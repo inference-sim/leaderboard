@@ -1,0 +1,191 @@
+# BLIS leaderboard — OpenShift deployment.
+#
+# Runs `leaderboard serve` in full-run mode: it serves the web app and the
+# read API, and it executes new candidates via POST /api/run by shelling out to
+# the upstream `blis` binary. That means the container image must carry, and the
+# runtime must provide:
+#
+#   /app/leaderboard          the server binary (make build)
+#   /app/web/dist             the built web app (make web-build); served at /
+#                             relative to the process working directory (/app)
+#   /app/inference-sim        the upstream checkout, passed as -blis. It must
+#                             contain a built ./blis (make blis), defaults.yaml,
+#                             hardware_config.json, model_configs/, and a .git
+#                             directory (blis records the upstream commit and
+#                             dirty flag as run provenance via `git`).
+#   git on PATH               used for that provenance capture.
+#   writable /tmp             blis run/spec scratch files (emptyDir below).
+#   writable /data            results/<group_id>/<run_id>.json and workloads.yaml
+#                             (the PVC below); this is the only state that must
+#                             survive a restart.
+#
+# There is no Dockerfile in this repo yet — build an image that lays the tree out
+# as above and set `.spec.template.spec.containers[0].image` to it. A multi-stage
+# build (golang + node to compile, then a slim base with git) is the natural shape.
+#
+# Apply into your project:  oc apply -n <project> -f deploy/openshift/leaderboard.yaml
+#
+# OpenShift note: nothing here pins a UID or fsGroup. The restricted-v2 SCC
+# assigns an arbitrary non-root UID and gid 0, and manages PVC ownership. The
+# image must therefore run as an arbitrary UID (group-root-writable dirs), which
+# is the OpenShift-standard image contract.
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: blis-leaderboard-data
+  labels:
+    app.kubernetes.io/name: blis-leaderboard
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 1Gi
+  # storageClassName: <your-class>   # omit to use the cluster default
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: blis-leaderboard
+  labels:
+    app.kubernetes.io/name: blis-leaderboard
+spec:
+  replicas: 1
+  # RWO volume + a single writer of results/workloads.yaml: keep one pod. Recreate
+  # (not RollingUpdate) so the old pod releases the volume before the new one binds.
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: blis-leaderboard
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: blis-leaderboard
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: leaderboard
+          image: quay.io/jgchen/leaderboard:latest
+          imagePullPolicy: Always
+          workingDir: /app
+          args:
+            - serve
+            - -addr
+            - ":8080"
+            - -out
+            - /data/results
+            - -blis
+            - /app/inference-sim
+            - -workloads
+            - /data/workloads.yaml
+          ports:
+            - name: http
+              containerPort: 8080
+          # /api/results returns 200 with a JSON array even before any run exists,
+          # and needs neither web/dist nor blis, so it is the honest health signal.
+          readinessProbe:
+            httpGet:
+              path: /api/results
+              port: http
+            initialDelaySeconds: 3
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /api/results
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 20
+          resources:
+            requests:
+              cpu: 250m
+              memory: 256Mi
+            limits:
+              # blis runs are CPU-seconds, not GPU; headroom lets a run complete
+              # without starving the server.
+              cpu: "2"
+              memory: 1Gi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: false
+            capabilities:
+              drop:
+                - ALL
+          volumeMounts:
+            - name: data
+              mountPath: /data
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: blis-leaderboard-data
+        - name: tmp
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: blis-leaderboard
+  labels:
+    app.kubernetes.io/name: blis-leaderboard
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: blis-leaderboard
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http
+      protocol: TCP
+---
+# OpenShift-native external exposure. On plain Kubernetes, delete this and use an
+# Ingress instead. edge termination gives you HTTPS at the router with plain HTTP
+# to the pod; Redirect sends any HTTP request to HTTPS.
+apiVersion: route.openshift.io/v1
+kind: Route
+metadata:
+  name: blis-leaderboard
+  labels:
+    app.kubernetes.io/name: blis-leaderboard
+    # This cluster's custom ingress controller (llmdplanner-ingress-controller)
+    # selects the routes it serves by this label; without it the route is admitted
+    # but returns 503. Every other app's route in the namespace carries it.
+    ingress: llmdplanner
+spec:
+  to:
+    kind: Service
+    name: blis-leaderboard
+    weight: 100
+  port:
+    # Numeric, not the named port "http": the controller serves routes whose
+    # targetPort is the numeric container port, matching the other apps here.
+    targetPort: 8080
+  tls:
+    termination: edge
+    insecureEdgeTerminationPolicy: Redirect
+---
+# Second route on the internal VPC domain, mirroring the peer `planner-vpc` route.
+# This is the host reachable from inside the IBM Cloud VPC.
+apiVersion: route.openshift.io/v1
+kind: Route
+metadata:
+  name: blis-leaderboard-vpc
+  labels:
+    app.kubernetes.io/name: blis-leaderboard
+    ingress: llmdplanner
+spec:
+  host: blis-leaderboard-llmdplanner.llmdplanner.vpc.res.ibm.com
+  to:
+    kind: Service
+    name: blis-leaderboard
+    weight: 100
+  port:
+    targetPort: 8080
+  tls:
+    termination: edge
+    insecureEdgeTerminationPolicy: Redirect

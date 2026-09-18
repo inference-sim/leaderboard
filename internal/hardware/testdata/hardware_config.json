@@ -1,0 +1,43 @@
+{
+ "A100-80": {
+  "BwPeakTBs": 2.039,
+  "InterNodeBwGBps": 25,
+  "IntraNodeBwGBps": 300,
+  "MemoryGiB": 80.0,
+  "TFlopsFP8": 0,
+  "TFlopsPeak": 312,
+  "mfuDecode": 0.18,
+  "mfuPrefill": 0.38
+ },
+ "A100-SXM": {
+  "BwPeakTBs": 2.039,
+  "InterNodeBwGBps": 25,
+  "IntraNodeBwGBps": 300,
+  "MemoryGiB": 80.0,
+  "TFlopsFP8": 0,
+  "TFlopsPeak": 312,
+  "mfuDecode": 0.18,
+  "mfuPrefill": 0.38
+ },
+ "H100": {
+  "BwPeakTBs": 3.35,
+  "InterNodeBwGBps": 50,
+  "IntraNodeBwGBps": 450,
+  "MemoryGiB": 80.0,
+  "TFlopsFP8": 1979.0,
+  "TFlopsPeak": 989.5,
+  "mfuDecode": 0.3,
+  "mfuPrefill": 0.45
+ },
+ "L40S": {
+  "BwPeakTBs": 0.864,
+  "InterNodeBwGBps": 12.5,
+  "IntraNodeBwGBps": 32,
+  "MemoryGiB": 48.0,
+  "TFlopsFP8": 1466.0,
+  "TFlopsPeak": 362.05,
+  "mfuDecode": 0.08,
+  "mfuPrefill": 0.32
+ },
+ "_comment": "Trimmed copy of ../inference-sim/hardware_config.json at commit 07622594. Prose _comment keys are stripped; the numbers are verbatim. TestFixtureMatchesUpstream (integration) fails when this drifts."
+}

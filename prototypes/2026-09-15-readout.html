@@ -1,0 +1,464 @@
+<title>BLIS Deployment Readout</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600;700&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<style>
+:root{
+  --paper:#EDF0F3; --surface:#F8FAFB; --surface-2:#E3E9EE; --surface-3:#DAE2E8;
+  --ink:#101820; --ink-2:#47555F; --ink-3:#78868F;
+  --rule:#CBD5DC; --rule-2:#A2B1BB;
+  --bar:#2a78d6; --bar-soft:rgba(42,120,214,.15);
+  --pole-good:#2a78d6; --pole-bad:#d03b3b; --pole-mid:#B9C4CC;
+  --ok:#0ca30c; --warn:#fab219; --crit:#d03b3b; --chip-ink:#171204;
+  --mono:"IBM Plex Mono",ui-monospace,SFMono-Regular,Menlo,monospace;
+  --sans:"IBM Plex Sans",system-ui,-apple-system,sans-serif;
+}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
+  --paper:#0C1116; --surface:#141C24; --surface-2:#1D2833; --surface-3:#243240;
+  --ink:#E4EBF0; --ink-2:#A3B2BD; --ink-3:#7C8B96;
+  --rule:#2A3742; --rule-2:#3F4E5B;
+  --bar:#3987e5; --bar-soft:rgba(57,135,229,.22);
+  --pole-good:#3987e5; --pole-bad:#e05c5c; --pole-mid:#3F4E5B;
+}}
+:root[data-theme="dark"]{
+  --paper:#0C1116; --surface:#141C24; --surface-2:#1D2833; --surface-3:#243240;
+  --ink:#E4EBF0; --ink-2:#A3B2BD; --ink-3:#7C8B96;
+  --rule:#2A3742; --rule-2:#3F4E5B;
+  --bar:#3987e5; --bar-soft:rgba(57,135,229,.22);
+  --pole-good:#3987e5; --pole-bad:#e05c5c; --pole-mid:#3F4E5B;
+}
+*{box-sizing:border-box}
+body{background:var(--paper);color:var(--ink);font-family:var(--mono);
+  font-size:13px;line-height:1.5;-webkit-font-smoothing:antialiased;
+  font-variant-numeric:tabular-nums}
+.wrap{max-width:1180px;margin:0 auto;padding-inline:20px;padding-block:32px 64px}
+
+/* ---------- masthead: the comparability contract ---------- */
+.eyebrow #gid{text-transform:none;letter-spacing:.04em}
+.eyebrow{font-size:10.5px;font-weight:600;letter-spacing:.14em;text-transform:uppercase;
+  color:var(--ink-3);margin:0 0 10px}
+h1{font-family:var(--mono);font-weight:700;font-size:clamp(23px,4.4vw,34px);
+  letter-spacing:-.022em;line-height:1.12;margin:0 0 6px;text-wrap:balance}
+.dek{font-family:var(--sans);font-size:14.5px;color:var(--ink-2);margin:0;max-width:64ch}
+
+.spec{margin:26px 0 0;border:1px solid var(--rule);border-top:3px solid var(--ink);
+  background:var(--surface)}
+.spec-hd{display:flex;flex-wrap:wrap;gap:10px 16px;align-items:baseline;
+  padding:11px 16px;border-bottom:1px solid var(--rule);background:var(--surface-2)}
+.spec-hd b{font-size:10.5px;font-weight:700;letter-spacing:.13em;text-transform:uppercase}
+.spec-hd span{font-size:11px;color:var(--ink-3)}
+.spec-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(158px,1fr));
+  gap:1px;background:var(--rule)}
+.sf{background:var(--surface);padding:11px 14px 12px}
+.sf dt{font-size:10px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;
+  color:var(--ink-3);margin:0 0 4px}
+.sf dd{margin:0;font-size:14px;font-weight:600;letter-spacing:-.01em}
+.sf dd small{font-weight:400;font-size:11.5px;color:var(--ink-3);letter-spacing:0}
+.prov{display:flex;flex-wrap:wrap;gap:8px 14px;align-items:center;
+  padding:10px 16px;border-top:1px solid var(--rule);font-size:11px;color:var(--ink-3)}
+
+.chip{display:inline-flex;align-items:center;gap:5px;padding:2px 7px;border-radius:2px;
+  font-size:10.5px;font-weight:600;letter-spacing:.03em;color:var(--chip-ink)}
+.chip.warn{background:var(--warn)}
+.chip.crit{background:var(--crit);color:#fff}
+.chip.ok{background:var(--ok);color:#fff}
+.chip .g{font-family:var(--sans);font-weight:700}
+
+/* ---------- view switcher ---------- */
+.views{display:flex;flex-wrap:wrap;gap:0;margin:30px 0 0;border:1px solid var(--rule-2);
+  width:fit-content;background:var(--surface)}
+.views button{font-family:var(--mono);font-size:11.5px;font-weight:600;letter-spacing:.04em;
+  padding:8px 15px;background:none;border:0;border-right:1px solid var(--rule);
+  color:var(--ink-2);cursor:pointer}
+.views button:last-child{border-right:0}
+.views button[aria-pressed="true"]{background:var(--ink);color:var(--paper)}
+.views button:focus-visible{outline:2px solid var(--bar);outline-offset:-2px}
+.viewnote{font-family:var(--sans);font-size:12.5px;color:var(--ink-3);margin:10px 0 0;max-width:70ch}
+
+/* ---------- tables ---------- */
+.tscroll{overflow-x:auto;margin:16px 0 0;border:1px solid var(--rule);background:var(--surface)}
+table{border-collapse:collapse;width:100%;min-width:900px}
+thead th{background:var(--surface-2);font-size:10px;font-weight:600;letter-spacing:.09em;
+  text-transform:uppercase;color:var(--ink-2);text-align:right;padding:7px 10px;
+  border-bottom:1px solid var(--rule-2);white-space:nowrap}
+thead tr.grp th{font-size:9.5px;letter-spacing:.14em;color:var(--ink-3);
+  background:var(--surface-3);text-align:left;padding:5px 10px;border-bottom:1px solid var(--rule)}
+thead th.lft,tbody td.lft{text-align:left}
+th.sortable{cursor:pointer;user-select:none}
+th.sortable:hover{color:var(--ink)}
+th.sortable:focus-visible{outline:2px solid var(--bar);outline-offset:-2px}
+th .car{opacity:.32;margin-left:3px}
+th[aria-sort] .car{opacity:1;color:var(--bar)}
+tbody td{padding:6px 10px;text-align:right;border-bottom:1px solid var(--rule);
+  white-space:nowrap;font-size:12.5px}
+tbody tr:hover td{background:var(--bar-soft)}
+.cfg{font-weight:600;font-size:12.5px}
+.cfg em{font-style:normal;color:var(--ink-3);font-weight:400}
+.knob{display:inline-block;margin-left:6px;padding:1px 5px;border:1px solid var(--rule-2);
+  border-radius:2px;font-size:10px;color:var(--ink-2)}
+.val{display:block;line-height:1.25}
+.mb{display:block;height:3px;margin-top:3px;background:var(--bar);border-radius:0 2px 2px 0;
+  min-width:1px}
+.mbt{display:block;height:3px;margin-top:3px;background:var(--bar-soft)}
+.best{color:var(--bar);font-weight:700}
+.star{display:inline-block;width:5px;height:5px;background:var(--bar);transform:rotate(45deg);margin-left:5px;vertical-align:1px}
+td.dim{color:var(--ink-3)}
+.der{border-bottom:1px dotted var(--ink-3);cursor:help}
+.info{display:inline-block;width:12px;height:12px;line-height:12px;text-align:center;
+  border:1px solid var(--rule-2);border-radius:50%;font-size:8.5px;color:var(--ink-3);
+  margin-left:4px;cursor:help;font-family:var(--sans);font-weight:700}
+.eq{color:var(--bar);cursor:help;font-weight:700}
+
+/* disqualified band */
+.dqband{margin:0;border:1px solid var(--rule);border-top:3px solid var(--crit);
+  background:var(--surface)}
+.dqhd{display:flex;flex-wrap:wrap;gap:6px 12px;align-items:baseline;padding:10px 14px;
+  border-bottom:1px solid var(--rule);background:var(--surface-2)}
+.dqhd b{font-size:10.5px;font-weight:700;letter-spacing:.12em;text-transform:uppercase}
+.dqhd span{font-family:var(--sans);font-size:12px;color:var(--ink-2)}
+.dqrow{padding:12px 14px;border-bottom:1px solid var(--rule)}
+.dqrow:last-child{border-bottom:0}
+.dqtop{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:7px}
+.dqtop .nm{font-weight:700;font-size:13px}
+.dqwhy{font-family:var(--sans);font-size:12.5px;color:var(--ink-2);margin:0 0 8px;max-width:74ch}
+.dqnums{display:flex;flex-wrap:wrap;gap:4px 22px;font-size:11.5px;color:var(--ink-3)}
+.dqnums b{color:var(--ink-2);font-weight:600}
+
+/* ---------- relative view ---------- */
+.baseline{display:flex;flex-wrap:wrap;gap:9px;align-items:center;margin:16px 0 0;
+  font-size:11.5px;color:var(--ink-2)}
+.baseline label{font-size:10px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;
+  color:var(--ink-3)}
+select{font-family:var(--mono);font-size:12px;padding:5px 8px;background:var(--surface);
+  color:var(--ink);border:1px solid var(--rule-2);border-radius:0}
+select:focus-visible{outline:2px solid var(--bar);outline-offset:-2px}
+.dv{position:relative;height:15px;margin-top:2px;background:var(--bar-soft)}
+.dv i{position:absolute;top:0;height:100%;display:block}
+.dv .ax{position:absolute;top:-1px;bottom:-1px;left:50%;width:1px;background:var(--rule-2)}
+.rv{display:block;line-height:1.2;font-size:12.5px}
+.rv.g{color:var(--pole-good);font-weight:600}
+.rv.b{color:var(--pole-bad);font-weight:600}
+.rv.n{color:var(--ink-3)}
+
+/* ---------- tail profile ---------- */
+.prof{margin:16px 0 0;border:1px solid var(--rule);background:var(--surface)}
+.pkey{display:flex;flex-wrap:wrap;gap:14px;align-items:center;padding:10px 14px;
+  border-bottom:1px solid var(--rule);background:var(--surface-2);font-size:11px;color:var(--ink-2)}
+.pkey span{display:inline-flex;align-items:center;gap:6px}
+.prow{display:grid;grid-template-columns:170px 1fr;gap:12px;align-items:center;
+  padding:8px 14px;border-bottom:1px solid var(--rule)}
+.prow:last-child{border-bottom:0}
+.prow:hover{background:var(--bar-soft)}
+.plab{font-size:12px;font-weight:600;overflow:hidden;text-overflow:ellipsis}
+.plab small{display:block;font-weight:400;font-size:10.5px;color:var(--ink-3)}
+.paxis{padding:0 14px 4px;border-bottom:1px solid var(--rule-2);background:var(--surface-2)}
+@media(max-width:560px){.prow{grid-template-columns:1fr;gap:4px}}
+
+/* ---------- reading panel ---------- */
+.read{margin:34px 0 0;border:1px solid var(--rule);border-left:3px solid var(--bar);
+  background:var(--surface);padding:18px 20px}
+.read h2{font-family:var(--mono);font-size:11px;font-weight:700;letter-spacing:.13em;
+  text-transform:uppercase;margin:0 0 12px;color:var(--ink-2)}
+.read ol{font-family:var(--sans);font-size:13.5px;color:var(--ink-2);margin:0;
+  padding-left:20px;display:flex;flex-direction:column;gap:11px}
+.read li strong{color:var(--ink);font-weight:600}
+.read code{font-family:var(--mono);font-size:12.5px;background:var(--surface-2);
+  padding:1px 4px;color:var(--ink)}
+footer{font-family:var(--sans);font-size:11.5px;color:var(--ink-3);margin:26px 0 0;
+  padding-top:14px;border-top:1px solid var(--rule);max-width:78ch}
+#tip{position:fixed;z-index:9;pointer-events:none;opacity:0;transition:opacity .1s;
+  background:var(--ink);color:var(--paper);font-size:11px;padding:5px 8px;
+  max-width:230px;line-height:1.4}
+@media(prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
+</style>
+
+<div class="wrap">
+  <p class="eyebrow">Comparability group <span id="gid"></span></p>
+  <h1>Which deployment survives this workload?</h1>
+  <p class="dek">Twelve simulated deployments, every one offered byte-identical work by
+    BLIS. Only the hardware and serving configuration change. Runs that shed or truncated
+    part of the workload are separated out rather than ranked, because their percentiles
+    describe a different, easier job.</p>
+
+  <section class="spec">
+    <div class="spec-hd">
+      <b>Work offered &mdash; identical across every row</b>
+      <span>changing any field below makes a different group, not another row</span>
+    </div>
+    <dl class="spec-grid">
+      <div class="sf"><dt>Model</dt><dd>qwen/qwen3-14b</dd></div>
+      <div class="sf"><dt>Workload</dt><dd>distribution <small>poisson</small></dd></div>
+      <div class="sf"><dt>Requests</dt><dd>500</dd></div>
+      <div class="sf"><dt>Offered rate</dt><dd>6.0 <small>req/s</small></dd></div>
+      <div class="sf"><dt>Prompt tokens</dt><dd>512 <small>&plusmn;128</small></dd></div>
+      <div class="sf"><dt>Output tokens</dt><dd>128 <small>&plusmn;32</small></dd></div>
+      <div class="sf"><dt>Seed</dt><dd>42</dd></div>
+    </dl>
+    <div class="prov">
+      <span>blis&nbsp;<b id="commit"></b></span>
+      <span>binary&nbsp;sha256&nbsp;33393375fd6a6b25</span>
+      <span>cwd&nbsp;../inference-sim</span>
+      <span>2026&#8209;09&#8209;16T00:23Z</span>
+      <span class="chip warn"><b class="g">!</b> upstream tree dirty</span>
+    </div>
+  </section>
+
+  <div class="views" role="group" aria-label="Table treatment">
+    <button id="v-abs" aria-pressed="true">Readout</button>
+    <button id="v-rel" aria-pressed="false">Relative</button>
+    <button id="v-prof" aria-pressed="false">Tail profile</button>
+  </div>
+  <p class="viewnote" id="viewnote"></p>
+
+  <div id="pane-abs">
+    <div class="tscroll"><table id="tbl-abs"><thead></thead><tbody></tbody></table></div>
+  </div>
+
+  <div id="pane-rel" hidden>
+    <div class="baseline">
+      <label for="base-sel">Baseline</label>
+      <select id="base-sel"></select>
+      <span id="base-note"></span>
+    </div>
+    <div class="tscroll"><table id="tbl-rel"><thead></thead><tbody></tbody></table></div>
+  </div>
+
+  <div id="pane-prof" hidden>
+    <div class="prof">
+      <div class="pkey">
+        <span><svg width="46" height="12" aria-hidden="true"><rect x="0" y="5" width="46" height="3" fill="var(--bar)" opacity=".3"></rect><circle cx="4" cy="6.5" r="3.5" fill="var(--bar)"></circle><rect x="26" y="2" width="2" height="9" fill="var(--bar)"></rect><rect x="34" y="2" width="2" height="9" fill="var(--bar)"></rect><rect x="43" y="1" width="3" height="11" fill="var(--bar)"></rect></svg>
+          mean &rarr; p90 &middot; p95 &middot; <b>p99</b></span>
+        <span>end&#8209;to&#8209;end latency, one shared scale</span>
+      </div>
+      <div class="paxis"><svg id="paxis" width="100%" height="26" aria-hidden="true"></svg></div>
+      <div id="prows"></div>
+    </div>
+  </div>
+
+  <section class="read">
+    <h2>What this table is arguing</h2>
+    <ol id="findings"></ol>
+  </section>
+
+  <footer id="foot"></footer>
+</div>
+<div id="tip" role="status"></div>
+
+<script>
+const GROUP={num_requests:500,rate:6.0};
+const RUNS=[
+{"id":"h100-tp1","hw":"H100","tp":1,"seqs":256,"mml":40960,"extra":{},"e2e_mean":2520.8,"e2e_p90":6031.1,"e2e_p95":7793.0,"e2e_p99":9749.6,"ttft_mean":37.6,"ttft_p99":44.5,"itl_mean":13.41,"itl_p99":16.59,"sched_p99":28.8,"toks":1019.4,"rps":5.48,"done":500,"inj":500,"preempt":0,"queued":0,"running":0,"dq":[]},
+{"id":"h100-tp2","hw":"H100","tp":2,"seqs":256,"mml":40960,"extra":{},"e2e_mean":1358.9,"e2e_p90":3229.5,"e2e_p95":4197.8,"e2e_p99":5265.8,"ttft_mean":27.4,"ttft_p99":31.4,"itl_mean":7.19,"itl_p99":8.69,"sched_p99":22.5,"toks":1078.9,"rps":5.8,"done":500,"inj":500,"preempt":0,"queued":0,"running":0,"dq":[]},
+{"id":"h100-tp4","hw":"H100","tp":4,"seqs":256,"mml":40960,"extra":{},"e2e_mean":813.3,"e2e_p90":1926.9,"e2e_p95":2499.3,"e2e_p99":3109.1,"ttft_mean":22.5,"ttft_p99":24.9,"itl_mean":4.27,"itl_p99":4.96,"sched_p99":19.7,"toks":1099.4,"rps":5.91,"done":500,"inj":500,"preempt":0,"queued":0,"running":0,"dq":[]},
+{"id":"a100-tp1","hw":"A100-SXM","tp":1,"seqs":256,"mml":40960,"extra":{},"e2e_mean":4261.9,"e2e_p90":10243.4,"e2e_p95":12689.7,"e2e_p99":16482.0,"ttft_mean":54.4,"ttft_p99":69.6,"itl_mean":22.73,"itl_p99":33.8,"sched_p99":37.3,"toks":950.3,"rps":5.11,"done":500,"inj":500,"preempt":0,"queued":0,"running":0,"dq":[]},
+{"id":"a100-tp2","hw":"A100-SXM","tp":2,"seqs":256,"mml":40960,"extra":{},"e2e_mean":2118.6,"e2e_p90":5071.5,"e2e_p95":6545.5,"e2e_p99":8195.9,"ttft_mean":35.5,"ttft_p99":42.8,"itl_mean":11.25,"itl_p99":16.33,"sched_p99":26.5,"toks":1039.5,"rps":5.59,"done":500,"inj":500,"preempt":0,"queued":0,"running":0,"dq":[]},
+{"id":"a100-tp4","hw":"A100-SXM","tp":4,"seqs":256,"mml":40960,"extra":{},"e2e_mean":1168.8,"e2e_p90":2773.0,"e2e_p95":3603.5,"e2e_p99":4517.8,"ttft_mean":26.5,"ttft_p99":30.6,"itl_mean":6.17,"itl_p99":8.52,"sched_p99":21.6,"toks":1089.3,"rps":5.85,"done":500,"inj":500,"preempt":0,"queued":0,"running":0,"dq":[]},
+{"id":"l40s-tp2","hw":"L40S","tp":2,"seqs":256,"mml":40960,"extra":{},"e2e_mean":4972.4,"e2e_p90":11984.3,"e2e_p95":14833.5,"e2e_p99":19279.7,"ttft_mean":58.0,"ttft_p99":73.3,"itl_mean":26.55,"itl_p99":32.31,"sched_p99":42.0,"toks":922.0,"rps":4.96,"done":500,"inj":500,"preempt":0,"queued":0,"running":0,"dq":[]},
+{"id":"l40s-tp4","hw":"L40S","tp":4,"seqs":256,"mml":40960,"extra":{},"e2e_mean":2448.7,"e2e_p90":5862.4,"e2e_p95":7566.6,"e2e_p99":9473.2,"ttft_mean":36.9,"ttft_p99":44.3,"itl_mean":13.03,"itl_p99":15.97,"sched_p99":28.3,"toks":1022.9,"rps":5.5,"done":500,"inj":500,"preempt":0,"queued":0,"running":0,"dq":[]},
+{"id":"h100-tp2-seqs32","hw":"H100","tp":2,"seqs":32,"mml":40960,"extra":{},"e2e_mean":1358.9,"e2e_p90":3229.5,"e2e_p95":4197.8,"e2e_p99":5265.8,"ttft_mean":27.4,"ttft_p99":31.4,"itl_mean":7.19,"itl_p99":8.69,"sched_p99":22.5,"toks":1078.9,"rps":5.8,"done":500,"inj":500,"preempt":0,"queued":0,"running":0,"dq":[]},
+{"id":"h100-tp2-seqs8","hw":"H100","tp":2,"seqs":8,"mml":40960,"extra":{},"e2e_mean":2781.1,"e2e_p90":5079.1,"e2e_p95":5737.6,"e2e_p99":7058.2,"ttft_mean":1454.7,"ttft_p99":3471.1,"itl_mean":7.16,"itl_p99":8.61,"sched_p99":3462.8,"toks":1069.2,"rps":5.75,"done":500,"inj":500,"preempt":0,"queued":0,"running":0,"dq":[]},
+{"id":"h100-tp2-len640","hw":"H100","tp":2,"seqs":256,"mml":640,"extra":{},"e2e_mean":672.3,"e2e_p90":1928.5,"e2e_p95":2366.1,"e2e_p99":2959.8,"ttft_mean":26.2,"ttft_p99":30.1,"itl_mean":6.89,"itl_p99":7.57,"sched_p99":22.2,"toks":269.2,"rps":2.85,"done":241,"inj":500,"preempt":0,"queued":0,"running":0,"dq":[{"code":"requests_dropped","detail":"259 of 500 requests dropped as unservable"}]},
+{"id":"h100-tp4-horizon","hw":"H100","tp":4,"seqs":256,"mml":40960,"extra":{"horizon":20000000},"e2e_mean":821.1,"e2e_p90":1920.2,"e2e_p95":2568.6,"e2e_p99":3431.4,"ttft_mean":22.5,"ttft_p99":24.9,"itl_mean":4.27,"itl_p99":4.93,"sched_p99":19.7,"toks":1062.5,"rps":5.65,"done":113,"inj":119,"preempt":0,"queued":0,"running":6,"dq":[{"code":"window_ended_busy","detail":"6 still running when the window closed"},{"code":"injection_short","detail":"injected 119 of the 500 declared"}]}
+];
+const OK=RUNS.filter(r=>!r.dq.length), DQ=RUNS.filter(r=>r.dq.length);
+const $=s=>document.querySelector(s);
+const fmt=(v,d=0)=>v==null?'—':v.toLocaleString('en-US',{minimumFractionDigits:d,maximumFractionDigits:d});
+const ms=v=>v>=1000?fmt(v/1000,2)+'s':fmt(v,1)+'ms';
+
+/* group id: printed, not invented — a real hash of the spec block above */
+$('#gid').textContent='· 55faf3a90f47';
+$('#commit').textContent='07622594';
+
+/* ---- column model: which flags are candidate knobs, what each metric means ---- */
+const COLS=[
+ {k:'cfg',  lab:'Deployment',      grp:'candidate', lft:1, sort:0},
+ {k:'gpus', lab:'GPUs',            grp:'candidate', der:'tp × num_instances — computed from flags, not reported by blis'},
+ {k:'served',lab:'Served',         grp:'candidate', der:'completed_requests ÷ injected_requests'},
+ {k:'ttft_p99',lab:'TTFT p99',     grp:'latency', bar:1},
+ {k:'itl_p99',lab:'ITL p99',       grp:'latency', bar:1},
+ {k:'e2e_p99',lab:'E2E p99',       grp:'latency', bar:1},
+ {k:'e2e_mean',lab:'E2E mean',     grp:'latency'},
+ {k:'sched_p99',lab:'Sched delay p99',grp:'latency'},
+ {k:'toks', lab:'Tokens/s',        grp:'throughput', hi:1, cap:1, d:1},
+ {k:'rps',  lab:'Resp/s',          grp:'throughput', hi:1, cap:1, d:2},
+ {k:'preempt',lab:'Preempt',       grp:'health'},
+];
+const CAPNOTE='Bounded above by the offered 6.0 req/s, so at this single load it measures "kept up", not capacity. Barely discriminates here — every complete run lands within 18% of the same figure.';
+const NUMC=COLS.filter(c=>!['cfg','gpus','served'].includes(c.k));
+
+/* best-in-column computed over COMPLETE runs only */
+const BEST={};
+NUMC.forEach(c=>{if(c.k==='preempt')return;
+  const vals=OK.map(r=>r[c.k]); BEST[c.k]=c.hi?Math.max(...vals):Math.min(...vals);});
+const MAXC={}; NUMC.forEach(c=>MAXC[c.k]=Math.max(...OK.map(r=>r[c.k])));
+
+/* runs whose metrics are byte-identical: a knob that changed nothing */
+const MKEYS=NUMC.map(c=>c.k);
+const TWINS={};
+for(let i=0;i<RUNS.length;i++)for(let j=i+1;j<RUNS.length;j++){
+  const a=RUNS[i],b=RUNS[j];
+  if(MKEYS.every(k=>a[k]===b[k])){(TWINS[a.id]=TWINS[a.id]||[]).push(b.id);(TWINS[b.id]=TWINS[b.id]||[]).push(a.id);}
+}
+const knobs=r=>{const o=[];if(r.seqs!==256)o.push('max_num_seqs '+r.seqs);
+  if(r.mml!==40960)o.push('max_model_len '+r.mml);
+  Object.entries(r.extra).forEach(([k,v])=>o.push(k+' '+v));return o;};
+
+/* ---------- tooltip ---------- */
+const tip=$('#tip');
+document.addEventListener('pointerover',e=>{const t=e.target.closest('[data-tip]');
+  if(!t)return; tip.textContent=t.dataset.tip; tip.style.opacity=1;
+  const r=t.getBoundingClientRect();
+  tip.style.left=Math.min(r.left,innerWidth-244)+'px';
+  tip.style.top=(r.bottom+6>innerHeight-40?r.top-tip.offsetHeight-6:r.bottom+6)+'px';});
+document.addEventListener('pointerout',e=>{if(e.target.closest('[data-tip]'))tip.style.opacity=0;});
+
+/* ---------- absolute readout ---------- */
+let sortK=null,sortDir=1;
+function head(tbl,cols,sortable){
+  const gs=[];cols.forEach(c=>{const l=gs[gs.length-1];
+    if(l&&l.g===c.grp)l.n++;else gs.push({g:c.grp,n:1});});
+  return `<tr class="grp">${gs.map(g=>`<th colspan="${g.n}">${g.g}</th>`).join('')}</tr>
+  <tr>${cols.map(c=>{const s=sortable&&c.sort!==0;
+    const ar=sortK===c.k?` aria-sort="${sortDir>0?'ascending':'descending'}"`:'';
+    return `<th class="${c.lft?'lft':''}${s?' sortable':''}"${ar}${s?` tabindex="0" data-k="${c.k}"`:''}${
+      c.cap?` data-tip="${CAPNOTE}"`:''}>${c.lab}${c.cap?'<i class="info">i</i>':''}${
+      s?`<span class="car">${sortK===c.k?(sortDir>0?'▲':'▼'):'⇅'}</span>`:''}</th>`;}).join('')}</tr>`;
+}
+function cfgCell(r){
+  const tw=TWINS[r.id]?`<span class="eq" data-tip="Metrics byte-identical to ${TWINS[r.id].join(', ')} — this knob changed nothing at this load.">≡</span>`:'';
+  return `<td class="lft"><span class="cfg">${r.hw} <em>tp${r.tp}</em></span>${tw}${
+    knobs(r).map(k=>`<span class="knob">${k}</span>`).join('')}</td>`;
+}
+function numCell(r,c){
+  const v=r[c.k], best=!r.dq.length&&v===BEST[c.k]&&c.k!=='preempt';
+  const w=MAXC[c.k]?Math.max(1,Math.round(v/MAXC[c.k]*100)):0;
+  const txt=c.k==='preempt'?fmt(v):(c.d!=null?fmt(v,c.d):ms(v));
+  return `<td class="${r.dq.length?'dim':''}"><span class="val ${best?'best':''}">${txt}${
+    best?' <span class="star" role="img" aria-label="best complete run"></span>':''}</span>${c.bar?`<span class="mbt"><span class="mb" style="width:${Math.min(w,100)}%"></span></span>`:''}</td>`;
+}
+function rowsAbs(list){
+  return list.map(r=>{
+    const pct=Math.round(r.done/r.inj*100);
+    return `<tr>${cfgCell(r)}
+    <td class="${r.dq.length?'dim':''}"><span class="der" data-tip="tp × num_instances = ${r.tp} × 1. Computed from flags — blis does not report a GPU count for a single-instance run.">${r.tp}</span></td>
+    <td class="${r.dq.length?'dim':''}"><span class="der" data-tip="completed_requests ÷ injected_requests = ${r.done} ÷ ${r.inj} = ${pct}%. Computed by the leaderboard; blis reports the two counts separately.">${fmt(r.done)}/${fmt(r.inj)}</span>${pct<100?`<span class="val" style="font-size:10px;color:var(--crit)">${pct}%</span>`:''}</td>
+    ${NUMC.map(c=>numCell(r,c)).join('')}</tr>`;}).join('');
+}
+function renderAbs(){
+  let list=[...OK];
+  if(sortK)list.sort((a,b)=>(a[sortK]-b[sortK])*sortDir);
+  $('#tbl-abs thead').innerHTML=head(COLS,COLS,1);
+  $('#tbl-abs tbody').innerHTML=rowsAbs(list);
+  $('#tbl-abs thead').querySelectorAll('th.sortable').forEach(th=>{
+    const go=()=>{const k=th.dataset.k;sortDir=sortK===k?-sortDir:1;sortK=k;renderAbs();};
+    th.onclick=go; th.onkeydown=e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();go();}};});
+  $('#viewnote').innerHTML=sortK
+    ?`Sorted by <b>${COLS.find(c=>c.k===sortK).lab}</b> ${sortDir>0?'ascending':'descending'} — click again to reverse. Bars scale to each column's widest complete run; ★ marks the best complete run. No column is ranked by default.`
+    :`Rows in the order they were declared — <b>no default ranking</b>. Click any header to sort. Bars scale to each column's widest complete run; ★ marks the best complete run in that column.`;
+}
+/* ---------- relative ---------- */
+const RELC=NUMC.filter(c=>c.k!=='preempt');
+function renderRel(){
+  const base=RUNS.find(r=>r.id===$('#base-sel').value)||OK[1];
+  const cols=[COLS[0],...RELC];
+  $('#tbl-rel thead').innerHTML=head(cols,cols,0);
+  $('#tbl-rel tbody').innerHTML=OK.map(r=>`<tr>${cfgCell(r)}${RELC.map(c=>{
+    const ratio=r[c.k]/base[c.k];
+    if(r.id===base.id)return `<td><span class="rv n">baseline</span></td>`;
+    const better=c.hi?ratio>1:ratio<1;
+    const mag=Math.min(Math.abs(Math.log2(ratio||1e-9))/3,1)*50;
+    const cls=Math.abs(ratio-1)<0.005?'n':(better?'g':'b');
+    const label=(ratio>=1?'×'+fmt(ratio,2):'×'+fmt(ratio,2));
+    const side=ratio<1?`right:50%;width:${mag}%`:`left:50%;width:${mag}%`;
+    const col=cls==='n'?'var(--pole-mid)':(better?'var(--pole-good)':'var(--pole-bad)');
+    return `<td data-tip="${c.lab}: ${c.d!=null?fmt(r[c.k],c.d):ms(r[c.k])} vs baseline ${c.d!=null?fmt(base[c.k],c.d):ms(base[c.k])}">
+      <span class="rv ${cls}">${label}</span>
+      <span class="dv"><span class="ax"></span><i style="${side};background:${col}"></i></span></td>`;}).join('')}</tr>`).join('');
+  $('#base-note').innerHTML=`&mdash; every cell is that run ÷ <b>${base.hw} tp${base.tp}</b>. Blue = better than baseline, red = worse, bar length is log&#8322; magnitude.`;
+}
+/* ---------- tail profile ---------- */
+function renderProf(){
+  const max=Math.max(...OK.map(r=>r.e2e_p99))*1.04;
+  const ticks=[0,5000,10000,15000,20000].filter(t=>t<=max);
+  $('#paxis').innerHTML=ticks.map(t=>{const x=t/max*100;
+    return `<line x1="${x}%" y1="14" x2="${x}%" y2="20" stroke="var(--rule-2)" stroke-width="1"></line>
+    <text x="${x}%" y="10" fill="var(--ink-3)" font-size="9.5" font-family="var(--mono)"
+      text-anchor="${t===0?'start':(x>92?'end':'middle')}">${t/1000}s</text>`;}).join('')
+    +`<line x1="0" y1="20" x2="100%" y2="20" stroke="var(--rule-2)" stroke-width="1"></line>`;
+  $('#prows').innerHTML=[...OK,...DQ].map(r=>{
+    const bad=r.dq.length, sc=v=>v/max*100;
+    const c=bad?'var(--crit)':'var(--bar)';
+    return `<div class="prow"><div class="plab">${r.hw} tp${r.tp}
+      <small>${bad?'disqualified · '+fmt(r.done)+' of '+fmt(r.inj)+' served':(knobs(r)[0]||'stock config')}</small></div>
+      <svg width="100%" height="18" role="img" aria-label="${r.id} latency mean ${ms(r.e2e_mean)} to p99 ${ms(r.e2e_p99)}">
+        <rect x="${sc(r.e2e_mean)}%" y="7.5" width="${Math.max(sc(r.e2e_p99)-sc(r.e2e_mean),0.3)}%" height="3" fill="${c}" opacity=".32"></rect>
+        <circle cx="${sc(r.e2e_mean)}%" cy="9" r="3.5" fill="${c}"></circle>
+        <rect x="${sc(r.e2e_p90)}%" y="4" width="2" height="10" fill="${c}" opacity=".75"></rect>
+        <rect x="${sc(r.e2e_p95)}%" y="4" width="2" height="10" fill="${c}" opacity=".75"></rect>
+        <rect x="${sc(r.e2e_p99)}%" y="2" width="3" height="14" fill="${c}"></rect>
+      </svg></div>`;}).join('');
+}
+/* ---------- disqualified band ---------- */
+function dqBand(){
+  return `<div class="dqband"><div class="dqhd"><b>Disqualified &mdash; ${DQ.length} runs</b>
+    <span>Shown, not hidden. Each was offered the same 500 requests but did not complete them, so its
+    percentiles describe a smaller, easier job and cannot be ranked beside a complete run.</span></div>
+    ${DQ.map(r=>{
+      const rank=[...OK,r].sort((a,b)=>a.e2e_p99-b.e2e_p99).findIndex(x=>x.id===r.id)+1;
+      return `<div class="dqrow"><div class="dqtop"><span class="nm">${r.hw} tp${r.tp}</span>
+      ${knobs(r).map(k=>`<span class="knob">${k}</span>`).join('')}
+      ${r.dq.map(d=>`<span class="chip crit"><b class="g">✕</b> ${d.code}</span>`).join('')}</div>
+      <p class="dqwhy">${r.dq.map(d=>d.detail).join(' · ')}. Its E2E p99 of <b>${ms(r.e2e_p99)}</b> would
+        place it <b>#${rank} of ${OK.length+1}</b> on latency &mdash; ${rank===1?'first place':'ahead of '+(OK.length+1-rank)+' honest runs'} &mdash;
+        by virtue of the work it never did.</p>
+      <div class="dqnums"><span>served <b>${fmt(r.done)} / ${fmt(r.inj)}</b></span>
+        <span>tokens/s <b>${fmt(r.toks,1)}</b></span>
+        <span>E2E p99 <b>${ms(r.e2e_p99)}</b></span>
+        <span>TTFT p99 <b>${ms(r.ttft_p99)}</b></span>
+        ${r.running?`<span>still running <b>${r.running}</b></span>`:''}</div></div>`;}).join('')}</div>`;
+}
+/* ---------- findings ---------- */
+const seqs8=RUNS.find(r=>r.id==='h100-tp2-seqs8'), h2=RUNS.find(r=>r.id==='h100-tp2');
+const len640=RUNS.find(r=>r.id==='h100-tp2-len640'), best=OK.reduce((a,b)=>a.e2e_p99<b.e2e_p99?a:b);
+$('#findings').innerHTML=`
+<li><strong>The disqualified run has the best latency in the file.</strong>
+  <code>max_model_len 640</code> posts an E2E p99 of ${ms(len640.e2e_p99)} against the best complete
+  run's ${ms(best.e2e_p99)} — because it dropped ${len640.inj-len640.done} of ${len640.inj} requests as
+  unservable and timed only the ${len640.done} it kept. Its tokens/s collapsed to
+  ${fmt(len640.toks,1)} against ${fmt(best.toks,1)}, which is the tell. This is why disqualification is
+  computed from <code>dropped_unservable</code> rather than left to the reader.</li>
+<li><strong>Throughput columns cannot see a broken config.</strong> <code>max_num_seqs 8</code> reports
+  ${fmt(seqs8.toks,1)} tokens/s against the stock config's ${fmt(h2.toks,1)} — a ${fmt(Math.abs(1-seqs8.toks/h2.toks)*100,1)}%
+  difference, invisible. Its TTFT p99 is <strong>${ms(seqs8.ttft_p99)} versus ${ms(h2.ttft_p99)}</strong>,
+  a ${fmt(seqs8.ttft_p99/h2.ttft_p99,0)}× regression, and its scheduling delay p99 is ${ms(seqs8.sched_p99)}.
+  Queueing moved out of the throughput figure and into the wait.</li>
+<li><strong>Two rows are byte-identical, and that is a result.</strong> <code>max_num_seqs 32</code>
+  and the stock <code>256</code> produce the same numbers in every column, marked ≡ — at this load the
+  batch never reaches 32, so the cap is unreachable. The same held for
+  <code>block_size_in_tokens</code> at 16/64/128 with <code>cache_hit_rate 0</code>, which is why it is
+  not a column here.</li>
+<li><strong>Resp/s says nothing at a single load.</strong> Every complete run lands between
+  ${fmt(Math.min(...OK.map(r=>r.rps)),2)} and ${fmt(Math.max(...OK.map(r=>r.rps)),2)} against an offered
+  6.0 — a spread of ${fmt((Math.max(...OK.map(r=>r.rps))/Math.min(...OK.map(r=>r.rps))-1)*100,0)}% across
+  hardware that differs by ${fmt(Math.max(...OK.map(r=>r.e2e_p99))/Math.min(...OK.map(r=>r.e2e_p99)),1)}× on
+  tail latency. Capacity needs a load sweep, which is a second table.</li>`;
+$('#foot').innerHTML=`All twelve rows are real <code style="font-family:var(--mono)">blis run</code> output at
+  commit 07622594, 500 requests each, wall time under 0.3s per run. <b>A100-80 was dropped from the
+  matrix</b>: <code style="font-family:var(--mono)">hardware_config.json</code> documents it as an alias of
+  A100-SXM, so it produced a duplicate row rather than a second candidate. Marks with a dotted underline are
+  computed by the leaderboard, not reported by BLIS — hover for the formula.`;
+
+/* ---------- view switching ---------- */
+$('#base-sel').innerHTML=OK.map(r=>`<option value="${r.id}"${r.id==='h100-tp2'?' selected':''}>${r.hw} tp${r.tp}${knobs(r).length?' · '+knobs(r)[0]:''}</option>`).join('');
+$('#base-sel').onchange=renderRel;
+const NOTES={rel:'',prof:'End-to-end latency for every run on one shared scale — the distance from the mean dot to the heavy p99 tick <em>is</em> the tail. Disqualified runs are drawn in red and sit last.'};
+function show(v){
+  ['abs','rel','prof'].forEach(k=>{$('#pane-'+k).hidden=k!==v;$('#v-'+k).setAttribute('aria-pressed',k===v);});
+  if(v==='abs')renderAbs();
+  if(v==='rel'){renderRel();$('#viewnote').innerHTML='Absolute milliseconds are hard to compare across nine rows, so every cell here is a <b>ratio against one baseline you choose</b>. The reading becomes "2.4× slower", not "8,196ms".';}
+  if(v==='prof'){renderProf();$('#viewnote').innerHTML=NOTES.prof;}
+  const band=document.getElementById('band');if(band)band.remove();
+  if(v!=='prof'){const d=document.createElement('div');d.id='band';d.style.marginTop='18px';
+    d.innerHTML=dqBand();$('#pane-'+v).appendChild(d);}
+}
+$('#v-abs').onclick=()=>show('abs');$('#v-rel').onclick=()=>show('rel');$('#v-prof').onclick=()=>show('prof');
+show('abs');
+</script>

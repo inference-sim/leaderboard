@@ -1,0 +1,3366 @@
+/*
+ * Design concept: a spec sheet for simulated hardware, not a SaaS dashboard.
+ * IBM Plex Sans carries prose and labels; IBM Plex Mono carries every measured
+ * or computed number, so a reader can tell "this is data" from typeface alone
+ * before reading a digit. The palette borrows from lab instrumentation — pale
+ * graph-paper ground, hairline rules, a single teal signal color reserved for
+ * "this is the number to look at" (best markers, derived values, focus rings) —
+ * rather than a card-and-shadow kit that would flatten a table this dense.
+ */
+
+@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap');
+
+:root {
+  --paper: #f7f9f6;
+  --panel: #ffffff;
+  --ink: #171c1a;
+  --muted: #5b6660;
+  --line: #e3e7df;
+  --line-strong: #c3ccbf;
+  --accent: #1f6e5c;
+  --accent-ink: #0f4438;
+  --accent-soft: #d9e9e1;
+  --warn-ink: #7a4a12;
+  --warn-bg: #f3e3c9;
+  --warn-line: #d8b984;
+  --crit-ink: #7a1f1f;
+  --crit-bg: #f3d9d3;
+  --crit-line: #c76a5a;
+  --alt-ink: #34366e;
+  --alt-bg: #dcdcf0;
+  --alt-line: #7679c4;
+  --focus: #1f6e5c;
+  --shadow: none;
+  --font-sans: 'IBM Plex Sans', -apple-system, 'Segoe UI', system-ui, sans-serif;
+  --font-mono: 'IBM Plex Mono', 'SFMono-Regular', ui-monospace, Menlo, monospace;
+  /* The page content column: `.wrap`'s max-width, single-sourced so anything that has
+   * to cap itself to the container (see `.reprorow .repro`) tracks the same number. */
+  --wrap-max: 1440px;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  color-scheme: light;
+}
+
+body {
+  margin: 0;
+  background: var(--paper);
+  color: var(--ink);
+  font-family: var(--font-sans);
+  font-size: 15px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+}
+
+code {
+  font-family: var(--font-mono);
+  font-size: 0.92em;
+}
+
+.wrap {
+  max-width: var(--wrap-max);
+  margin: 0 auto;
+  padding: 40px 32px 96px;
+}
+
+/* Left-aligned like the content below it: the masthead moved to the sidebar, so the only
+   remaining direct-child dek is the leaderboard's empty state, a page-level message. */
+.wrap > .dek {
+  margin: 0 0 32px;
+  color: var(--muted);
+  font-size: 15px;
+}
+
+/* A view's own caption sits under its heading, left-aligned like the content below it,
+   rather than centered like the masthead dek above. */
+.viewhead + .dek {
+  margin-bottom: 24px;
+  text-align: left;
+}
+
+/* A view's own heading, sitting under the masthead h1 and the tab bar. */
+.viewhead {
+  margin: 0 0 8px;
+  font-size: 22px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+/* Lead-in text at the top of a tab, above its editor/list. */
+.tab-intro {
+  margin: 0 0 24px;
+  color: var(--muted);
+  line-height: 1.5;
+}
+
+.group {
+  margin-bottom: 64px;
+}
+
+.group + .group {
+  padding-top: 40px;
+  border-top: 1px solid var(--line);
+}
+
+/* ---------- SpecHeader ---------- */
+
+.spec {
+  margin-bottom: 20px;
+}
+
+.spec h2 {
+  margin: 0 0 10px;
+  font-size: 21px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  max-width: 42ch;
+}
+
+.spec .dek {
+  margin: 0 0 24px;
+  max-width: 68ch;
+  color: var(--muted);
+}
+
+.spec-tag {
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  color: var(--muted);
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  padding: 1px 7px;
+  white-space: nowrap;
+}
+
+/* One colour per tag meaning, shared with the Workloads page cards (.badge.builtin,
+ * .variant-*) so a workload reads the same in both places: a preset is amber, a
+ * distribution teal, a workload-spec the alt purple. */
+.tag-preset {
+  color: var(--warn-ink);
+  background: var(--warn-bg);
+  border-color: var(--warn-line);
+}
+
+.tag-distribution {
+  color: var(--accent-ink);
+  background: var(--accent-soft);
+  border-color: var(--accent);
+}
+
+.tag-workload-spec {
+  color: var(--alt-ink);
+  background: var(--alt-bg);
+  border-color: var(--alt-line);
+}
+
+/* The full workload spec, collapsed by default under a spec-backed workload's readout. */
+.spec-details {
+  margin: 0 0 20px;
+}
+
+.spec-details > summary {
+  cursor: pointer;
+  color: var(--muted);
+  font-size: 13px;
+  user-select: none;
+}
+
+.spec-details > summary:hover {
+  color: var(--ink);
+}
+
+.spec-details[open] > summary {
+  margin-bottom: 10px;
+}
+
+.spec-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  gap: 16px 24px;
+  margin: 0 0 20px;
+  padding: 18px 20px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 3px;
+}
+
+.spec-grid > div {
+  min-width: 0;
+}
+
+.spec-grid dt {
+  margin: 0 0 3px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.spec-grid dd {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: 14px;
+  font-weight: 500;
+  overflow-wrap: anywhere;
+}
+
+.spec-grid dd small {
+  font-size: 11.5px;
+  color: var(--muted);
+  font-weight: 400;
+}
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 3px 9px;
+  border-radius: 3px;
+  font-size: 12px;
+  line-height: 1.3;
+}
+
+/* ---------- Derived ---------- */
+
+.derived {
+  text-decoration: underline dotted 1.5px;
+  text-decoration-color: var(--line-strong);
+  text-underline-offset: 3px;
+  cursor: help;
+}
+
+.derived:hover,
+.derived:focus-visible {
+  text-decoration-color: var(--accent);
+  color: var(--accent-ink);
+}
+
+/* ---------- Tooltip (data-tip) ----------
+ * `.derived`, `.info` and `.eq` each carry a `data-tip` explanation. Native `title` shows
+ * on hover but not reliably on keyboard focus, so the visible tooltip is a single element
+ * parked at the end of <body> and positioned by initTooltips() (tooltip.ts) on hover and
+ * `:focus-visible`. It lives at the document root, not on the trigger, on purpose: the
+ * readout table scrolls horizontally, so a tooltip anchored inside it is clipped by that
+ * scroll container (a header note on a short table gets cut off by the first row); and each
+ * header cell is its own stacking context (sticky `z-index`), so a note anchored inside one
+ * is painted under the neighbouring column titles. A `position: fixed` box at <body> is
+ * neither clipped nor outranked. Assistive tech reads the trigger's `aria-label`, not this
+ * box (it is `aria-hidden`) — the tooltip is a sighted-user affordance layered on top.
+ */
+.tip {
+  position: fixed;
+  z-index: 100;
+  max-width: 280px;
+  padding: 6px 10px;
+  border-radius: 4px;
+  background: var(--ink);
+  color: var(--panel);
+  font-family: var(--font-sans);
+  font-size: 12px;
+  font-style: normal;
+  font-weight: 400;
+  line-height: 1.4;
+  white-space: normal;
+  text-align: left;
+  box-shadow: 0 3px 10px rgba(0, 0, 0, 0.3);
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transition: opacity 120ms ease;
+}
+
+.tip.show {
+  opacity: 1;
+  visibility: visible;
+}
+
+/* ---------- ReadoutTable ---------- */
+
+/* The bar above the table: sort chips on the left, the expand/collapse-all control pushed
+   to the right. Wraps to two lines when a long multi-tier sort leaves no room beside it. */
+.tabletools {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px 12px;
+  margin: 0 0 12px;
+}
+
+/* The sort note lives inside .tabletools now, so it drops its own bottom margin. */
+.tabletools .sortnote {
+  margin: 0;
+}
+
+/* The expand/collapse-all pair is a quiet view utility, not an action button: no filled
+   frame, no seam, no box — just two muted text labels, each with the same ▾/▸ disclosure
+   caret a row's reproduce toggle uses, so the glyph says what it does (▾ leaves the rows
+   open, ▸ leaves them closed). It stays subdued at rest and only lights up on hover, so it
+   reads as a table affordance and not as one of the page's solid/bordered action buttons.
+   margin-left:auto keeps it right-aligned even when no sort chips sit beside it. */
+.rowtools {
+  display: inline-flex;
+  align-items: center;
+  gap: 16px;
+  margin-left: auto;
+}
+
+.rowtool {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 1px;
+  border: none;
+  background: none;
+  color: var(--muted);
+  font-family: var(--font-sans);
+  font-size: 12.5px;
+  font-weight: 500;
+  line-height: 1.4;
+  cursor: pointer;
+}
+
+.rowtool .car {
+  font-size: 10px;
+  color: var(--muted);
+}
+
+/* Hover is the only fill: the label turns to accent ink and picks up an underline, so the
+   affordance is unmistakable without a resting frame. */
+.rowtool:hover:not(:disabled),
+.rowtool:hover:not(:disabled) .car {
+  color: var(--accent-ink);
+}
+
+.rowtool:hover:not(:disabled) {
+  text-decoration: underline;
+  text-decoration-color: var(--accent);
+  text-underline-offset: 3px;
+}
+
+.rowtool:focus-visible {
+  outline: none;
+  border-radius: 3px;
+  box-shadow: 0 0 0 2px var(--focus);
+}
+
+/* Disabled dims further from the already-muted resting tone, so "nothing to toggle" reads
+   distinctly from an idle-but-available control. */
+.rowtool:disabled,
+.rowtool:disabled .car {
+  color: var(--muted);
+  opacity: 0.5;
+  cursor: default;
+}
+
+.sortnote {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 8px;
+  margin: 0 0 12px;
+  font-size: 13px;
+}
+
+.sortnote-label {
+  color: var(--muted);
+}
+
+/* One sorted column, a pill of its own: rank, label, caret, and a remove button that
+   drops just this tier. Each chip stands alone — separated by the row's gap, not packed
+   into a single tag — so the reader can pare a multi-tier sort back one column at a time. */
+.sortnote-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 3px 3px 9px;
+  color: var(--accent-ink);
+  background: var(--accent-soft);
+  border: 1px solid var(--accent);
+  border-radius: 3px;
+}
+
+.sortnote-chip b {
+  font-weight: 600;
+}
+
+.sortnote-rank {
+  min-width: 14px;
+  height: 14px;
+  padding: 0 3px;
+  border-radius: 7px;
+  background: var(--accent);
+  color: var(--panel);
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 14px;
+  text-align: center;
+}
+
+.sortnote-car {
+  font-size: 11px;
+  line-height: 1;
+  color: var(--accent);
+}
+
+.sortnote-remove {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: none;
+  border-radius: 3px;
+  background: none;
+  color: var(--accent-ink);
+  font-size: 12px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.sortnote-remove:hover {
+  background: rgba(15, 68, 56, 0.14);
+}
+
+.sortnote-remove:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 1px;
+}
+
+.tscroll {
+  overflow-x: auto;
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  background: var(--panel);
+}
+
+table.readout {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+  min-width: 760px;
+}
+
+table.readout th,
+table.readout td {
+  padding: 8px 10px;
+  text-align: left;
+  vertical-align: middle;
+  border-bottom: 1px solid var(--line);
+  white-space: nowrap;
+}
+
+/*
+ * Numeric columns hold short mono values but multi-word headers ("Sched delay
+ * p99"). Left nowrap, every such column would be as wide as its header and the
+ * table would overflow sideways. Letting these headers wrap to two lines lets a
+ * column shrink to its value width instead; the values themselves stay nowrap.
+ */
+table.readout thead tr:not(.grp) th:not(.lft) {
+  white-space: normal;
+  vertical-align: bottom;
+}
+
+table.readout thead tr:not(.grp) th:not(.lft) .sortbtn {
+  white-space: normal;
+  text-align: left;
+}
+
+table.readout thead tr.grp th {
+  padding: 8px 12px 4px;
+  border-bottom: none;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--muted);
+  letter-spacing: 0.02em;
+  background: var(--panel);
+}
+
+table.readout thead tr:not(.grp) th {
+  padding-top: 2px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--line-strong);
+  background: var(--panel);
+  font-weight: 600;
+  position: relative;
+}
+
+table.readout thead th {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+}
+
+/*
+ * The frozen first column has to pin horizontally in the header too, not just the
+ * body. The `tr:not(.grp) th` rule above sets the column-header cells
+ * position:relative (it anchors the `.info` tooltips), which outranks `.lft`'s own
+ * sticky; the grouped-header cell above it has no left offset. Without this the
+ * header's first column scrolls out from under the pinned body column and every
+ * header label ends up over the wrong column. `top: auto` on the column header keeps
+ * it in step with its unpinned siblings — only the horizontal pin is wanted here.
+ */
+table.readout thead tr:not(.grp) th.lft {
+  position: sticky;
+  left: 0;
+  top: auto;
+}
+
+table.readout thead tr.grp th:first-child {
+  left: 0;
+}
+
+/* ---------- Metric-group separators ----------
+ * A hairline vertical rule at each group boundary (candidate | latency | throughput |
+ * health) marks where one group of columns ends and the next begins. Applied to
+ * every cell in the group's first column — header, grouped header, and body — so
+ * the rule runs unbroken top to bottom. Row hover repaints the cell ground but
+ * leaves the border, so the separators stay visible on the hovered row too.
+ */
+table.readout .gsep {
+  border-left: 1px solid var(--line);
+}
+
+.sortbtn {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 5px;
+  border: none;
+  background: none;
+  margin: 0;
+  padding: 3px 4px;
+  font: inherit;
+  font-weight: 600;
+  color: var(--ink);
+  cursor: pointer;
+  border-radius: 3px;
+}
+
+.sortbtn:hover {
+  background: var(--accent-soft);
+  color: var(--accent-ink);
+}
+
+.sortbtn:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+
+.sortbtn .car {
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.sortbtn:hover .car {
+  color: var(--accent-ink);
+}
+
+th[aria-sort] .sortbtn .car {
+  color: var(--accent);
+}
+
+/* Priority number beside the caret, shown only while more than one column sorts,
+   so primary and secondary keys are told apart at the header. */
+.sortbtn .rank {
+  align-self: center;
+  min-width: 13px;
+  height: 13px;
+  margin-left: 1px;
+  padding: 0 3px;
+  border-radius: 7px;
+  background: var(--accent);
+  color: var(--panel);
+  font-size: 9px;
+  font-weight: 700;
+  line-height: 13px;
+  text-align: center;
+}
+
+.info {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+  margin-left: 4px;
+  border-radius: 50%;
+  border: 1px solid var(--line-strong);
+  font-size: 9.5px;
+  font-style: italic;
+  font-weight: 600;
+  color: var(--muted);
+  cursor: help;
+  vertical-align: middle;
+}
+
+.info:hover,
+.info:focus-visible {
+  border-color: var(--accent);
+  color: var(--accent-ink);
+}
+
+th.lft,
+td.lft {
+  position: sticky;
+  left: 0;
+  z-index: 1;
+  background: var(--panel);
+  border-right: 1px solid var(--line-strong);
+  white-space: normal;
+  min-width: 190px;
+  max-width: 300px;
+}
+
+thead tr.grp th.lft {
+  z-index: 3;
+}
+
+thead tr:not(.grp) th.lft {
+  z-index: 3;
+}
+
+/* The deployment cell reads top to bottom: model, GPU type, the key spec line, the
+ * knobs that differ, then the "show all" control — each on its own row. The flex
+ * column lives on an inner box, not the <td>: a display:flex table-cell escapes the
+ * table's column sizing and shrink-wraps narrower than its header, which jags the
+ * frozen first column's divider (header and body edges diverge). */
+td.dep {
+  padding-top: 11px;
+  padding-bottom: 11px;
+  vertical-align: top;
+}
+
+.depbox {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+}
+
+/* A long model id (org/long-name-with-many-parts) must not widen or wrap the frozen
+ * first column. Keep it on one line and let this line alone scroll sideways when it
+ * outruns the column; a short name shrink-wraps and shows no scrollbar. max-width caps
+ * it at the column so the scroll container, not the name, is what bounds the width. */
+.dep-model {
+  font-family: var(--font-mono);
+  font-weight: 700;
+  font-size: 13px;
+  color: var(--accent-ink);
+  max-width: 100%;
+  white-space: nowrap;
+  overflow-x: auto;
+  scrollbar-width: thin;
+}
+
+.dep-hw {
+  font-family: var(--font-mono);
+  font-weight: 600;
+  font-size: 12.5px;
+  color: var(--ink);
+}
+
+/* The always-present topology of the deployment: tp / dp / num_instances, read the
+ * same way on every row. Each is a boxed chip identical to the differing-knob chips
+ * below (see the shared `.kv, .knob` rule), so every deployment argument reads as the
+ * same gray. (max_model_len is a knob chip.) */
+.dep-key {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 5px 6px;
+}
+
+.kv i {
+  font-style: normal;
+  margin-right: 3px;
+}
+
+.dep-knobs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px 6px;
+}
+
+/* A constant field, revealed only under "show all": set apart from a differing knob by
+ * its dotted border and transparent fill, not by a lighter text color, so its argument
+ * text stays the same ink shade as every other deployment argument. */
+.knob.rest {
+  border-style: dotted;
+  border-color: var(--line-strong);
+  background: transparent;
+}
+
+.dep-more {
+  align-self: flex-start;
+  padding: 1px 0;
+  font: inherit;
+  font-size: 11.5px;
+  color: var(--accent-ink);
+  background: none;
+  border: none;
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  text-decoration-color: var(--line-strong);
+}
+
+.dep-more:hover {
+  color: var(--accent);
+  text-decoration-color: currentColor;
+}
+
+.dep-more:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+  border-radius: 2px;
+}
+
+.eq {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  margin: -4px 0;
+  border-radius: 50%;
+  color: var(--accent-ink);
+  background: var(--accent-soft);
+  font-size: 13px;
+  cursor: help;
+}
+
+.eq:hover,
+.eq:focus-visible {
+  background: var(--accent);
+  color: var(--panel);
+}
+
+/* One chip look for every deployment argument: the topology on the key line (.kv) and
+ * the differing knobs below (.knob) share this box so they read as the same gray. */
+.kv,
+.knob {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 7px;
+  border: 1px solid var(--line-strong);
+  border-radius: 3px;
+  background: var(--paper);
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  color: var(--ink);
+  white-space: nowrap;
+}
+
+.knob.extra {
+  border-style: dashed;
+  border-color: var(--warn-line);
+  background: var(--warn-bg);
+  color: var(--warn-ink);
+}
+
+/* A deployment argument value can be long (a path, a long identifier). The container
+ * wraps between chips, but an inline-flex chip holds its text as one non-shrinking
+ * item, so a single long chip runs past the frozen column's right divider. Lay these
+ * chips out as inline-block flow, cap them at the column width, and let long tokens
+ * break, so the argument wraps inside the chip and the chip stays in the column. */
+.dep-key .kv,
+.dep-knobs .knob {
+  display: inline-block;
+  max-width: 100%;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+table.readout td:not(.lft) {
+  font-family: var(--font-mono);
+}
+
+.val {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 4px;
+  font-size: 13.5px;
+}
+
+.val.best {
+  font-weight: 700;
+  color: var(--accent-ink);
+  border-bottom: 1.5px solid var(--accent);
+}
+
+.star {
+  color: var(--accent);
+  font-size: 11px;
+}
+
+.short {
+  color: var(--muted);
+  font-size: 11.5px;
+}
+
+table.readout tbody tr:hover td {
+  background: var(--accent-soft);
+}
+
+table.readout tbody tr:hover td.lft {
+  background: var(--accent-soft);
+}
+
+/* ---------- Reproduce a run ----------
+ * Every complete row is a toggle: click it to open a panel beneath with the exact
+ * blis command that produced it. The whole row is the mouse target (hence the pointer
+ * cursor, on top of the hover highlight the table already has); the caret in the
+ * deployment cell is the keyboard entry point and the visible sign the row expands. */
+table.readout tbody tr:not(.reprorow) {
+  cursor: pointer;
+}
+
+/* td.lft is position:sticky, so it anchors this absolutely: the caret sits in the
+ * cell's top-right corner, out of the flow, so opening a row shifts no numbers. */
+.reprotoggle {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  color: var(--muted);
+  background: none;
+  border: none;
+  border-radius: 3px;
+  font-size: 11px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.reprotoggle:hover,
+.reprotoggle:focus-visible {
+  color: var(--accent-ink);
+  background: var(--accent-soft);
+  outline: none;
+}
+
+.reprotoggle:focus-visible {
+  box-shadow: 0 0 0 2px var(--focus);
+}
+
+/* The expanded panel: a full-width row, on paper so it reads as a drawer under the run
+ * rather than another ranked row. `table.readout td` sets `white-space: nowrap` on every
+ * cell, which children inherit — undone here so the caption wraps instead of running off
+ * the width into the panel's `overflow: hidden` (the command's own <pre> keeps its
+ * `white-space: pre`). The selector must out-specify `table.readout td` (0,1,2), so it is
+ * qualified with `.readout` rather than left as a bare `.reprorow td` (0,1,1), which loses
+ * the cascade and leaves the caption on one clipped line. */
+.readout .reprorow td {
+  padding: 0;
+  background: var(--paper);
+  border-right: 1px solid var(--line-strong);
+  white-space: normal;
+  /* The table is auto-layout, so it sizes its columns to the max-content of every cell,
+   * this spanning drawer cell included. The command's <pre> is one long unbroken line, so
+   * left to contribute it drags the whole table wider than its resting width and every
+   * column, and with it every sticky header label, reflows the instant a row is opened.
+   * max-width:0 drops this cell out of that width calculation: the columns stay sized by
+   * the data and header rows alone, so opening a row never moves a heading. The cell still
+   * spans the full table width (a colspan cell always does), so the panel below renders
+   * full-width and the command keeps scrolling inside its own overflow. */
+  max-width: 0;
+}
+
+.reprorow:hover td {
+  background: var(--paper);
+}
+
+.repro {
+  padding: 14px 16px;
+}
+
+/* The panel lives in a table cell that spans the full (scrollable) table width. Pinning
+ * it to the left of the scroll port and capping its width keeps it in view and readable
+ * even when the table is wider than the screen. The cap is the container's own width, not
+ * the viewport's: `.wrap` centres at `--wrap-max`, so past that width the container stops
+ * growing while the viewport keeps going — a plain `100vw - 48px` would then run the panel
+ * past the container's right edge and `.tscroll` would clip the caption. `min(100vw,
+ * --wrap-max) - 48px` is the `.wrap` content width (its 24px gutters), i.e. the container. */
+.reprorow .repro {
+  position: sticky;
+  left: 0;
+  width: min(100%, min(100vw, var(--wrap-max)) - 48px);
+}
+
+/* The disqualified band is a stack of cards, not a table, so its toggle is an explicit
+ * labelled control at the foot of the card (the card carries prose worth selecting, so
+ * click-anywhere would fight the reader), and its panel opens right below it. */
+.dqrepro {
+  margin-top: 14px;
+}
+
+.reprotoggle.dq {
+  position: static;
+  width: auto;
+  height: auto;
+  gap: 5px;
+  padding: 3px 0;
+  font-size: 12px;
+  color: var(--accent-ink);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  text-decoration-color: var(--line-strong);
+}
+
+.reprotoggle.dq:hover,
+.reprotoggle.dq:focus-visible {
+  background: none;
+  color: var(--accent);
+}
+
+.dqrepro .repro {
+  padding: 12px 0 0;
+}
+
+/* ---------- DqBand ----------
+ * A disqualified run is shown, never filtered — but it must never be mistaken
+ * for a ranked row. The band sits below `.tscroll` (position already says
+ * "not ranked here") and is set off by a dashed rule plus a change of ground
+ * (a diagonal hatch, not just a plain panel) so "this region is excluded from
+ * the ranking above" does not depend on noticing a color.
+ */
+.dqband {
+  margin-top: 28px;
+  padding: 20px 20px 4px;
+  border-top: 2px dashed var(--line-strong);
+  background-image: repeating-linear-gradient(
+    135deg,
+    var(--panel) 0px,
+    var(--panel) 10px,
+    var(--paper) 10px,
+    var(--paper) 20px
+  );
+  border-radius: 3px;
+}
+
+.dqband h3 {
+  margin: 0 0 8px;
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+.dqintro {
+  margin: 0 0 18px;
+  max-width: 68ch;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.dqrow {
+  margin-bottom: 16px;
+  padding: 14px 16px;
+  background: var(--panel);
+  border: 1px solid var(--line-strong);
+  border-left: 4px solid var(--crit-line);
+  border-radius: 3px;
+}
+
+.dqtop {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 7px;
+  margin-bottom: 8px;
+}
+
+.dqtop .nm {
+  font-family: var(--font-mono);
+  font-weight: 600;
+  margin-right: 3px;
+}
+
+/*
+ * `.chip.crit` and `.chip.alt` extend the base `.chip` (used elsewhere for the
+ * `.warn` dirty-tree caveat) with their own palette, their own border style,
+ * and their own leading glyph — three independent, non-color signals — so
+ * the two classes read apart from each other and from `.chip.warn` even
+ * without color: `incomplete` (the declared work did not finish) gets a
+ * solid border and a "✕"; `altered` (finished, but not the declared work)
+ * gets a dashed border and a "≠".
+ */
+.chip.crit,
+.chip.alt {
+  font-family: var(--font-mono);
+  gap: 5px;
+}
+
+.chip.crit {
+  background: var(--crit-bg);
+  color: var(--crit-ink);
+  border: 1.5px solid var(--crit-line);
+}
+
+.chip.crit::before {
+  content: '✕';
+}
+
+.chip.alt {
+  background: var(--alt-bg);
+  color: var(--alt-ink);
+  border: 1.5px dashed var(--alt-line);
+}
+
+.chip.alt::before {
+  content: '≠';
+}
+
+.chip.crit small,
+.chip.alt small {
+  font-family: var(--font-sans);
+  opacity: 0.85;
+}
+
+.dqwhy {
+  margin: 0 0 12px;
+  max-width: 74ch;
+  font-size: 13.5px;
+  color: var(--ink);
+}
+
+.dqwhy b {
+  font-weight: 600;
+}
+
+.dqnums {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 12px 20px;
+  margin: 0;
+}
+
+.dqnums dt {
+  margin: 0 0 3px;
+  font-size: 11.5px;
+  color: var(--muted);
+}
+
+.dqnums dd {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: 13.5px;
+  font-weight: 500;
+}
+
+.dqnums dd small {
+  display: block;
+  font-family: var(--font-sans);
+  font-size: 11.5px;
+  font-weight: 400;
+  color: var(--muted);
+}
+
+/*
+ * The output-tokens-per-request row is the honest tell (D5): the served
+ * subset is easier, not just smaller. It gets the same emphasis treatment
+ * `.val.best` uses in the table — a colored, bold figure with an underline —
+ * so it reads as the point of the row, not an afterthought beside tokens/s.
+ */
+.dqnums .tell dt {
+  color: var(--crit-ink);
+  font-weight: 600;
+}
+
+.dqnums .tell dd {
+  font-weight: 700;
+  font-size: 15px;
+  color: var(--crit-ink);
+}
+
+.dqnums .tell dd small {
+  display: block;
+  font-size: 11.5px;
+  font-weight: 400;
+  color: var(--muted);
+}
+
+/* ---------- Live run banner (the board's in-flight / just-landed widget) ---------- */
+
+.liverun {
+  display: flex;
+  align-items: flex-start;
+  gap: 14px;
+  padding: 14px 16px;
+  margin-bottom: 20px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-left: 4px solid var(--accent);
+  border-radius: 3px;
+}
+
+.liverun-body {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.liverun-head {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.liverun-sub {
+  margin: 3px 0 0;
+  font-size: 12.5px;
+  color: var(--muted);
+}
+
+.liverun-note {
+  margin: 4px 0 0;
+  font-size: 11.5px;
+  color: var(--muted);
+}
+
+/* The done check mark, sized to sit level with the head line. */
+.liverun-mark {
+  flex: none;
+  width: 20px;
+  height: 20px;
+  margin-top: 1px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  background: var(--accent-soft);
+  color: var(--accent-ink);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+/* A CSS-only ring. It spins under no-preference; the reduced-motion rule below stops the
+   animation, leaving a static three-quarter ring that still reads as a "working" mark. */
+.liverun-spin {
+  flex: none;
+  width: 18px;
+  height: 18px;
+  margin-top: 2px;
+  border-radius: 50%;
+  border: 2px solid var(--accent-soft);
+  border-top-color: var(--accent);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .liverun-spin {
+    animation: liverun-spin 0.8s linear infinite;
+  }
+}
+
+@keyframes liverun-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.liverun-actions {
+  flex: none;
+}
+
+.liverun-view {
+  padding: 6px 14px;
+  background: var(--accent);
+  color: var(--panel);
+  border: 1px solid var(--accent);
+  border-radius: 3px;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.liverun-view:hover {
+  background: var(--accent-ink);
+  border-color: var(--accent-ink);
+}
+
+.liverun-dismiss {
+  flex: none;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  display: grid;
+  place-items: center;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 3px;
+  color: var(--muted);
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.liverun-dismiss:hover {
+  border-color: var(--line-strong);
+  color: var(--ink);
+}
+
+/* The reveal highlight: the row a "View the run" scrolled to. Under no-preference it pulses;
+   under reduce the static tint below just shows for the ~2s before JS removes the class. It
+   sits on the cells (and the dq card), so it reads over the table's own row striping. */
+tr.revealed td,
+.dqrow.revealed {
+  background: var(--accent-soft);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  tr.revealed td,
+  .dqrow.revealed {
+    animation: liverun-pulse 2s ease;
+  }
+}
+
+@keyframes liverun-pulse {
+  0%,
+  100% {
+    background: transparent;
+  }
+  15%,
+  50% {
+    background: var(--accent-soft);
+  }
+}
+
+/* ---------- Motion & focus ---------- */
+
+:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .sortbtn,
+  .eq,
+  .info,
+  .derived,
+  .wcard-del,
+  table.readout tbody tr td {
+    transition: background-color 120ms ease, color 120ms ease, border-color 120ms ease;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * {
+    transition: none !important;
+    animation: none !important;
+  }
+}
+
+/* ---------- Small viewports ---------- */
+
+@media (max-width: 640px) {
+  .wrap {
+    padding: 28px 16px 72px;
+  }
+
+  .spec-grid {
+    grid-template-columns: repeat(2, 1fr);
+    padding: 14px 16px;
+  }
+
+  td.lft,
+  th.lft {
+    min-width: 168px;
+  }
+}
+
+/* ---------- App shell (sidebar + content) ----------
+ * The views live behind a fixed left rail, the way a site's sections sit behind its
+ * nav. The rail carries only the view list; the page title sits atop the content
+ * beside it. The rail is a panel with a single hairline right rule — the same
+ * instrument vocabulary as the table frame and the cards, not a shaded chrome bar.
+ */
+
+.app {
+  display: flex;
+  align-items: flex-start;
+  min-height: 100vh;
+}
+
+.sidebar {
+  position: sticky;
+  top: 0;
+  align-self: flex-start;
+  display: flex;
+  flex: 0 0 232px;
+  flex-direction: column;
+  gap: 18px;
+  height: 100vh;
+  padding: 20px 16px 36px;
+  overflow-y: auto;
+  background: var(--panel);
+  border-right: 1px solid var(--line);
+  transition: flex-basis 160ms ease;
+}
+
+.sidebar.collapsed {
+  flex-basis: 62px;
+  padding-left: 8px;
+  padding-right: 8px;
+}
+
+/* Stroked line icons, sized to the text beside them. */
+.navico {
+  flex: none;
+  width: 18px;
+  height: 18px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+/* The expander: a quiet hairline button that folds the rail to an icon strip. It sits at
+ * the rail's right edge when open (its chevron points at the edge it collapses toward)
+ * and centers when the rail is a strip. */
+.navtoggle {
+  display: inline-flex;
+  align-self: flex-end;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  color: var(--muted);
+  background: none;
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  cursor: pointer;
+}
+
+.navtoggle:hover {
+  color: var(--accent-ink);
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.navtoggle:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+
+.sidebar.collapsed .navtoggle {
+  align-self: center;
+}
+
+/* Collapsed, the chevron flips to point outward — the affordance to open the rail. */
+.sidebar.collapsed .navtoggle .navico {
+  transform: rotate(180deg);
+}
+
+/* The page title, at the top of the content column rather than in the rail. Left-aligned
+   with the content below it, and set off from it by its own bottom margin. */
+.masthead {
+  margin: 0 0 40px;
+}
+
+.masthead h1 {
+  margin: 0 0 8px;
+  font-size: 34px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+.masthead .dek {
+  margin: 0;
+  color: var(--muted);
+  font-size: 15px;
+}
+
+/* The view list. The current view is the one whose rule is unbroken and in the signal
+ * color — the same marker the tab row used, turned onto its side: a left border rather
+ * than an underline, matching how a selected workload row is marked in the catalog. */
+.sidenav {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.sidenav a {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  border-left: 2px solid transparent;
+  border-radius: 0 3px 3px 0;
+  color: var(--muted);
+  font-size: 14px;
+  font-weight: 500;
+  text-decoration: none;
+}
+
+.sidenav a:hover {
+  color: var(--accent-ink);
+  background: var(--accent-soft);
+}
+
+.sidenav a[aria-current='page'] {
+  color: var(--ink);
+  border-left-color: var(--accent);
+  background: var(--accent-soft);
+  font-weight: 600;
+}
+
+.sidenav a[aria-current='page'] .navico {
+  color: var(--accent);
+}
+
+.navlabel {
+  white-space: nowrap;
+}
+
+/* Collapsed: the rail is an icon strip. Labels drop out (the anchor keeps its aria-label,
+ * and a title shows the name on hover), leaving each icon centered on the current-view
+ * accent marker. */
+.sidebar.collapsed .navlabel {
+  display: none;
+}
+
+.sidebar.collapsed .sidenav a {
+  justify-content: center;
+  padding: 9px 0;
+}
+
+/* Project links, at the foot of the rail: this board's own source and the BLIS simulator
+ * it consumes. Set below the views by margin-top:auto and off from them by a hairline, so
+ * they read as departures from the app rather than more of its views — no current-page
+ * marker, the muted rest color the views use, and the same accent-soft hover. */
+.railfoot {
+  margin-top: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding-top: 14px;
+  border-top: 1px solid var(--line);
+}
+
+.railfoot a {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  border-radius: 3px;
+  color: var(--muted);
+  font-size: 14px;
+  font-weight: 500;
+  text-decoration: none;
+}
+
+.railfoot a:hover {
+  color: var(--accent-ink);
+  background: var(--accent-soft);
+}
+
+/* The GitHub mark is a solid logo, not a stroked line icon. */
+.navico-solid {
+  fill: currentColor;
+  stroke: none;
+}
+
+.sidebar.collapsed .railfoot a {
+  justify-content: center;
+  padding: 9px 0;
+}
+
+/* min-width:0 lets a wide, horizontally scrolling table shrink to fit beside the rail
+   instead of forcing the whole layout wider than the viewport. */
+.content {
+  flex: 1;
+  min-width: 0;
+}
+
+/* On a narrow viewport the rail folds up into a top bar, and the view list turns back
+ * into the horizontal tab row it came from — the left border reverts to an underline. */
+@media (max-width: 820px) {
+  .app {
+    flex-direction: column;
+  }
+
+  .sidebar {
+    position: static;
+    flex: none;
+    flex-direction: row;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px 24px;
+    flex-wrap: wrap;
+    width: 100%;
+    height: auto;
+    padding: 18px 20px;
+    border-right: none;
+    border-bottom: 1px solid var(--line);
+  }
+
+  .sidenav {
+    flex-direction: row;
+    gap: 4px;
+  }
+
+  .sidenav a {
+    border-left: none;
+    border-bottom: 2px solid transparent;
+    border-radius: 3px 3px 0 0;
+  }
+
+  .sidenav a[aria-current='page'] {
+    border-left-color: transparent;
+    border-bottom-color: var(--accent);
+  }
+
+  /* The rail is a top bar here, not a collapsible strip: the expander and icons drop out
+     and labels always show, so a remembered "collapsed" preference reverts to plain tabs. */
+  .navtoggle {
+    display: none;
+  }
+
+  .sidebar .navico {
+    display: none;
+  }
+
+  .sidebar.collapsed {
+    flex-basis: auto;
+  }
+
+  .sidebar.collapsed .navlabel {
+    display: inline;
+  }
+
+  .sidebar.collapsed .sidenav a {
+    justify-content: flex-start;
+    padding: 8px 12px;
+  }
+
+  /* In the top bar the footer links join the tab row inline, so the vertical push and the
+     hairline separator both drop out. */
+  .railfoot {
+    margin-top: 0;
+    flex-direction: row;
+    gap: 4px;
+    padding-top: 0;
+    border-top: none;
+  }
+}
+
+/* ---------- Workload picker ----------
+ * The top level of the page: the workloads, one selectable row each. Picking one shows
+ * its results below; only that workload's table is on the page at a time. The selected
+ * row is marked by an accent left-border and weight, not by color alone.
+ */
+/* The workload selector is a card gallery, sharing .wgallery's grid with the Workloads
+ * tab's card vocabulary so the two views read as one system. Each card is itself the
+ * button, since selecting a workload is its only action here. */
+.wpick {
+  margin: 0 0 40px;
+}
+
+.wpick .wgallery {
+  margin: 0;
+}
+
+.wpick-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: 100%;
+  height: 100%;
+  padding: 12px 14px;
+  font: inherit;
+  text-align: left;
+  color: var(--ink);
+  background: var(--panel);
+  border: 1px solid var(--line-strong);
+  border-radius: 3px;
+  cursor: pointer;
+}
+
+.wpick-card:hover {
+  background: var(--accent-soft);
+}
+
+.wpick-card:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: -2px;
+}
+
+/* The current card takes the same accent border + inset ring as a .wcard.selected. */
+.wpick-card.cur {
+  border-color: var(--accent);
+  box-shadow: inset 0 0 0 1px var(--accent);
+  background: var(--accent-soft);
+}
+
+.wpick .wtitle {
+  font-weight: 500;
+  line-height: 1.35;
+}
+
+.wpick-card.cur .wtitle {
+  font-weight: 700;
+  color: var(--accent-ink);
+}
+
+/* The classification tags (preset / distribution / workload-spec), reusing the .spec-tag
+ * pill vocabulary, on their own row under the title. */
+.wpick .wtags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.wpick .gcount {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 3px 12px;
+  margin-top: auto;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+/* An excluded run is surfaced on the card in its own critical tone, never hidden. */
+.wpick .gcount .dq {
+  color: var(--crit-ink);
+}
+
+/* ---------- Tag filters (models, hardware) ----------
+ * A workload table can span several models and several accelerators; these narrow it.
+ * Each option is a toggle bubble, in the same squared, monospace vocabulary as the
+ * .knob chips — an unselected tag reads like a knob, a selected one takes the page's
+ * --accent-soft highlight. None selected means all, so the control opens showing
+ * everything and never hides a row silently. Filtering the model tags to exactly one
+ * model restores that model's full single-group ranking (W5); the hardware tags only
+ * narrow the rows.
+ */
+/* The two filters sit side by side, sharing the row, and wrap to stacked only when
+ * the viewport is too narrow to hold both. */
+.filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin: 0 0 18px;
+}
+
+.tagfilter {
+  flex: 1 1 260px;
+  margin: 0;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  background: var(--panel);
+}
+
+.tagfilter legend {
+  padding: 0 6px;
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  font-weight: 600;
+}
+
+.tagfilter legend .muted {
+  font-weight: 400;
+  color: var(--muted);
+}
+
+.tagbody {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.tagrow {
+  display: flex;
+  flex: 1 1 auto;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+/* The Show all / Clear pair, pinned to the card's right edge; wraps below the
+   bubbles when the card is too narrow to hold both on one row. */
+.tagactions {
+  display: flex;
+  flex-shrink: 0;
+  margin-left: auto;
+  gap: 8px;
+}
+
+.tag {
+  padding: 3px 10px;
+  border: 1px solid var(--line-strong);
+  border-radius: 3px;
+  background: var(--paper);
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  color: var(--ink);
+  cursor: pointer;
+}
+
+.tag:hover {
+  border-color: var(--accent);
+  color: var(--accent-ink);
+}
+
+.tag:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 1px;
+}
+
+.tag[aria-pressed='true'] {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--accent-ink);
+  font-weight: 600;
+}
+
+.tagaction {
+  padding: 3px 10px;
+  font: inherit;
+  font-size: 12px;
+  color: var(--accent-ink);
+  background: none;
+  border: 1px solid var(--line-strong);
+  border-radius: 3px;
+  cursor: pointer;
+}
+
+.tagaction:hover {
+  border-color: var(--accent);
+}
+
+.tagaction:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 1px;
+}
+
+/* Shown instead of the table when a filter has every option deselected. */
+.filterempty {
+  margin: 0;
+  padding: 20px 16px;
+  border: 1px dashed var(--line-strong);
+  border-radius: 3px;
+  background: var(--panel);
+  color: var(--muted);
+  font-size: 13.5px;
+  text-align: center;
+}
+
+/* The model label on a merged dq row. (The readout table folds the model into the
+ * Deployment cell's own `.dep-model` line rather than a column of its own.) */
+.dqtop .model {
+  font-family: var(--font-mono);
+  font-weight: 600;
+  color: var(--accent-ink);
+}
+
+.dqtop .model {
+  margin-right: 3px;
+}
+
+/* ---------- Declare a run ----------
+ * The form is a requisition, not a settings screen: label on the left, value on
+ * the right, one hairline per row, in the same measured voice as the spec grid
+ * above every table. The panel beside it is the only thing that moves — it
+ * rewrites itself as the declaration changes, because "which table does this land
+ * in" is the question the form exists to answer.
+ */
+
+.nrgrid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 32px;
+  align-items: start;
+}
+
+.nrform {
+  min-width: 0;
+}
+
+.nrform fieldset {
+  margin: 0 0 16px;
+  padding: 8px 20px 12px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 3px;
+}
+
+/* The cards carry the same colour code the rest of the app uses for the split: the group
+ * side (what every row shares) is slate, the candidate side (what a row varies) is teal, so
+ * a glance tells the two apart before the legend is read. Matches the slate left-rule the
+ * group-side Run-settings card wears in the editor. The Simulation-model card is neither: the
+ * latency model is a blis modeling-fidelity setting, not part of the work and not something
+ * the candidate competes on, so it wears a neutral grey that reads as a third category. */
+.nrform fieldset.nrwork {
+  border-left: 3px solid var(--alt-line);
+}
+
+.nrform fieldset.nrcand {
+  border-left: 3px solid var(--accent);
+}
+
+.nrform fieldset.nrsim {
+  border-left: 3px solid var(--warn-line);
+}
+
+/* The section titles wear the same tinted pill the editor's legends do (.editor legend):
+ * a bordered tag that straddles the card's top border, in the section's own colour. The
+ * teal default marks the candidate side; the group-side Work-offered card overrides it to
+ * slate below, so the two read apart at the title, matching the left-rule code they carry. */
+.nrform legend {
+  padding: 3px 10px;
+  background: var(--accent-soft);
+  border: 1px solid var(--accent);
+  border-radius: 3px;
+  color: var(--accent-ink);
+  font-size: 11.5px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.nrform fieldset.nrwork legend {
+  background: var(--alt-bg);
+  border-color: var(--alt-line);
+  color: var(--alt-ink);
+}
+
+/* The amber pill for the Simulation-model card: neither the slate group side nor the teal
+ * candidate side, so its own warm tint says "a third thing" at the title, distinct from both
+ * without reading as the red error/critical tone. */
+.nrform fieldset.nrsim legend {
+  background: var(--warn-bg);
+  border-color: var(--warn-line);
+  color: var(--warn-ink);
+}
+
+/* A single argument: a label and its control. Rows within a group are held together by
+ * the group card and this rhythm, not divided by hairlines, so the form reads as blocks
+ * of related knobs rather than a striped ledger. */
+.nrrow {
+  display: grid;
+  /* A wide label column so the longer field names sit on one line rather than wrapping and
+   * growing the row, and a control column that fills the rest of the card. Every control
+   * type fills this column — text and number inputs, the styled dropdown, the segmented
+   * controls — so their left and right edges line up down the form instead of each control
+   * choosing its own width. */
+  grid-template-columns: 200px minmax(0, 1fr);
+  gap: 12px;
+  align-items: center;
+  padding: 4px 0;
+}
+
+.nrlabel {
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.nrform input[type='text'],
+.nrform input[type='number'],
+.nrform select {
+  width: 100%;
+  padding: 6px 9px;
+  background: var(--paper);
+  color: var(--ink);
+  border: 1px solid var(--line-strong);
+  border-radius: 3px;
+  font-family: var(--font-mono);
+  font-size: 13.5px;
+}
+
+/* ---------- Styled dropdown (Select) ----------
+ * Replaces the native <select> app-wide so the open list wears the page design, which CSS
+ * cannot do to a native option popup. The closed trigger matches the .nrform / .editor
+ * control it stands in for exactly (same border, radius, mono type), so the two read as
+ * one system whether open or closed. */
+.sel {
+  position: relative;
+  width: 100%;
+}
+
+.sel-trigger {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 6px 9px;
+  background: var(--paper);
+  color: var(--ink);
+  border: 1px solid var(--line-strong);
+  border-radius: 3px;
+  font-family: var(--font-mono);
+  font-size: 13.5px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.sel-trigger:hover:not(:disabled) {
+  border-color: var(--accent);
+}
+
+.sel-trigger:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.sel-trigger:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 1px;
+}
+
+.sel.open .sel-trigger {
+  border-color: var(--accent);
+}
+
+.sel-value {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.sel-empty {
+  color: var(--muted);
+}
+
+.sel-arrow {
+  flex: 0 0 auto;
+  color: var(--muted);
+  transition: transform 120ms ease;
+}
+
+.sel.open .sel-arrow {
+  transform: rotate(180deg);
+}
+
+.sel-list {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  right: 0;
+  z-index: 30;
+  margin: 0;
+  padding: 4px;
+  list-style: none;
+  max-height: 288px;
+  overflow-y: auto;
+  background: var(--panel);
+  border: 1px solid var(--line-strong);
+  border-radius: 7px;
+  box-shadow: 0 8px 24px rgba(23, 28, 26, 0.14);
+}
+
+.sel-opt {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding: 7px 9px;
+  border-radius: 4px;
+  font-family: var(--font-mono);
+  font-size: 13px;
+  color: var(--ink);
+  cursor: pointer;
+}
+
+.sel-opt-label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.sel-opt.selected {
+  font-weight: 600;
+}
+
+.sel-opt.active {
+  background: var(--accent-soft);
+  color: var(--accent-ink);
+}
+
+.sel-opt.disabled {
+  color: var(--muted);
+  cursor: default;
+}
+
+/* The trailing hint ("preset"), in the trigger and each option: sans, muted, pushed right. */
+.sel-hint {
+  flex: 0 0 auto;
+  margin-left: auto;
+  font-family: var(--font-sans);
+  font-size: 11px;
+  font-weight: 400;
+  color: var(--muted);
+}
+
+.sel-opt.active .sel-hint {
+  color: var(--accent-ink);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sel-arrow,
+  details.nrflaggroup > summary::before {
+    transition: none;
+  }
+}
+
+.nrform input[aria-invalid='true'] {
+  border-color: var(--crit-line);
+  background: var(--crit-bg);
+}
+
+.nrerr {
+  margin: 0 0 6px;
+  padding-left: 162px;
+  font-size: 12.5px;
+  color: var(--crit-ink);
+}
+
+/* Segmented choice: adjacent cells sharing one border, so the set reads as one
+ * control and the chosen cell reads as filled rather than merely tinted. */
+.seg {
+  display: flex;
+}
+
+/* `seg-wrap`, not the bare `wrap`: the page container is `.wrap` (with its own large
+ * padding), so a segmented control tagged `wrap` would silently inherit that padding and
+ * balloon its row. Scope the flex-wrap modifier to the control. */
+.seg.seg-wrap {
+  flex-wrap: wrap;
+}
+
+.seg label {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 5px;
+  padding: 5px 11px;
+  margin-left: -1px;
+  border: 1px solid var(--line-strong);
+  background: var(--paper);
+  font-family: var(--font-mono);
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.seg label:first-child {
+  margin-left: 0;
+  border-radius: 3px 0 0 3px;
+}
+
+.seg label:last-child {
+  border-radius: 0 3px 3px 0;
+}
+
+.seg label:hover {
+  color: var(--accent-ink);
+  background: var(--accent-soft);
+}
+
+.seg label.on {
+  z-index: 1;
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--panel);
+  font-weight: 600;
+}
+
+.seg label em {
+  font-style: normal;
+  font-size: 11px;
+  opacity: 0.75;
+}
+
+.seg input {
+  position: absolute;
+  opacity: 0;
+  width: 0;
+  height: 0;
+}
+
+.seg label:has(input:focus-visible) {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+
+/* A segmented control the current model does not support (the expert-parallel toggle on a
+ * dense model): dimmed and unclickable, so it reads as inactive rather than merely off. The
+ * inputs already carry `disabled`; this is the matching visual state, at the same 0.5 opacity
+ * as a disabled Select trigger. */
+.seg.disabled {
+  opacity: 0.5;
+}
+
+.seg.disabled label {
+  cursor: not-allowed;
+}
+
+/* Suppress the hover affordance: a non-selected cell must not light up under the cursor. The
+ * selected cell keeps its filled look (dimmed by the container's opacity) rather than flipping
+ * to the hover tint, so it stays legible which side the disabled control rests on. */
+.seg.disabled label:hover {
+  color: var(--ink);
+  background: var(--paper);
+}
+
+.seg.disabled label.on,
+.seg.disabled label.on:hover {
+  color: var(--panel);
+  background: var(--accent);
+}
+
+/* In the Declare-a-run form each segmented control fills its field column, so its cells
+ * share the width equally rather than hugging the left. Mirrors the .editor .seg rule
+ * below and lines these controls up with the number inputs beside them. Wrapping controls
+ * (seg-wrap) grow each row's cells to the full width the same way. */
+.nrform .seg label {
+  flex: 1;
+  justify-content: center;
+}
+
+/* The read-only summary shown when a catalog workload is selected. */
+.nrsummary {
+  margin: 10px 0 8px;
+  padding: 12px 16px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--paper);
+}
+
+.nrsummaryline {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--ink);
+}
+
+.nrknobs {
+  margin: 4px 0 0;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.nrsummary .nrnote {
+  margin-top: 10px;
+}
+
+/* The simple inline custom workload, grouped under the workload selector. */
+.nrcard {
+  margin: 10px 0 4px;
+  padding: 10px 0 0;
+  border-top: 1px solid var(--line);
+}
+
+/* Inside the custom-workload card the rows sit a touch tighter than the default row rhythm,
+ * since the card's top edge already groups them and there are no hairlines to space around. */
+.nrcard .nrrow {
+  padding: 2px 0;
+}
+
+.nrnote {
+  margin: 10px 0 0;
+  font-size: 12.5px;
+  line-height: 1.55;
+  color: var(--muted);
+}
+
+.nrnote code {
+  color: var(--ink);
+  font-size: 11.5px;
+}
+
+/* A non-blocking heads-up under the custom-workload card: this custom workload matches one
+ * already saved, so the run reuses it rather than save a copy (one name per workload, P3).
+ * The warn tokens carry their own dark-mode values, so it reads in both themes. It layers
+ * on .nrnote, overriding the muted colour with the callout treatment. */
+.nrwarn {
+  padding: 8px 10px;
+  border: 1px solid var(--warn-line);
+  border-radius: 8px;
+  background: var(--warn-bg);
+  color: var(--warn-ink);
+}
+
+.nrwarn code {
+  color: var(--warn-ink);
+}
+
+/* ---------- Candidate knob groups ----------
+ * Inside the candidate (white) card the serving flags are grouped by theme, each group its
+ * own recessed panel: the pale graph-paper ground showing through a hairline-bordered well.
+ * That is the inverse of the Workload editor's white-on-pale cards, the same card language
+ * turned inside out for a card that lives inside another card, so the two read as one family
+ * without one sitting muddily on top of the other. The panel edge is the only group divider
+ * needed, so the rows inside carry no hairlines. Collapsed groups are the same panel showing
+ * only its header, with a chevron in place of the tick, so an open group and a closed one
+ * read as the same kind of thing. */
+.nrflaggroup {
+  margin-top: 10px;
+  padding: 6px 14px 8px;
+  background: var(--paper);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+}
+
+/* The group header borrows the Workload legend's voice (uppercase, letter-spaced, in the
+ * accent ink) rather than its filled pill, which would be heavy stacked seven deep inside
+ * one card. */
+details.nrflaggroup > summary {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  margin: 2px 0 4px;
+  font-family: var(--font-sans);
+  font-size: 11.5px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--accent-ink);
+}
+
+/* Closed, a collapsible group is just its header: drop the header-to-content spacing and
+ * the extra bottom padding so a folded panel is a tidy single bar, not a mostly-empty box. */
+details.nrflaggroup:not([open]) {
+  padding-bottom: 6px;
+}
+
+details.nrflaggroup:not([open]) > summary {
+  margin-bottom: 0;
+}
+
+/* A collapsible group swaps the tick for a chevron that turns down when the group opens,
+ * so the header advertises that it folds. */
+details.nrflaggroup > summary {
+  cursor: pointer;
+  list-style: none;
+}
+
+details.nrflaggroup > summary::-webkit-details-marker {
+  display: none;
+}
+
+details.nrflaggroup > summary::before {
+  content: '';
+  flex: 0 0 auto;
+  width: 7px;
+  height: 7px;
+  margin: 0 1px 2px 1px;
+  border-right: 2px solid var(--accent);
+  border-bottom: 2px solid var(--accent);
+  transform: rotate(-45deg);
+  transition: transform 120ms ease;
+}
+
+details.nrflaggroup[open] > summary::before {
+  transform: rotate(45deg);
+  margin-bottom: 0;
+}
+
+details.nrflaggroup > summary:hover {
+  color: var(--accent-ink);
+}
+
+details.nrflaggroup > summary:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+  border-radius: 2px;
+}
+
+/* ---------- Weighted-routing scorer profile ----------
+ * Shown below the routing-policy control only for the weighted policy: the scorers as
+ * multi-select bubbles (the .tag vocabulary the leaderboard filters use), then one compact
+ * weight field per scorer picked. It sits off the row grid so the bubbles can wrap freely. */
+.nrscorers {
+  margin: 10px 0 2px;
+  padding-top: 10px;
+  border-top: 1px solid var(--line);
+}
+
+.nrscorers .nrlabel {
+  display: block;
+  margin-bottom: 6px;
+}
+
+.nrscorerweights {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 18px;
+  margin-top: 10px;
+}
+
+.nrscorerweight {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  color: var(--muted);
+}
+
+.nrscorerweight input[type='number'] {
+  width: 72px;
+  max-width: 72px;
+}
+
+/* ---------- Declaration panel ---------- */
+
+.nrout {
+  position: sticky;
+  top: 24px;
+  min-width: 0;
+}
+
+.verdict {
+  padding: 16px 18px;
+  margin-bottom: 20px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-left: 4px solid var(--accent);
+  border-radius: 3px;
+}
+
+.verdict.new {
+  border-left-color: var(--alt-line);
+}
+
+.verdict.blocked {
+  border-left-color: var(--crit-line);
+  background: var(--crit-bg);
+}
+
+.verdict h3 {
+  margin: 0 0 6px;
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.verdict p {
+  margin: 0 0 6px;
+  font-size: 13.5px;
+  line-height: 1.55;
+}
+
+.verdict.blocked h3 {
+  color: var(--crit-ink);
+}
+
+.verdict ul {
+  margin: 0;
+  padding-left: 18px;
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--crit-ink);
+}
+
+.verdict .nrtitle {
+  font-weight: 600;
+}
+
+.verdict .nrpath {
+  margin: 0;
+  font-size: 12.5px;
+  color: var(--muted);
+}
+
+.copyblock {
+  margin-bottom: 18px;
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  background: var(--panel);
+  overflow: hidden;
+}
+
+/* Title and caption only — the copy button now sits on the command block below. The head
+ * must shrink below its content width, or a long cwd path or commit hash in the caption
+ * pushes the block wider than the panel and the table container clips it: min-width:0 lets
+ * it shrink and overflow-wrap breaks the long token (the caption `p` and title `h4` both). */
+.copyhead {
+  min-width: 0;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--line);
+}
+
+.copyhead h4 {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: 13px;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.copyhead p {
+  margin: 3px 0 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+
+/* The command block. Positioned so the copy button can anchor to its top-right corner,
+ * over the command it copies. */
+.copybody {
+  position: relative;
+}
+
+.copybtn {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  z-index: 1;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 11px;
+  background: var(--panel);
+  color: var(--ink);
+  border: 1px solid var(--line-strong);
+  border-radius: 3px;
+  font: inherit;
+  font-size: 12.5px;
+  cursor: pointer;
+}
+
+.copybtn:hover {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--panel);
+}
+
+.copybtn:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 1px;
+}
+
+/* The clipboard glyph: stroked in the button's current colour, so it inverts on hover
+ * with the rest of the button. */
+.copyico {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.3;
+  stroke-linejoin: round;
+}
+
+.copyblock pre,
+.nrargv pre {
+  margin: 0;
+  /* Right padding clears the copy button parked in the top-right corner, so the command's
+   * first line never slides under it. */
+  padding: 12px 84px 12px 14px;
+  max-height: 340px;
+  overflow: auto;
+  background: var(--paper);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.6;
+  white-space: pre;
+  tab-size: 2;
+}
+
+/* The reproduce panel shows the exact command that ran; it is the record, meant to be read
+ * whole, so it is never boxed into a vertical scroll — it expands to its full height. (The
+ * New-run YAML/CLI blocks keep the 340px cap; a full runs.yaml can be long.) */
+.repro .copyblock pre {
+  max-height: none;
+}
+
+.nrargv {
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  background: var(--panel);
+}
+
+.nrargv summary {
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.nrargv pre {
+  margin-top: 10px;
+  border: 1px solid var(--line);
+  border-radius: 3px;
+}
+
+.nrargv p {
+  margin: 10px 0 0;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+/* Run action ---------------------------------------------------------------- */
+
+.nrrun {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 18px;
+}
+
+.runbtn {
+  flex: none;
+  padding: 9px 18px;
+  background: var(--accent);
+  color: var(--panel);
+  border: 1px solid var(--accent);
+  border-radius: 3px;
+  font: inherit;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.runbtn:hover:not(:disabled) {
+  background: var(--accent-ink);
+  border-color: var(--accent-ink);
+}
+
+.runbtn:disabled {
+  opacity: 0.65;
+  cursor: progress;
+}
+
+.nrrunhint {
+  font-size: 12px;
+  color: var(--muted);
+  line-height: 1.5;
+}
+
+/* Run result ---------------------------------------------------------------- */
+
+.runresult {
+  padding: 16px 18px;
+  margin-bottom: 20px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-left: 4px solid var(--accent);
+  border-radius: 3px;
+}
+
+.runresult.dq {
+  border-left-color: var(--warn-line);
+  background: var(--warn-bg);
+}
+
+.runresult.err {
+  border-left-color: var(--crit-line);
+  background: var(--crit-bg);
+}
+
+.runresult h3 {
+  margin: 0 0 6px;
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.runresult.dq h3 {
+  color: var(--warn-ink);
+}
+
+.runresult.err h3 {
+  color: var(--crit-ink);
+}
+
+.runresult .nrpath {
+  margin: 0 0 10px;
+  font-size: 12.5px;
+  color: var(--muted);
+}
+
+.runwhy {
+  margin: 0 0 12px;
+  padding-left: 18px;
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--warn-ink);
+}
+
+.runmetrics {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px 16px;
+  margin: 0 0 12px;
+}
+
+.runmetrics div {
+  min-width: 0;
+}
+
+.runmetrics dt {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+}
+
+.runmetrics dd {
+  margin: 2px 0 0;
+  font-family: var(--font-mono);
+  font-size: 15px;
+  font-variant-numeric: tabular-nums;
+}
+
+.runmetrics dd small {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.nrclidetail {
+  margin-top: 12px;
+}
+
+.nrargvnote {
+  margin: 10px 0 0;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+@media (max-width: 900px) {
+  .nrgrid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .nrout {
+    position: static;
+  }
+}
+
+@media (max-width: 640px) {
+  .nrrow {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 6px;
+  }
+
+  .nrerr {
+    padding-left: 0;
+  }
+}
+
+/* ============================================================================
+ * Workloads tab: the catalog browser and the profile editor. Same instrument
+ * aesthetic — hairline rules, mono for authored values, teal for the one action
+ * to take. Self-contained so it sits apart from the table and form sections above.
+ * ========================================================================== */
+
+/* The catalog sits under the always-open new-workload editor; a rule sets it apart. */
+.editor + .catalog,
+.editor + p + .catalog {
+  margin-top: 28px;
+  padding-top: 24px;
+  border-top: 1px solid var(--line);
+}
+
+.catalog-head,
+.editor-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 16px;
+  margin-top: 8px;
+}
+
+.catalog-head h2,
+.catalog > h2,
+.editor-head h2 {
+  margin: 0;
+  font-size: 20px;
+}
+
+button.primary {
+  padding: 7px 14px;
+  background: var(--accent);
+  border: 1px solid var(--accent);
+  border-radius: 3px;
+  color: var(--panel);
+  font-family: var(--font-sans);
+  font-size: 13.5px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+button.primary:disabled {
+  background: var(--line-strong);
+  border-color: var(--line-strong);
+  cursor: not-allowed;
+}
+
+button.danger {
+  color: var(--crit-ink);
+  border-color: var(--crit-line);
+}
+
+.linkbtn {
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--accent-ink);
+  font: inherit;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+/* The saved-workloads gallery: hairline cards on the graph-paper ground, no drop shadow —
+ * a spec sheet's index, not a card-and-shadow kit. The chosen card takes the teal signal
+ * color reserved for "this is the one to look at". */
+.wgallery {
+  list-style: none;
+  margin: 16px 0 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: 12px;
+}
+
+/* A prompt above the list: sits between the section title and the rows, telling the reader
+ * the rows are the thing to act on. */
+.wlist-head {
+  margin: 4px 0 10px;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+/* Every saved workload as a full-width row, all shown at once (a list, not a gallery):
+ * busiest workload first, so the catalog opens on what is most compared. */
+.wlist {
+  list-style: none;
+  margin: 16px 0 0;
+  padding: 0;
+  border: 1px solid var(--line-strong);
+  border-radius: 3px;
+  background: var(--panel);
+  overflow: hidden;
+}
+
+.wrow {
+  display: flex;
+  align-items: stretch;
+}
+
+.wrow + .wrow {
+  border-top: 1px solid var(--line);
+}
+
+.wrow.selected {
+  background: var(--accent-soft);
+  box-shadow: inset 3px 0 0 var(--accent);
+}
+
+/* The row face is the selectable region: a button so the keyboard reaches it, filling the
+ * row left of the actions. Name, summary and meta sit on one line, wrapping when narrow. */
+.wrow-face {
+  display: flex;
+  flex: 1;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 14px;
+  min-width: 0;
+  padding: 12px 14px;
+  border: none;
+  background: none;
+  text-align: left;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+}
+
+.wrow-face:hover {
+  background: var(--accent-soft);
+}
+
+.wrow-face:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: -2px;
+}
+
+.wrow-name {
+  font-family: var(--font-mono);
+  font-weight: 600;
+  font-size: 14px;
+}
+
+.wrow.selected .wrow-name {
+  color: var(--accent-ink);
+}
+
+.wrow-summary {
+  flex: 1;
+  min-width: 0;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+.wrow-meta {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 10px;
+}
+
+.wrow-meta .xref {
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  color: var(--muted);
+}
+
+.wrow-actions {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 6px;
+  padding: 0 14px;
+}
+
+/* Delete: quiet by default — it is the only action and a destructive one — warming to the
+ * critical palette on hover and focus so its intent is unmistakable before the click. The
+ * click only opens the confirm dialog; nothing is removed until that is confirmed. */
+.wcard-del {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 11px;
+  background: var(--paper);
+  border: 1px solid var(--line-strong);
+  border-radius: 3px;
+  color: var(--muted);
+  font-family: var(--font-sans);
+  font-size: 12.5px;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.wcard-del-icon {
+  flex: none;
+}
+
+.wcard-del:hover:not(:disabled),
+.wcard-del:focus-visible {
+  color: var(--crit-ink);
+  border-color: var(--crit-line);
+  background: var(--crit-bg);
+}
+
+.wcard-del:focus-visible {
+  outline: 2px solid var(--crit-line);
+  outline-offset: 1px;
+}
+
+.wcard-del:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+/* Shown until a card is chosen. */
+.pick-hint {
+  margin-top: 16px;
+  font-size: 13px;
+}
+
+/* The detail panel: the chosen workload's complete definition, below the gallery. */
+.wdetail {
+  margin-top: 20px;
+  padding-top: 18px;
+  border-top: 1px solid var(--line-strong);
+}
+
+.wdetail-head {
+  margin-bottom: 14px;
+}
+
+.wdetail-head h3 {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.wdetail-knobs {
+  margin: 4px 0 0;
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  color: var(--muted);
+}
+
+.wdetail-fields {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 12px 24px;
+  margin: 0;
+  padding: 16px 18px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 3px;
+}
+
+.wdetail-fields dt {
+  margin-bottom: 3px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.wdetail-fields dd {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: 14px;
+}
+
+/* The read-only badge on a shipped preset (§11), beside its name. Amber, matching the
+ * "preset" tag on the leaderboard cards (.tag-preset). */
+.badge.builtin {
+  display: inline-block;
+  margin-left: 8px;
+  padding: 1px 7px;
+  border-radius: 10px;
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  border: 1px solid var(--warn-line);
+  background: var(--warn-bg);
+  color: var(--warn-ink);
+  vertical-align: middle;
+}
+
+.variant {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 3px;
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  border: 1px solid var(--line-strong);
+  background: var(--paper);
+  color: var(--muted);
+}
+
+/* Teal, matching the "distribution" tag on the leaderboard cards (.tag-distribution). */
+.variant-distribution {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--accent-ink);
+}
+
+.variant-workload-spec {
+  border-color: var(--alt-line);
+  background: var(--alt-bg);
+  color: var(--alt-ink);
+}
+
+.empty .linkbtn {
+  font-size: inherit;
+}
+
+/* Editor — the two panes span the full content width; the profile knobs above them stay
+ * narrow so a lone Name field does not stretch across the page. */
+.editor {
+  max-width: none;
+}
+
+/* The first row: the Name field spanning the width, with Reset all beside it. The button's
+ * column carries a blank label so the control lines up with the Name input, no magic offsets. */
+.name-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.name-row .editor-name {
+  flex: 1;
+}
+
+/* Name is the workload's identity — the anchor of the editor, so it reads as a title
+ * rather than one more mono field lost among the knobs: an accent-tinted label above a
+ * larger, sans-serif input with a stronger border. */
+.editor-name label {
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--accent-ink);
+}
+
+.editor-name input {
+  padding: 9px 12px;
+  background: var(--accent-soft);
+  border: 1.5px solid var(--accent);
+  border-radius: 4px;
+  font-family: var(--font-sans);
+  font-size: 17px;
+  font-weight: 600;
+  color: var(--accent-ink);
+}
+
+.editor-name input::placeholder {
+  font-weight: 400;
+  color: var(--muted);
+}
+
+.clear-field {
+  flex: 0 0 auto;
+}
+
+.clear-all {
+  padding: 7px 14px;
+  background: var(--paper);
+  border: 1px solid var(--line-strong);
+  border-radius: 3px;
+  font-family: var(--font-sans);
+  font-size: 13px;
+  color: var(--ink);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.clear-all:hover {
+  border-color: var(--accent);
+  color: var(--accent-ink);
+}
+
+.editor .field {
+  margin: 12px 0;
+}
+
+.editor .field-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+}
+
+.editor .field-row .field {
+  flex: 1;
+  min-width: 150px;
+}
+
+.editor label {
+  display: block;
+  margin-bottom: 4px;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.editor input,
+.editor select,
+.editor textarea {
+  width: 100%;
+  padding: 6px 9px;
+  background: var(--paper);
+  color: var(--ink);
+  border: 1px solid var(--line-strong);
+  border-radius: 3px;
+  font-family: var(--font-mono);
+  font-size: 13.5px;
+}
+
+.editor textarea {
+  resize: vertical;
+  line-height: 1.45;
+}
+
+/* The two panes: the WorkloadSpec form and its live YAML, side by side and synced. They
+ * stack on a narrow viewport so neither is squeezed. */
+.spec-panes {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 22px;
+  align-items: stretch;
+  margin: 18px 0 8px;
+}
+
+/* The last field card carries no trailing margin, so the YAML pane beside it stretches to
+ * the bottom of the fields and no further — the Add client button sits below the panes. */
+.spec-form > :last-child {
+  margin-bottom: 0;
+}
+
+/* The YAML pane is a fieldset like the form's cards, so it wears the same border and
+ * tinted legend. It is a flex column with the textarea flexing to fill, so it should be
+ * exactly as tall as the form column beside it (the form is the taller of the two).
+ *
+ * A <fieldset> ignores the grid's `align-items: stretch` — it sizes to its own content and
+ * will not grow to the row height the way a plain block does, so the pane came up short.
+ * height: 100% forces it: a grid item's percentage height resolves against the grid area's
+ * used height, so 100% is the form column's height. margin-bottom: 0 keeps the border box
+ * (not a border box plus the inherited 16px margin) filling that height, so the fieldset's
+ * bottom border lands on the form's bottom card border rather than a notch above it. */
+.spec-yaml {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  margin-bottom: 0;
+}
+
+.spec-yaml .dek {
+  margin: 4px 0 10px;
+}
+
+@media (max-width: 880px) {
+  .spec-panes {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+/* Every editor fieldset — the Run settings knobs and each form section — is a white
+ * card on the pale ground, with a tinted legend so the section reads as a labelled
+ * block rather than a bare form. */
+.editor fieldset {
+  position: relative;
+  min-width: 0;
+  margin: 0 0 16px;
+  padding: 8px 16px 16px;
+  background: var(--panel);
+  border: 1px solid var(--line-strong);
+  border-radius: 5px;
+}
+
+.editor legend {
+  padding: 3px 10px;
+  background: var(--accent-soft);
+  border: 1px solid var(--accent);
+  border-radius: 3px;
+  color: var(--accent-ink);
+  font-size: 11.5px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+/* The Run settings card is group-side, not spec — a slate legend and left rule set it
+ * apart from the teal-legended spec sections below it. */
+.knobs {
+  border-left: 3px solid var(--alt-line);
+}
+
+.knobs legend {
+  background: var(--alt-bg);
+  border-color: var(--alt-line);
+  color: var(--alt-ink);
+}
+
+/* No line-length cap: the caption fills the card and wraps only at its right edge, rather
+ * than breaking early and leaving the rest of a wide card empty. */
+.knobs .dek {
+  margin: 6px 0 12px;
+}
+
+.spec-form .field-row .field {
+  min-width: 120px;
+}
+
+/* The load and streaming controls reuse the .seg segmented vocabulary inside the editor,
+ * where the block `.editor label` rule would otherwise stack their cells one above the
+ * other. Keep them inline and drop the block label's bottom margin; the .seg rules still
+ * paint the chosen cell. Each cell shares the field width equally so the control fills the
+ * field like the number inputs beside it, rather than sitting narrow against the left. */
+.editor .seg label {
+  display: inline-flex;
+  flex: 1;
+  justify-content: center;
+  margin-bottom: 0;
+}
+
+.spec-yaml textarea {
+  flex: 1;
+  /* A small floor so a short form still leaves a usable box; the form is normally the
+   * taller column, so the textarea grows to match it. No manual resize — it tracks the
+   * form's height rather than the reader's drag. */
+  min-height: 200px;
+  background: var(--paper);
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  resize: none;
+}
+
+/* A client card is removed by the red minus button pinned to its top-right corner — the
+ * counterpart to the legend tag on the top-left. Red at rest to read as delete; it fills
+ * solid on hover. */
+.card-remove {
+  position: absolute;
+  top: 10px;
+  right: 12px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  background: var(--crit-bg);
+  border: 1px solid var(--crit-line);
+  border-radius: 5px;
+  color: var(--crit-ink);
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.card-remove:hover {
+  background: var(--crit-ink);
+  border-color: var(--crit-ink);
+  color: var(--panel);
+}
+
+.card-remove:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 1px;
+}
+
+/* Add client sits below the two panes — a dashed outline reads as "make a new one". It is
+ * outside the panes so the YAML pane matches the form cards' height, not the button's. */
+.add-client {
+  display: inline-block;
+  margin: 2px 0 4px;
+  padding: 7px 14px;
+  background: var(--paper);
+  border: 1px dashed var(--line-strong);
+  border-radius: 3px;
+  color: var(--accent-ink);
+  font-family: var(--font-sans);
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.add-client:hover {
+  border-color: var(--accent);
+  border-style: solid;
+}
+
+.issue {
+  margin: 4px 0 0;
+  font-size: 12.5px;
+  color: var(--crit-ink);
+}
+
+.verdict {
+  margin: 16px 0;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--accent);
+  background: var(--panel);
+}
+
+.verdict p {
+  margin: 4px 0;
+}
+
+.verdict .note {
+  font-size: 12.5px;
+  color: var(--alt-ink);
+}
+
+.editor-actions {
+  display: flex;
+  gap: 10px;
+  margin-top: 18px;
+}
+
+.editor-actions button:not(.primary) {
+  padding: 7px 14px;
+  background: var(--paper);
+  border: 1px solid var(--line-strong);
+  border-radius: 3px;
+  font-size: 13.5px;
+  cursor: pointer;
+}
+
+/* ---------- Modal (confirm dialog) ----------
+ * A hairline panel on a dimmed scrim — the same graph-paper, no-shadow idiom as the cards,
+ * elevated by the scrim rather than a drop shadow. Sits above the fixed tooltip layer. */
+.modal-scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: rgba(23, 28, 26, 0.42); /* --ink at low alpha */
+}
+
+.modal {
+  width: 100%;
+  max-width: 440px;
+  background: var(--panel);
+  border: 1px solid var(--line-strong);
+  border-radius: 4px;
+  padding: 20px 22px 18px;
+}
+
+.modal-title {
+  margin: 0 0 8px;
+  font-size: 18px;
+}
+
+.modal-body {
+  margin: 0 0 18px;
+  font-size: 13.5px;
+  line-height: 1.5;
+}
+
+.modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.modal-actions button {
+  padding: 7px 14px;
+  border-radius: 3px;
+  font-family: var(--font-sans);
+  font-size: 13.5px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+/* Cancel: the plain, unweighted choice. */
+.modal-actions button:not(.danger-solid) {
+  background: var(--paper);
+  border: 1px solid var(--line-strong);
+  color: var(--ink);
+}
+
+/* Confirm: a solid critical fill, so the destructive action carries the weight — distinct
+ * from the catalog's outline `.danger` button that merely opens this dialog. */
+.modal-actions button.danger-solid {
+  background: var(--crit-ink);
+  border: 1px solid var(--crit-ink);
+  color: var(--panel);
+}
+
+.modal-actions button:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .modal-scrim {
+    animation: modal-scrim-in 120ms ease;
+  }
+  .modal {
+    animation: modal-rise 140ms ease;
+  }
+}
+
+@keyframes modal-scrim-in {
+  from {
+    opacity: 0;
+  }
+}
+
+@keyframes modal-rise {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+}

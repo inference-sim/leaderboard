@@ -1,0 +1,16 @@
+.proto/
+node_modules/
+dist/
+blis
+.superpowers/
+# Superpowers plans and specs are working notes, not shipped docs.
+docs/superpowers/plans/
+docs/superpowers/specs/
+bin/
+*.tsbuildinfo
+# results/ is regenerable output: blis run records (leaderboard run / serve) and the
+# workload catalog serve writes alongside them (see cmd/leaderboard/serve.go). The
+# repo ships the code; results are generated, not committed. The dir
+# itself is kept via .gitkeep so a fresh checkout has somewhere to write.
+results/*
+!results/.gitkeep

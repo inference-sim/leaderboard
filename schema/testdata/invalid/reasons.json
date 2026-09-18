@@ -1,0 +1,12 @@
+{
+  "unknown-group-field.json": "additional properties 'hardware' not allowed",
+  "bad-load-kind.json": "/group/workload/load/kind",
+  "missing-required-metric.json": "missing property 'ttft_p99_ms'",
+  "raw-carries-requests.json": "/metrics_raw",
+  "bad-group-id.json": "/group_id",
+  "dq-missing-class.json": "missing property 'class'",
+  "preemption-recompute.json": "/deployment/preemption_policy",
+  "workload-spec-missing-spec.json": "missing property 'spec'",
+  "bad-scorer-weight.json": "/deployment/routing_scorers/0/weight",
+  "bad-moe-backend.json": "/deployment/moe_comm_backend"
+}

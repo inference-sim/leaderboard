@@ -1,0 +1,9 @@
+# Keep upstream/ — blis-build compiles it and the runtime image bundles its
+# .git for provenance. Only drop things the build regenerates or never needs.
+/.git
+/bin
+web/dist
+**/node_modules
+# results/ is regenerable output, not shipped: the image creates an empty
+# /app/results at runtime (see Dockerfile), so keep local records out of the build.
+/results
