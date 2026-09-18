@@ -1,0 +1,10 @@
+{
+  // Production build type-check. Extends the base config but drops the test
+  // files: they import fixtures from ../../prototypes (outside web/), which the
+  // Docker web stage does not copy into its build context, so type-checking them
+  // here would fail the image build. Tests are still type-checked by
+  // `npm run typecheck` (make web-lint) and run by `make web-test`, where the
+  // full checkout is present.
+  "extends": "./tsconfig.json",
+  "exclude": ["**/*.test.ts", "**/*.test.tsx"]
+}
