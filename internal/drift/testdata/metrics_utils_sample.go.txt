@@ -1,0 +1,28 @@
+package sim
+
+type MetricsOutput struct {
+	InstanceID        string  `json:"instance_id"`
+	CompletedRequests int     `json:"completed_requests"`
+	E2EP99Ms          float64 `json:"e2e_p99_ms"`
+	CacheHitRate      *float64 `json:"cache_hit_rate,omitempty"`
+	Requests          []int    `json:"requests,omitempty"`
+	Internal          string   `json:"-"`
+	Untagged          string
+	EmptyName         string `json:","`
+	OtherTagged       string `db:"other"`
+	NonOmitOpt        string `json:"non_omit,string"`
+	unexported        string
+}
+
+type Embedder struct {
+	Inline
+	InstanceID string `json:"instance_id"`
+}
+
+type Inline struct {
+	Nope string `json:"nope"`
+}
+
+type Unrelated struct {
+	Nope string `json:"nope"`
+}
