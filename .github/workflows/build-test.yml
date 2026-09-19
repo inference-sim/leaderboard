@@ -1,0 +1,47 @@
+name: build-test
+
+# Validate that the release container image builds, without publishing it.
+# This mirrors the build in .github/workflows/release.yml step-for-step (same
+# Dockerfile, same upstream checkout, same platforms) but with push: false, so a
+# broken image build is caught on every PR and on main rather than at release time
+# when a tag triggers the real push to GHCR. Keep the build steps here in sync with
+# release.yml; the only intended difference is that this one never pushes.
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read            # no packages: write — this workflow never pushes
+
+jobs:
+  image-build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out leaderboard
+        uses: actions/checkout@v4
+
+      - name: Check out blis (upstream)
+        uses: actions/checkout@v4
+        with:
+          repository: inference-sim/inference-sim
+          path: upstream
+          fetch-depth: 0                 # full .git — GitProvenance needs real history
+          # If inference-sim/inference-sim is PRIVATE, the default GITHUB_TOKEN cannot read
+          # it. Provide a PAT or GitHub App token with read access instead:
+          # token: ${{ secrets.UPSTREAM_READ_TOKEN }}
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@v3
+
+      # No GHCR login step: with push: false the image is built and discarded,
+      # never uploaded, so no registry credentials are needed.
+      - name: Build image (no push)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: false
