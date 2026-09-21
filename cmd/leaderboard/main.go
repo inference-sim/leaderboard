@@ -26,7 +26,8 @@ $LEADERBOARD_RESULTS at the repo's results/ for local dev, or at a persistent vo
 in a container.
 
 blis is always executed with its own checkout as the working directory: it resolves
-defaults.yaml, hardware_config.json and model_configs/ relative to cwd.
+defaults.yaml and hardware_config.json relative to cwd. The model catalog is located
+via the BLIS_CATALOG env var (no default), inherited by the blis subprocess.
 `
 
 func main() {

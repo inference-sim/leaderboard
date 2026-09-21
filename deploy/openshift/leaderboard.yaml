@@ -10,9 +10,10 @@
 #                             relative to the process working directory (/app)
 #   /app/inference-sim        the upstream checkout, passed as -blis. It must
 #                             contain a built ./blis (make blis), defaults.yaml,
-#                             hardware_config.json, model_configs/, and a .git
-#                             directory (blis records the upstream commit and
-#                             dirty flag as run provenance via `git`).
+#                             hardware_config.json, a .git directory (blis records
+#                             the upstream commit and dirty flag as run provenance
+#                             via `git`), and the bundled blis-catalog/ (see
+#                             BLIS_CATALOG below).
 #   git on PATH               used for that provenance capture.
 #   writable /tmp             blis run/spec scratch files (emptyDir below).
 #   writable /data            results/<group_id>/<run_id>.json and workloads.yaml
@@ -99,13 +100,15 @@ spec:
           workingDir: /app
           env:
             # Upstream blis (#1774) requires an explicit catalog CLONE ROOT — there is
-            # no default and no search path — and refuses any run without it. The image
-            # bundles the catalog tree at /app/inference-sim/model_configs (flat model
-            # entries plus workloads/ and devices/), so point blis at it here. This env
-            # var is inherited by every blis subprocess the server spawns (both the run
-            # path and the workload-spec validation probe), which -blis/args cannot cover.
+            # no default and no search path — and refuses any run without it. Since
+            # inference-sim#1797 the catalog is the separate blis-catalog repo (the old
+            # in-repo model_configs/ tree was deleted); the image bundles it at
+            # /app/inference-sim/blis-catalog (models/<name>/config.json + workloads/ +
+            # devices/), so point blis at that clone root here. This env var is inherited
+            # by every blis subprocess the server spawns (both the run path and the
+            # workload-spec validation probe), which -blis/args cannot cover.
             - name: BLIS_CATALOG
-              value: /app/inference-sim/model_configs
+              value: /app/inference-sim/blis-catalog
             # Results directory. It lives on the /data PVC (mounted below) so it is
             # the only state that survives a restart. serve reads it via -out, whose
             # default is this env var; keep it inside the /data mount.

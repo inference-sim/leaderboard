@@ -4,7 +4,9 @@
 #   leaderboard/     this repo's WORKING TREE (carries the uncommitted serve feature)
 #   inference-sim/   a shallow clone of the upstream checkout at its committed HEAD,
 #                    plus working-tree runtime config (defaults.yaml,
-#                    hardware_config.json, model_configs/) overlaid in.
+#                    hardware_config.json) overlaid in.
+#   blis-catalog/    a shallow clone of the model catalog repo (bundled at
+#                    /app/inference-sim/blis-catalog; BLIS_CATALOG points at it).
 # Do not `docker build` this file against the repo root directly — run build.sh.
 #
 # Go stages run on the builder's native arch and cross-compile to $TARGETARCH, so
@@ -51,15 +53,21 @@ ENV HOME=/app
 WORKDIR /app
 COPY --from=gobuild /out/leaderboard /app/leaderboard
 COPY --from=web     /src/web/dist    /app/web/dist
-# blis and everything it resolves relative to its own cwd (/app/inference-sim).
+# blis and the config it resolves relative to its own cwd (/app/inference-sim).
 COPY --from=gobuild /out/blis        /app/inference-sim/blis
 COPY inference-sim/defaults.yaml inference-sim/hardware_config.json /app/inference-sim/
-COPY inference-sim/model_configs /app/inference-sim/model_configs
 COPY inference-sim/.git          /app/inference-sim/.git
+# Model catalog: the separate blis-catalog repo (upstream deleted the in-repo
+# model_configs/ tree in inference-sim#1797). blis has no default catalog, so
+# BLIS_CATALOG (set below) points at this clone-root. build.sh stages it.
+COPY blis-catalog /app/inference-sim/blis-catalog
 # OpenShift restricted-v2: arbitrary UID, gid 0. Make the tree group-root writable
 # so git can refresh its index and the process can read everything.
 RUN chgrp -R 0 /app && chmod -R g=u /app
 EXPOSE 8080
+# blis resolves the model catalog only via BLIS_CATALOG (no default); point it at
+# the bundled blis-catalog clone-root. The Deployment sets the same value explicitly.
+ENV BLIS_CATALOG=/app/inference-sim/blis-catalog
 # Results land on the /data PVC. Set by env, not by -out, so the Deployment and a
 # bare `docker run` agree without repeating the path in args; the Deployment sets
 # the same LEADERBOARD_RESULTS explicitly.

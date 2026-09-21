@@ -37,11 +37,25 @@ rsync -a \
 git clone --quiet --depth 1 "file://${INFSIM}" "${CTX}/inference-sim"
 # Overlay working-tree runtime config that may be untracked in that commit.
 cp "${INFSIM}/defaults.yaml" "${INFSIM}/hardware_config.json" "${CTX}/inference-sim/"
-rm -rf "${CTX}/inference-sim/model_configs"
-cp -R "${INFSIM}/model_configs" "${CTX}/inference-sim/model_configs"
+
+# blis-catalog: the model catalog is a separate repo now (upstream deleted the in-repo
+# model_configs/ tree, inference-sim#1797). Bundle a shallow clone; the Dockerfile COPYs
+# it to /app/inference-sim/blis-catalog and BLIS_CATALOG points there. Prefer a local
+# checkout at ../blis-catalog, else clone from GitHub. Override with BLIS_CATALOG_SRC.
+CATALOG_SRC="${BLIS_CATALOG_SRC:-}"
+if [ -z "${CATALOG_SRC}" ]; then
+  if [ -d "${LEADERBOARD}/../blis-catalog/.git" ]; then
+    CATALOG_SRC="file://$(cd "${LEADERBOARD}/../blis-catalog" && pwd)"
+  else
+    CATALOG_SRC="https://github.com/inference-sim/blis-catalog.git"
+  fi
+fi
+git clone --quiet --depth 1 "${CATALOG_SRC}" "${CTX}/blis-catalog"
+rm -rf "${CTX}/blis-catalog/.git"   # config-only; no provenance needed, keep the image lean
 
 echo ">> upstream provenance in image: $(git -C "${CTX}/inference-sim" rev-parse --short=8 HEAD)"
 echo ">> shallow .git size: $(du -sh "${CTX}/inference-sim/.git" | cut -f1)"
+echo ">> model catalog: ${CATALOG_SRC} ($(find "${CTX}/blis-catalog/models" -maxdepth 1 -mindepth 1 -type d 2>/dev/null | wc -l | tr -d ' ') models)"
 
 echo ">> building ${IMAGE} for ${PLATFORM}"
 # docker's daemon/buildx is not always up on this host; podman is daemon-less and
