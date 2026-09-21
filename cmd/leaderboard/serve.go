@@ -169,7 +169,7 @@ func (s *server) runOnce(g schema.Group, runID string, dep schema.Deployment, wo
 // which requires --model/--hardware even with --workload-spec and has no top-level
 // model field — will parse and start a spec. They are only to surface the spec's own
 // errors; the model actually run is chosen later, in Declare-a-run (P6). qwen/qwen3-14b
-// is in the committed model_configs cache and H100 in hardware_config.json, so the
+// is in the bundled blis-catalog (BLIS_CATALOG) and H100 in hardware_config.json, so the
 // smoke run stays offline.
 const (
 	probeModel    = "qwen/qwen3-14b"

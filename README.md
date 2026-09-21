@@ -37,10 +37,15 @@ go build -o blis main.go
 
 ### Producing a result to rank
 
-Run from the `inference-sim` repo root — `blis` resolves `defaults.yaml` and the
-`model_configs/` cache relative to the working directory.
+Run from the `inference-sim` repo root — `blis` resolves `defaults.yaml` relative to
+the working directory. The model catalog is external and must be located explicitly:
+`blis` has no default catalog and no search path, so set `BLIS_CATALOG` (or pass
+`--catalog`) to a clone of the [`blis-catalog`](https://github.com/inference-sim/blis-catalog)
+repo. The leaderboard image bundles it; for a raw run, clone it once.
 
 ```bash
+git clone https://github.com/inference-sim/blis-catalog.git
+export BLIS_CATALOG="$PWD/blis-catalog"
 cd ../inference-sim
 ./blis run --model qwen/qwen3-14b --hardware H100 --tp 1 \
   --num-requests 2000 --metrics-path result.json
@@ -65,17 +70,26 @@ Practical notes:
   (`trained-physics`) refuses to run without them unless the model has a
   `defaults.yaml` entry, and omitting them silently defaults to H100 / TP=1.
 - `--model` must be org-prefixed (`qwen/qwen3-14b`), which is how `defaults.yaml`
-  is keyed — the bare directory names under `model_configs/` do not resolve.
+  is keyed.
 - Valid `--hardware` names come from `../inference-sim/hardware_config.json`.
-- On first run BLIS fetches the model's `config.json` from HuggingFace and caches
-  it in `model_configs/`. Set `HF_TOKEN` for gated models and to avoid rate limits.
+- BLIS fetches nothing at run time: a model runs only if its `config.json` is
+  committed in the catalog at `<BLIS_CATALOG>/models/<name>/config.json`, otherwise
+  the run is refused, naming the path the entry belongs at. Add a model by committing
+  its `config.json` to `blis-catalog`.
 
 ## Building and running the leaderboard
 
+Results are read and written under `$LEADERBOARD_RESULTS` (default
+`~/leaderboard-results`; `-out` overrides it). For local dev, point it at the repo so
+you can see the `results/` tree change with your edits: `export LEADERBOARD_RESULTS=results`,
+or just use the `make` targets, which set it for you. The container image and the
+OpenShift deployment set it to a persistent-volume path instead.
+
 ```bash
+export LEADERBOARD_RESULTS=results   # local dev: write into the repo tree (make sets this too)
 make blis                    # build the upstream simulator (Go >= 1.24)
 make build                   # bin/leaderboard
-./bin/leaderboard run -runs runs.yaml   # execute a run declaration -> results/<group_id>/<run_id>.json
+./bin/leaderboard run -runs runs.yaml   # execute a run declaration -> $LEADERBOARD_RESULTS/<group_id>/<run_id>.json
 ./bin/leaderboard validate   # schema, ids, filing, and upstream drift
 ./bin/leaderboard verify     # re-run and diff; BLIS is deterministic, so a diff is a bug
 

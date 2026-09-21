@@ -2,6 +2,19 @@
 # `integration`, which need the sibling ../inference-sim checkout.
 BLIS_DIR := ../inference-sim
 
+# Where the CLI reads and writes results. Local dev keeps them in the repo tree so
+# the directory structure is visible alongside code changes; override to write
+# elsewhere. The container image and OpenShift set this to a PVC-backed path.
+LEADERBOARD_RESULTS ?= results
+export LEADERBOARD_RESULTS
+
+# blis's model catalog is a separate repo (inference-sim#1797 deleted the in-repo
+# model_configs/ tree). blis has no default, so point BLIS_CATALOG at a local
+# blis-catalog clone — by convention a sibling of ../inference-sim. Override if yours
+# lives elsewhere: `git clone https://github.com/inference-sim/blis-catalog.git`.
+BLIS_CATALOG ?= $(abspath $(BLIS_DIR)/../blis-catalog)
+export BLIS_CATALOG
+
 .PHONY: all test lint build blis drift integration serve web-install web-test web-build web-lint web-dev clean
 
 all: lint test build

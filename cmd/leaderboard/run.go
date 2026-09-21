@@ -21,8 +21,25 @@ type commonFlags struct {
 
 func (c *commonFlags) bind(fs *flag.FlagSet) {
 	fs.StringVar(&c.runsPath, "runs", "runs.yaml", "path to the run declaration")
-	fs.StringVar(&c.outDir, "out", "results", "directory to write results into")
+	fs.StringVar(&c.outDir, "out", defaultResultsDir(),
+		"directory to write results into (default $LEADERBOARD_RESULTS, else ~/leaderboard-results)")
 	fs.StringVar(&c.blisDir, "blis", blisrun.Cwd, "upstream inference-sim checkout")
+}
+
+// defaultResultsDir is the -out default. It reads $LEADERBOARD_RESULTS so the
+// results location is chosen by environment rather than baked into flags: local
+// dev points it at the repo's results/ so changes are visible in the tree, while
+// the container image and the OpenShift deployment set it to the PVC-backed path
+// that survives restarts. When unset it falls back to ~/leaderboard-results, which
+// keeps stray runs out of the repo. An explicit -out always wins over both.
+func defaultResultsDir() string {
+	if dir := os.Getenv("LEADERBOARD_RESULTS"); dir != "" {
+		return dir
+	}
+	if home, err := os.UserHomeDir(); err == nil {
+		return filepath.Join(home, "leaderboard-results")
+	}
+	return "leaderboard-results"
 }
 
 func loadPlan(c commonFlags) (*spec.Plan, error) {

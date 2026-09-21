@@ -15,13 +15,19 @@ import (
 const usage = `leaderboard — collect and check BLIS results
 
 usage:
-  leaderboard run      [-runs runs.yaml] [-out results] [-blis ../inference-sim] [-keep-requests]
-  leaderboard serve    [-out results] [-blis ../inference-sim] [-addr :8080]
-  leaderboard validate [-runs runs.yaml] [-out results] [-blis ../inference-sim]
-  leaderboard verify   [-runs runs.yaml] [-out results] [-blis ../inference-sim] [-run ID]
+  leaderboard run      [-runs runs.yaml] [-out DIR] [-blis ../inference-sim] [-keep-requests]
+  leaderboard serve    [-out DIR] [-blis ../inference-sim] [-addr :8080]
+  leaderboard validate [-runs runs.yaml] [-out DIR] [-blis ../inference-sim]
+  leaderboard verify   [-runs runs.yaml] [-out DIR] [-blis ../inference-sim] [-run ID]
+
+-out is where results are read and written. It defaults to $LEADERBOARD_RESULTS, or
+~/leaderboard-results when that is unset; an explicit -out overrides both. Point
+$LEADERBOARD_RESULTS at the repo's results/ for local dev, or at a persistent volume
+in a container.
 
 blis is always executed with its own checkout as the working directory: it resolves
-defaults.yaml, hardware_config.json and model_configs/ relative to cwd.
+defaults.yaml and hardware_config.json relative to cwd. The model catalog is located
+via the BLIS_CATALOG env var (no default), inherited by the blis subprocess.
 `
 
 func main() {

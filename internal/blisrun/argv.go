@@ -10,9 +10,10 @@ import (
 	"github.com/inference-sim/leaderboard/internal/schema"
 )
 
-// Cwd is the working directory blis must be run from: it resolves defaults.yaml,
-// hardware_config.json, and the model_configs/ cache relative to cwd, and fails or
-// silently mis-defaults otherwise.
+// Cwd is the working directory blis must be run from: it resolves defaults.yaml and
+// hardware_config.json relative to cwd, and fails or silently mis-defaults otherwise.
+// The model catalog is separate: blis locates it via the BLIS_CATALOG env var (no
+// default), which the blis subprocess inherits from this process's environment.
 const Cwd = "../inference-sim"
 
 // The blis defaults for the PD KV-transfer physics (cmd/root.go). A disaggregated run

@@ -27,7 +27,7 @@ make lint                # gofmt -l + go vet
 make build               # bin/leaderboard
 make drift               # fail if upstream MetricsOutput gained a required field
 make blis                # build the upstream simulator this repo consumes
-make integration         # real blis runs; needs make blis and the model_configs/ cache
+make integration         # real blis runs; needs make blis and BLIS_CATALOG (a blis-catalog clone)
 make web-install         # npm ci
 make web-test            # Vitest
 make web-lint            # tsc --noEmit
@@ -46,8 +46,12 @@ run those two with the sandbox disabled.
   there, in their own commit, on their own branch — never mixed into a leaderboard
   change. Never assume its working tree is clean or on `main`; check.
 - `blis` must be invoked with `../inference-sim` as the working directory. It
-  resolves `defaults.yaml`, `hardware_config.json`, and the `model_configs/` cache
-  relative to cwd, and fails or silently mis-defaults otherwise.
+  resolves `defaults.yaml` and `hardware_config.json` relative to cwd, and fails or
+  silently mis-defaults otherwise. The model catalog is separate: since
+  inference-sim#1797 the in-repo `model_configs/` tree is gone, and `blis` locates
+  the catalog only via `BLIS_CATALOG` (or `--catalog`) pointing at a
+  [`blis-catalog`](https://github.com/inference-sim/blis-catalog) clone — no default,
+  no search path. The blis subprocess inherits `BLIS_CATALOG` from `leaderboard`'s env.
 - BLIS is deterministic: identical flags and `--seed` give identical output. Treat
   a metrics JSON as reproducible, and treat a diff in output with no flag change as
   a bug worth chasing, not noise.

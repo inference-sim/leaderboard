@@ -31,6 +31,17 @@ jobs:
           # it. Provide a PAT or GitHub App token with read access instead:
           # token: ${{ secrets.UPSTREAM_READ_TOKEN }}
 
+      - name: Check out blis-catalog (model catalog)
+        # The authoritative model/hardware/workload catalog, a separate repo. Upstream
+        # deleted the in-repo model_configs/ tree (inference-sim#1797), so blis now
+        # resolves <catalog>/models/<name>/config.json via BLIS_CATALOG with no default.
+        # The image bundles this clone; the Dockerfile sets BLIS_CATALOG to it. Small,
+        # public, config-only — no history needed.
+        uses: actions/checkout@v4
+        with:
+          repository: inference-sim/blis-catalog
+          path: blis-catalog
+
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v3
 
