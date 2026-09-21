@@ -114,6 +114,15 @@ spec:
             # default is this env var; keep it inside the /data mount.
             - name: LEADERBOARD_RESULTS
               value: /data/results
+          # Set the entrypoint explicitly to the bare binary so `args` below ARE the
+          # whole command. Kubernetes appends `args` to the image ENTRYPOINT, so if the
+          # image bakes `serve -addr ... -blis ...` into its entrypoint (as older images
+          # did), these args would be appended after it — Go's flag parser then stops at
+          # the second positional `serve` and silently drops everything after it,
+          # including -workloads. Overriding command here makes the launch independent of
+          # whatever the image entrypoint bakes in.
+          command:
+            - leaderboard
           args:
             - serve
             - -addr

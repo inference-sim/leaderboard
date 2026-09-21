@@ -75,4 +75,10 @@ ENV BLIS_CATALOG=/app/inference-sim/blis-catalog
 # Results location is chosen by env, not baked into the entrypoint: mount a volume
 # over /app/results, or override LEADERBOARD_RESULTS to a different persisted path.
 ENV LEADERBOARD_RESULTS=/app/results
-ENTRYPOINT ["leaderboard", "serve", "-addr", ":8080", "-blis", "/app/inference-sim"]
+# ENTRYPOINT is the bare binary; the subcommand and its flags live in CMD. This way a
+# `docker run … <args>` or a Kubernetes `args:` REPLACES the command instead of being
+# appended to it — appending would duplicate the positional `serve` and make Go's flag
+# parser stop early, silently dropping later flags like -workloads (see the OpenShift
+# Deployment). Keep flags here in CMD, never in ENTRYPOINT.
+ENTRYPOINT ["leaderboard"]
+CMD ["serve", "-addr", ":8080", "-blis", "/app/inference-sim"]
