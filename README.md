@@ -72,10 +72,17 @@ Practical notes:
 
 ## Building and running the leaderboard
 
+Results are read and written under `$LEADERBOARD_RESULTS` (default
+`~/leaderboard-results`; `-out` overrides it). For local dev, point it at the repo so
+you can see the `results/` tree change with your edits: `export LEADERBOARD_RESULTS=results`,
+or just use the `make` targets, which set it for you. The container image and the
+OpenShift deployment set it to a persistent-volume path instead.
+
 ```bash
+export LEADERBOARD_RESULTS=results   # local dev: write into the repo tree (make sets this too)
 make blis                    # build the upstream simulator (Go >= 1.24)
 make build                   # bin/leaderboard
-./bin/leaderboard run -runs runs.yaml   # execute a run declaration -> results/<group_id>/<run_id>.json
+./bin/leaderboard run -runs runs.yaml   # execute a run declaration -> $LEADERBOARD_RESULTS/<group_id>/<run_id>.json
 ./bin/leaderboard validate   # schema, ids, filing, and upstream drift
 ./bin/leaderboard verify     # re-run and diff; BLIS is deterministic, so a diff is a bug
 

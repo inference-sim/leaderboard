@@ -60,6 +60,10 @@ COPY inference-sim/.git          /app/inference-sim/.git
 # so git can refresh its index and the process can read everything.
 RUN chgrp -R 0 /app && chmod -R g=u /app
 EXPOSE 8080
+# Results land on the /data PVC. Set by env, not by -out, so the Deployment and a
+# bare `docker run` agree without repeating the path in args; the Deployment sets
+# the same LEADERBOARD_RESULTS explicitly.
+ENV LEADERBOARD_RESULTS=/data/results
 ENTRYPOINT ["/app/leaderboard"]
 # Overridden by the Deployment's args; kept in sync so `docker run` behaves the same.
-CMD ["serve", "-addr=:8080", "-out=/data/results", "-blis=/app/inference-sim", "-workloads=/data/workloads.yaml"]
+CMD ["serve", "-addr=:8080", "-blis=/app/inference-sim", "-workloads=/data/workloads.yaml"]

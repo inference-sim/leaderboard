@@ -64,5 +64,7 @@ RUN mkdir -p /app/results \
  && chown -R app:app /app
 USER app
 EXPOSE 8080
-ENTRYPOINT ["leaderboard", "serve", "-addr", ":8080", \
-            "-out", "/app/results", "-blis", "/app/inference-sim"]
+# Results location is chosen by env, not baked into the entrypoint: mount a volume
+# over /app/results, or override LEADERBOARD_RESULTS to a different persisted path.
+ENV LEADERBOARD_RESULTS=/app/results
+ENTRYPOINT ["leaderboard", "serve", "-addr", ":8080", "-blis", "/app/inference-sim"]

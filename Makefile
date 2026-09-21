@@ -2,6 +2,12 @@
 # `integration`, which need the sibling ../inference-sim checkout.
 BLIS_DIR := ../inference-sim
 
+# Where the CLI reads and writes results. Local dev keeps them in the repo tree so
+# the directory structure is visible alongside code changes; override to write
+# elsewhere. The container image and OpenShift set this to a PVC-backed path.
+LEADERBOARD_RESULTS ?= results
+export LEADERBOARD_RESULTS
+
 .PHONY: all test lint build blis drift integration serve web-install web-test web-build web-lint web-dev clean
 
 all: lint test build

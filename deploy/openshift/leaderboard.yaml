@@ -68,17 +68,53 @@ spec:
         runAsNonRoot: true
         seccompProfile:
           type: RuntimeDefault
+      initContainers:
+        # Guarantee the server can write results before it starts. restricted-v2
+        # gives the pod an arbitrary UID plus an fsGroup and chowns the /data PVC to
+        # that fsGroup, so /data is group-writable. This creates the LEADERBOARD_RESULTS
+        # subdir with group-write and the setgid bit, so records written now — and by
+        # any future pod in the same fsGroup — stay writable. It also fails the pod
+        # loudly at startup if the volume is not writable, rather than surfacing later
+        # as a failed /api/run. Same image, so no extra pull.
+        - name: ensure-results-dir
+          image: ghcr.io/inference-sim/leaderboard:0.1.2
+          imagePullPolicy: Always
+          command:
+            - sh
+            - -c
+            - mkdir -p /data/results && chmod 2775 /data/results
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+          volumeMounts:
+            - name: data
+              mountPath: /data
       containers:
         - name: leaderboard
-          image: quay.io/jgchen/leaderboard:latest
+          image: ghcr.io/inference-sim/leaderboard:0.1.2
           imagePullPolicy: Always
           workingDir: /app
+          env:
+            # Upstream blis (#1774) requires an explicit catalog CLONE ROOT — there is
+            # no default and no search path — and refuses any run without it. The image
+            # bundles the catalog tree at /app/inference-sim/model_configs (flat model
+            # entries plus workloads/ and devices/), so point blis at it here. This env
+            # var is inherited by every blis subprocess the server spawns (both the run
+            # path and the workload-spec validation probe), which -blis/args cannot cover.
+            - name: BLIS_CATALOG
+              value: /app/inference-sim/model_configs
+            # Results directory. It lives on the /data PVC (mounted below) so it is
+            # the only state that survives a restart. serve reads it via -out, whose
+            # default is this env var; keep it inside the /data mount.
+            - name: LEADERBOARD_RESULTS
+              value: /data/results
           args:
             - serve
             - -addr
             - ":8080"
-            - -out
-            - /data/results
             - -blis
             - /app/inference-sim
             - -workloads
@@ -116,8 +152,11 @@ spec:
               drop:
                 - ALL
           volumeMounts:
+            # Read-write: /api/run writes results/<group_id>/<run_id>.json and
+            # workloads.yaml here (readOnly defaults to false; stated for intent).
             - name: data
               mountPath: /data
+              readOnly: false
             - name: tmp
               mountPath: /tmp
       volumes:
