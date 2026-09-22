@@ -238,7 +238,7 @@ code {
 }
 
 /* ---------- Tooltip (data-tip) ----------
- * `.derived`, `.info` and `.eq` each carry a `data-tip` explanation. Native `title` shows
+ * `.derived` and `.info` each carry a `data-tip` explanation. Native `title` shows
  * on hover but not reliably on keyboard focus, so the visible tooltip is a single element
  * parked at the end of <body> and positioned by initTooltips() (tooltip.ts) on hover and
  * `:focus-visible`. It lives at the document root, not on the trigger, on purpose: the
@@ -640,16 +640,26 @@ td.dep {
   gap: 6px;
 }
 
+/* The reproduce caret (right:6px) and, in server mode, the delete trash (right:28px) float
+ * over the cell's top-right corner. Reserve that strip on the top line — whatever it is:
+ * the model id, the GPU type, or the key spec chips — so its content ends before the icons
+ * instead of running underneath them. Only the top line needs it; the icons sit at the top,
+ * so the chip rows below keep the full column width. */
+.depbox > :first-child {
+  max-width: calc(100% - 52px);
+}
+
 /* A long model id (org/long-name-with-many-parts) must not widen or wrap the frozen
  * first column. Keep it on one line and let this line alone scroll sideways when it
- * outruns the column; a short name shrink-wraps and shows no scrollbar. max-width caps
- * it at the column so the scroll container, not the name, is what bounds the width. */
+ * outruns the column; a short name shrink-wraps and shows no scrollbar. The width is
+ * capped by the .depbox first-line rule above (the model is that first line), so the
+ * scroll container, not the name, is what bounds the width — and it ends clear of the
+ * top-right icons. */
 .dep-model {
   font-family: var(--font-mono);
   font-weight: 700;
   font-size: 13px;
   color: var(--accent-ink);
-  max-width: 100%;
   white-space: nowrap;
   overflow-x: auto;
   scrollbar-width: thin;
@@ -716,26 +726,6 @@ td.dep {
   outline: 2px solid var(--focus);
   outline-offset: 2px;
   border-radius: 2px;
-}
-
-.eq {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 22px;
-  height: 22px;
-  margin: -4px 0;
-  border-radius: 50%;
-  color: var(--accent-ink);
-  background: var(--accent-soft);
-  font-size: 13px;
-  cursor: help;
-}
-
-.eq:hover,
-.eq:focus-visible {
-  background: var(--accent);
-  color: var(--panel);
 }
 
 /* One chip look for every deployment argument: the topology on the key line (.kv) and
@@ -848,6 +838,58 @@ table.readout tbody tr:not(.reprorow) {
 
 .reprotoggle:focus-visible {
   box-shadow: 0 0 0 2px var(--focus);
+}
+
+/* The per-run delete control: a trash icon that opens the delete confirmation. It is shown
+ * only when the run server is reachable (deleting removes the results file from disk), so it
+ * never appears on the static board. It borrows the reproduce toggle's quiet 18px footprint
+ * and takes the critical red on hover, the one place a row turns destructive. */
+.delrow {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  color: var(--muted);
+  background: none;
+  border: none;
+  border-radius: 3px;
+  cursor: pointer;
+}
+
+.delico {
+  width: 14px;
+  height: 14px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.delrow:hover,
+.delrow:focus-visible {
+  color: var(--crit-ink);
+  background: var(--crit-bg);
+  outline: none;
+}
+
+.delrow:focus-visible {
+  box-shadow: 0 0 0 2px var(--focus);
+}
+
+/* On a table row the trash sits in the frozen deployment cell's top-right, just left of the
+ * reproduce caret (right:6px, 18px wide), so the two pair without overlapping. */
+.delrow.onrow {
+  position: absolute;
+  top: 6px;
+  right: 28px;
+}
+
+/* On a disqualified card the trash rides to the end of the header row of chips. */
+.delrow.dq {
+  margin-left: auto;
 }
 
 /* The expanded panel: a full-width row, on paper so it reads as a drawer under the run
@@ -1240,7 +1282,6 @@ tr.revealed td,
 
 @media (prefers-reduced-motion: no-preference) {
   .sortbtn,
-  .eq,
   .info,
   .derived,
   .wcard-del,
@@ -1753,6 +1794,218 @@ tr.revealed td,
   color: var(--muted);
   font-size: 13.5px;
   text-align: center;
+}
+
+/* ---------- SLO-target filter ----------
+ * The third filter card, beside Models and Hardware. It wears the same frame as those cards:
+ * a fieldset whose legend title dissects the top border. Unlike them it is collapsible: the
+ * legend title is the toggle and the body is hidden until opened, so align-self keeps the
+ * collapsed card from stretching to the taller filters beside it. Its own class, never
+ * `wrap` (the global page container). */
+.slofilter {
+  flex: 1 1 300px;
+  align-self: flex-start;
+  margin: 0;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  background: var(--panel);
+}
+
+.slofilter legend {
+  padding: 0 6px;
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  font-weight: 600;
+}
+
+/* The legend title, made a toggle: a bare button that reads as the legend text, with a
+ * disclosure caret and the muted target count. Matches the sibling legends' type so the
+ * three cards title alike. */
+.slotoggle {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+  padding: 0;
+  background: none;
+  border: 0;
+  font: inherit;
+  color: var(--ink);
+  cursor: pointer;
+}
+
+.slotoggle:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+  border-radius: 2px;
+}
+
+.slotoggle .car {
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.slobody {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-top: 10px;
+}
+
+/* The collapsed preview and the editable body each hide with the `hidden` attribute; the
+ * attribute rule must out-specify the base display rule, so it carries the same class. */
+.slobody[hidden],
+.slopreview[hidden] {
+  display: none;
+}
+
+/* The collapsed preview: the set targets as pills, or the resting summary, so the card has
+ * presence beside the always-open sibling cards rather than shrinking to a bare title. */
+.slopreview {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+/* A set target, in the sibling cards' selected-bubble design: the accent-soft fill and
+ * accent border a pressed model/hardware tag wears, so an active target reads the same. */
+.slochip {
+  padding: 3px 10px;
+  border: 1px solid var(--accent);
+  border-radius: 3px;
+  background: var(--accent-soft);
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--accent-ink);
+  white-space: nowrap;
+}
+
+.slonone {
+  color: var(--muted);
+  font-size: 12.5px;
+}
+
+/* One threshold section (Latency, Throughput): a small heading over its stacked rows. */
+.slogrouphd {
+  margin-bottom: 6px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.slorows {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+/* One metric per row: its label on the left, a narrow number input on the right, so the
+ * thresholds stack into a compact ledger the reader scans top to bottom. */
+.slorow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.slolabel {
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  color: var(--ink);
+}
+
+.sloinput {
+  width: 92px;
+  flex-shrink: 0;
+  padding: 4px 8px;
+  background: var(--paper);
+  color: var(--ink);
+  border: 1px solid var(--line-strong);
+  border-radius: 3px;
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+}
+
+.sloinput:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 1px;
+}
+
+.sloactions {
+  display: flex;
+  justify-content: flex-end;
+}
+
+/* Shown in the table's place when a target removed every ranked row (the band below still
+ * lists them). The dashed neutral frame matches the empty-filter note. */
+.slonote {
+  margin: 0;
+  padding: 20px 16px;
+  border: 1px dashed var(--line-strong);
+  border-radius: 3px;
+  background: var(--panel);
+  color: var(--muted);
+  font-size: 13.5px;
+  text-align: center;
+}
+
+/* ---------- Hidden-by-SLO band ----------
+ * A sibling of the disqualified band in frame and rhythm, but a distinct exclusion: these
+ * runs completed the work and are comparable, they only missed a reader-set latency
+ * ceiling, so the left rule is the accent (a reader's filter), not the disqualified red.
+ * A native details/summary keeps it collapsed by default while leaving its rows in the
+ * markup. */
+.sloband {
+  margin-top: 24px;
+  padding: 16px 20px 6px;
+  border-top: 2px dashed var(--line-strong);
+  background: var(--panel);
+  border-radius: 3px;
+}
+
+.slobandsum {
+  cursor: pointer;
+  padding: 4px 0;
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+.slobandsum:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+
+.slobandintro {
+  margin: 8px 0 16px;
+  max-width: 68ch;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.slohidden {
+  margin-bottom: 12px;
+  padding: 12px 16px;
+  background: var(--panel);
+  border: 1px solid var(--line-strong);
+  border-left: 4px solid var(--accent);
+  border-radius: 3px;
+}
+
+.slomisses {
+  margin: 8px 0 0;
+  padding-left: 18px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.slomisses li {
+  margin: 2px 0;
 }
 
 /* The model label on a merged dq row. (The readout table folds the model into the

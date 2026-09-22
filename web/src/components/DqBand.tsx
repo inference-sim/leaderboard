@@ -4,6 +4,7 @@ import { formatCount, formatMs, formatNumber } from '../format'
 import { rowId } from '../liverun'
 import { distinctModels, dqSummary } from '../model'
 import { Derived } from './Derived'
+import { DeleteRunButton } from './DeleteRunButton'
 import { ReproPanel } from './ReproPanel'
 
 /**
@@ -45,7 +46,15 @@ function DqRepro({ record }: { record: RunRecord }) {
  * M on E2E p99" is a claim about the work the run shed, which the whole table shares — it
  * is not a per-model claim. Model is labelled per card when the table spans more than one.
  */
-export function DqBand({ group }: { group: RunGroup }) {
+export function DqBand({
+  group,
+  onDelete,
+}: {
+  group: RunGroup
+  /** Opens the delete confirmation for a disqualified run, or undefined when deletion is not
+   * offered (the static board, where the run server that removes the file is not reachable). */
+  onDelete?: (record: RunRecord) => void
+}) {
   const entries = dqSummary(group)
   if (entries.length === 0) return null
 
@@ -84,6 +93,7 @@ export function DqBand({ group }: { group: RunGroup }) {
                   <small> · {r.class}</small>
                 </span>
               ))}
+              {onDelete && <DeleteRunButton record={record} onDelete={onDelete} variant="dq" />}
             </div>
 
             <p className="dqwhy">

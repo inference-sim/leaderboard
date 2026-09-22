@@ -2,12 +2,17 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import type { Dispatch, ReactNode, SetStateAction } from 'react'
 import { loadCommittedRecords, loadWorkloads } from './load'
 import type { RunRecord, WorkloadGroup } from './load'
+import { deleteRun, fetchResults } from './results'
 import { ReadoutTable } from './components/ReadoutTable'
+import { ConfirmDialog } from './components/ConfirmDialog'
 import { WorkloadHeader } from './components/SpecHeader'
 import { WorkloadPicker } from './components/WorkloadPicker'
 import { ModelFilter } from './components/ModelFilter'
 import { HardwareFilter } from './components/HardwareFilter'
+import { SloFilter } from './components/SloFilter'
 import { EmptyFilterNote } from './components/EmptyFilterNote'
+import { SLO_METRICS, emptyTargets, parseTargets } from './slo'
+import type { RawTargets } from './slo'
 import { NewRun } from './components/NewRun'
 import { LiveRunBanner } from './components/LiveRunBanner'
 import { Workloads } from './components/Workloads'
@@ -100,6 +105,16 @@ export function App() {
   const [records, setRecords] = useState<RunRecord[]>(committed)
   const [view, setView] = useState<View>(() => viewFromHash(window.location.hash))
   const [collapsed, setCollapsed] = useState(initialCollapsed)
+  // Whether the run server is reachable. Deleting a run removes its results file from
+  // disk, which only `leaderboard serve` can do, so this gates the per-run delete control:
+  // the static committed board (no server) shows no trash button. It starts false and is
+  // set the first time /api/results answers.
+  const [serverAvailable, setServerAvailable] = useState(false)
+  // The run awaiting a delete confirmation, and the last delete failure to show. The
+  // confirmation and the destructive call live here at the root, beside the records and the
+  // live run a delete may have to clear, rather than in the table that renders the button.
+  const [pendingDelete, setPendingDelete] = useState<RunRecord | null>(null)
+  const [deleteError, setDeleteError] = useState<string | null>(null)
 
   // The run and the form both live here, at the root that stays mounted across every view
   // switch (§4). NewRun unmounts the moment Run is clicked and the user lands on the board,
@@ -136,11 +151,14 @@ export function App() {
 
   const reload = useCallback(async () => {
     try {
-      const res = await fetch('/api/results')
-      if (!res.ok) return
-      setRecords((await res.json()) as RunRecord[])
+      setRecords(await fetchResults())
+      // The server answered, so its live results supersede the committed build and the
+      // delete control can be offered.
+      setServerAvailable(true)
     } catch {
-      // No server: the committed build stands. This is the normal static case.
+      // No server: the committed build stands, and delete stays hidden. This is the normal
+      // static case.
+      setServerAvailable(false)
     }
   }, [])
 
@@ -180,6 +198,36 @@ export function App() {
     },
     [reload, onReveal],
   )
+
+  // A row's trash button asks to delete a run; the actual removal waits on the confirmation
+  // modal, so a stray click cannot carry out an irreversible delete. Opening the dialog
+  // clears any prior failure note so it does not linger over a fresh attempt.
+  const requestDelete = useCallback((record: RunRecord) => {
+    setDeleteError(null)
+    setPendingDelete(record)
+  }, [])
+
+  // Confirmed: delete the run's results file, then reload so the row leaves the board. If the
+  // just-deleted run is the one the banner is showing, clear the banner too — its record no
+  // longer exists. A failure keeps the row and surfaces the server's message.
+  const confirmDelete = useCallback(async () => {
+    const record = pendingDelete
+    if (!record) return
+    setPendingDelete(null)
+    try {
+      await deleteRun(record.group_id, record.run_id)
+      await reload()
+      setLiveRun((cur) =>
+        cur?.status === 'done' &&
+        cur.record.group_id === record.group_id &&
+        cur.record.run_id === record.run_id
+          ? null
+          : cur,
+      )
+    } catch (e) {
+      setDeleteError(e instanceof Error ? e.message : String(e))
+    }
+  }, [pendingDelete, reload])
 
   // The hash is the route, so the back button works and a table can be linked to.
   useEffect(() => {
@@ -280,17 +328,35 @@ export function App() {
                   onReveal={onReveal}
                 />
               )}
+              {deleteError && (
+                <p className="dek issue" role="alert">
+                  {deleteError}
+                </p>
+              )}
               <Leaderboard
                 workloads={workloads}
                 selectedKey={selectedKey}
                 onSelect={setSelectedKey}
                 revealTarget={revealTarget}
                 onRevealed={onRevealed}
+                canDelete={serverAvailable}
+                onDelete={requestDelete}
               />
             </>
           )}
         </div>
       </main>
+
+      <ConfirmDialog
+        open={pendingDelete !== null}
+        title="Delete run?"
+        confirmLabel="Delete"
+        onConfirm={confirmDelete}
+        onCancel={() => setPendingDelete(null)}
+      >
+        Delete <code className="mono">{pendingDelete?.run_id}</code>? This permanently removes its
+        result from <code>results/</code> on disk. Re-run the same declaration to bring it back.
+      </ConfirmDialog>
     </div>
   )
 }
@@ -301,6 +367,8 @@ function Leaderboard({
   onSelect,
   revealTarget,
   onRevealed,
+  canDelete,
+  onDelete,
 }: {
   workloads: WorkloadGroup[]
   /** Which workload is shown, lifted to App so a reveal can select the target's table.
@@ -310,6 +378,10 @@ function Leaderboard({
   onSelect: Dispatch<SetStateAction<string | null>>
   revealTarget: RevealTarget | null
   onRevealed: () => void
+  /** Whether the per-run delete control is offered (the run server is reachable). */
+  canDelete: boolean
+  /** Opens the delete confirmation for a run. */
+  onDelete: (record: RunRecord) => void
 }) {
   const selected =
     workloads.find((w) => w.workloadKey === selectedKey) ?? workloads[0] ?? null
@@ -355,6 +427,8 @@ function Leaderboard({
           workload={selected}
           revealTarget={revealTarget}
           onRevealed={onRevealed}
+          canDelete={canDelete}
+          onDelete={onDelete}
         />
       )}
     </>
@@ -377,10 +451,14 @@ function WorkloadSection({
   workload,
   revealTarget,
   onRevealed,
+  canDelete,
+  onDelete,
 }: {
   workload: WorkloadGroup
   revealTarget: RevealTarget | null
   onRevealed: () => void
+  canDelete: boolean
+  onDelete: (record: RunRecord) => void
 }) {
   // The accelerators actually present in this workload, sorted. Hardware is a candidate
   // under test rather than part of the key, so it is read from the records, not the group.
@@ -390,6 +468,11 @@ function WorkloadSection({
   )
   const [models, setModels] = useState<string[]>(workload.models)
   const [hardware, setHardware] = useState<string[]>(hardwareTypes)
+  // The SLO targets, raw as the form holds them. They live in this same section state, so
+  // the reveal remount (the key carries a nonce) resets them to empty alongside the model
+  // and hardware selections, so a freshly run candidate can never be hidden behind a target
+  // the reader left set. Parsed at the point they are handed to the table.
+  const [sloTargets, setSloTargets] = useState<RawTargets>(emptyTargets)
   // Show a filter whenever the workload has any option for it, not just two or more. The
   // table omits the model and hardware labels when there is only one of each (a single-
   // model table has no Model column, a single-accelerator one no hardware cell), so the
@@ -409,6 +492,7 @@ function WorkloadSection({
           {showHardware && (
             <HardwareFilter options={hardwareTypes} selected={hardware} onChange={setHardware} />
           )}
+          <SloFilter metrics={SLO_METRICS} targets={sloTargets} onChange={setSloTargets} />
         </div>
       )}
       {emptyNoun ? (
@@ -418,8 +502,11 @@ function WorkloadSection({
           workload={workload}
           models={models}
           hardware={hardware}
+          sloTargets={parseTargets(sloTargets)}
           revealTarget={revealTarget}
           onRevealed={onRevealed}
+          canDelete={canDelete}
+          onDelete={onDelete}
         />
       )}
     </section>

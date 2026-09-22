@@ -8,7 +8,6 @@ import {
   deploymentSpec,
   distinctHardware,
   distinctModels,
-  findTwins,
   gpuCount,
   knobChips,
   outputTokensPerRequest,
@@ -36,21 +35,6 @@ describe('loadGroups', () => {
     expect(main.disqualified).toHaveLength(1)
     expect(main.complete.length + main.disqualified.length).toBe(main.records.length)
     expect(main.disqualified[0]!.run_id).toBe('h100-tp2-len640')
-  })
-})
-
-describe('findTwins', () => {
-  // A knob that changed nothing is a finding, not a coincidence to hide.
-  it('pairs runs whose metrics are identical', () => {
-    const twins = findTwins(main.records)
-    expect(twins['h100-tp2']).toEqual(['h100-tp2-seqs32'])
-    expect(twins['h100-tp2-seqs32']).toEqual(['h100-tp2'])
-  })
-
-  it('leaves a run that differs anywhere unpaired', () => {
-    const twins = findTwins(main.records)
-    expect(twins['h100-tp2-seqs8']).toBeUndefined()
-    expect(twins['h100-tp4']).toBeUndefined()
   })
 })
 

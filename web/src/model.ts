@@ -109,38 +109,6 @@ export const COLUMNS: Column[] = [
 /** The numeric columns, i.e. everything the deployment cell does not render itself. */
 export const NUMERIC_COLUMNS = COLUMNS.filter((c) => c.key !== 'deployment')
 
-/** Metric fields compared when looking for twins. instance_id is a label, not a metric. */
-const TWIN_IGNORED = new Set(['instance_id'])
-
-/**
- * Runs whose metrics are identical, keyed by run_id. A knob that changed nothing is
- * a result worth showing, not a coincidence to hide: max_num_seqs 32 and the stock
- * 256 are byte-identical here because at this load the batch never reaches 32.
- */
-export function findTwins(records: RunRecord[]): Record<string, string[]> {
-  const key = (r: RunRecord): string => {
-    const entries = Object.entries(r.metrics)
-      .filter(([k]) => !TWIN_IGNORED.has(k))
-      .sort(([a], [b]) => (a < b ? -1 : 1))
-    return JSON.stringify(entries)
-  }
-
-  const buckets = new Map<string, string[]>()
-  for (const r of records) {
-    const k = key(r)
-    const bucket = buckets.get(k)
-    if (bucket) bucket.push(r.run_id)
-    else buckets.set(k, [r.run_id])
-  }
-
-  const out: Record<string, string[]> = {}
-  for (const ids of buckets.values()) {
-    if (ids.length < 2) continue
-    for (const id of ids) out[id] = ids.filter((other) => other !== id)
-  }
-  return out
-}
-
 /**
  * Deployment fields rendered in their own slot rather than as a chip. Model joined
  * hardware and tp here (E1): it leads the deployment cell as the candidate's headline

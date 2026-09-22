@@ -129,11 +129,6 @@ describe('ReadoutTable, single-model workload (mainW: one model, three accelerat
     }
   })
 
-  it('shows the ≡ twin marker on h100-tp2 and h100-tp2-seqs32, naming each other', () => {
-    expect(html).toContain('Metrics identical to h100-tp2-seqs32')
-    expect(html).toContain('Metrics identical to h100-tp2 ')
-  })
-
   it('renders a max_num_seqs 8 knob chip for h100-tp2-seqs8, whose TTFT p99 dwarfs stock h100-tp2 (3.47s vs 31.4ms)', () => {
     expect(html).toContain('max_num_seqs 8')
     const stockTtft = cellsOfRow(rows[1]!)[2]
@@ -297,6 +292,66 @@ describe('ReadoutTable, hardware filter (a row filter, orthogonal to the model f
     expect(html).toContain('class="dep-model"')
     // One accelerator now, so the cell drops the redundant GPU-type line.
     expect(html).not.toContain('class="dep-hw"')
+  })
+})
+
+function sloBand(html: string): string | undefined {
+  return html.match(/<details class="sloband">[\s\S]*?<\/details>/)?.[0]
+}
+
+describe('SLO-target filtering (via ReadoutTable)', () => {
+  it('moves the runs that miss a target out of the ranked table and into the band', () => {
+    // E2E p99 <= 5000 ms keeps only h100-tp4 and a100-tp4 of the ten complete runs.
+    const html = renderToStaticMarkup(
+      <ReadoutTable workload={mainW} models={[]} sloTargets={{ e2e_p99_ms: 5000 }} />,
+    )
+    const tbody = html.match(/<tbody>([\s\S]*)<\/tbody>/)![1]!
+    expect(tbodyRows(html)).toHaveLength(2)
+    expect(tbody).not.toContain('h100-tp1')
+    const band = sloBand(html)
+    expect(band).toBeDefined()
+    expect(band).toContain('8 runs')
+    expect(band).toContain('H100 tp1')
+    expect(band).toContain('E2E p99')
+    expect(band).toContain('exceeds')
+  })
+
+  it('renders no band and every complete row when no target is set', () => {
+    const html = renderToStaticMarkup(<ReadoutTable workload={mainW} models={[]} sloTargets={{}} />)
+    expect(tbodyRows(html)).toHaveLength(10)
+    expect(sloBand(html)).toBeUndefined()
+  })
+
+  it('replaces the table with a note when no run meets the targets, still listing them in the band', () => {
+    const html = renderToStaticMarkup(
+      <ReadoutTable workload={mainW} models={[]} sloTargets={{ e2e_p99_ms: 1 }} />,
+    )
+    expect(html).not.toContain('<tbody>')
+    expect(html).toContain('No runs meet the SLO targets')
+    const band = sloBand(html)
+    expect(band).toContain('10 runs')
+  })
+
+  it('orders the section as ranked table, then SLO band, then disqualified band', () => {
+    const html = renderToStaticMarkup(
+      <ReadoutTable workload={mainW} models={[]} sloTargets={{ e2e_p99_ms: 5000 }} />,
+    )
+    const iTable = html.indexOf('<tbody>')
+    const iSlo = html.indexOf('<details class="sloband">')
+    const iDq = html.indexOf('aria-label="Disqualified runs"')
+    expect(iTable).toBeGreaterThan(-1)
+    expect(iSlo).toBeGreaterThan(iTable)
+    expect(iDq).toBeGreaterThan(iSlo)
+  })
+
+  it('never applies SLO targets to the disqualified band', () => {
+    // The impossible target empties the ranked table, but the disqualified run is unchanged.
+    const html = renderToStaticMarkup(
+      <ReadoutTable workload={mainW} models={[]} sloTargets={{ e2e_p99_ms: 1 }} />,
+    )
+    const band = dqBand(html)
+    expect(band).toContain('max_model_len 640')
+    expect(band).toContain('requests_dropped')
   })
 })
 
@@ -690,5 +745,37 @@ describe('NewRun', () => {
     expect(html).toMatch(
       /id="moeCommBackend-label">MoE comm backend<\/span><div class="sel"><button type="button" class="sel-trigger" disabled=""/,
     )
+  })
+})
+
+describe('the per-run delete control (a trash button, server mode only)', () => {
+  it('renders no trash button by default, so the static board offers no delete', () => {
+    const html = renderToStaticMarkup(<ReadoutTable workload={mainW} models={[]} />)
+    expect(html).not.toContain('class="delrow')
+    expect(html).not.toContain('Delete the run')
+  })
+
+  it('renders a trash button per complete row when deletion is offered', () => {
+    const seen: RunRecord[] = []
+    const html = renderToStaticMarkup(
+      <ReadoutTable workload={mainW} models={[]} canDelete onDelete={(r) => seen.push(r)} />,
+    )
+    const buttons = html.match(/class="delrow onrow"/g) ?? []
+    expect(buttons.length).toBe(tbodyRows(html).length)
+    expect(buttons.length).toBeGreaterThan(0)
+    // Each names its run in the accessible label so the control is unambiguous.
+    expect(html).toMatch(/aria-label="Delete the run [^"]+"/)
+  })
+
+  it('offers deletion on disqualified runs too, in their band', () => {
+    const withDelete = renderToStaticMarkup(
+      <ReadoutTable workload={horizonW} models={[]} canDelete onDelete={() => {}} />,
+    )
+    const band = dqBand(withDelete)!
+    expect(band).toContain('class="delrow dq"')
+
+    // and not when deletion is not offered
+    const without = renderToStaticMarkup(<ReadoutTable workload={horizonW} models={[]} />)
+    expect(dqBand(without)!).not.toContain('class="delrow')
   })
 })
