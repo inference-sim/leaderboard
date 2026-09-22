@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import fixture from '../../prototypes/results.json'
+import argvRecords from '../../prototypes/argv-records.json'
 import { loadGroups } from './load'
 import type { RunRecord } from './load'
 import {
@@ -72,16 +73,22 @@ function specProfile(overrides: Partial<ProfileBody> = {}): ProfileBody {
 }
 
 /**
- * The committed results, read the same way the app reads them. This is the pin
- * between argvFor and internal/blisrun.Argv: every one of these argvs was written by
- * the Go builder, so reproducing them here means the two agree about flag order, the
- * omitted --dp, and the rest.
+ * A committed set of real records the Go builder wrote, curated to cover every argv
+ * shape: distribution and workload-spec workloads, open-loop --rate and closed-loop
+ * --concurrency, across a range of tp. This is the pin between argvFor and
+ * internal/blisrun.Argv: reproducing each stored argv means the two agree about flag
+ * order, the omitted --dp, and the rest.
+ *
+ * The fixture is committed (unlike results/, which is gitignored generated output) so
+ * the pin runs on a clean checkout in CI, not just on a machine with local runs. The
+ * metrics path and the materialized --workload-spec path are pass-through inputs to
+ * argvFor, so they were normalized to stable placeholders when the fixture was built;
+ * every other flag is exactly as Go emitted it.
  */
-const committed = Object.entries(
-  import.meta.glob<RunRecord>('../../results/*/*.json', { eager: true, import: 'default' }),
-)
-  .filter(([path]) => !path.endsWith('.requests.json'))
-  .map(([path, record]) => ({ path, record }))
+const committed = (argvRecords as unknown as RunRecord[]).map((record, i) => ({
+  path: `prototypes/argv-records.json[${i}]`,
+  record,
+}))
 
 describe('argvFor', () => {
   it('reproduces the stored argv of every committed record', () => {
