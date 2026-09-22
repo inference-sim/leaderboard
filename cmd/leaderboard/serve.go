@@ -23,6 +23,11 @@ import (
 // the server rejects it before anything runs.
 var serveRunIDPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]*$`)
 
+// serveGroupIDPattern matches a group_id — a hex content hash (internal/schema.GroupID),
+// so lower-case letters and digits only. A group_id is a directory name under results/,
+// so this rejects a "." / ".." / slash that could point delete outside the results tree.
+var serveGroupIDPattern = regexp.MustCompile(`^[a-z0-9]+$`)
+
 // runRequest is the body the Declare-a-run screen POSTs to /api/run: the work
 // offered, the candidate under test, and the id the result is filed under. It is
 // the same three things a runs.yaml carries, decoded straight into the record
@@ -73,18 +78,27 @@ func cmdServe(args []string) error {
 	s.execute = s.runOnce
 	s.validateSpec = s.validateSpecWithBlis
 
+	fmt.Printf("leaderboard serve — http://localhost%s  (blis: %s, results: %s)\n",
+		*addr, c.blisDir, c.outDir)
+	return http.ListenAndServe(*addr, withCORS(s.routes()))
+}
+
+// routes wires every handler onto a mux. It is a method so the routing — the method+path
+// patterns and their PathValue names — can be exercised end to end in a test, not only by
+// calling handlers directly.
+func (s *server) routes() *http.ServeMux {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/api/run", s.handleRun)
 	mux.HandleFunc("/api/results", s.handleResults)
+	// Deleting one stored run. A longer path than /api/results, so the two do not
+	// collide; the method+path pattern needs Go 1.22's ServeMux, same as the workload routes.
+	mux.HandleFunc("DELETE /api/results/{group}/{run}", s.handleResultDelete)
 	s.registerWorkloadRoutes(mux)
 	// Serve the built web app when it exists, so `leaderboard serve` is the whole
 	// thing in one process. In development the Vite dev server proxies /api here
 	// instead, and this static handler is never reached.
 	mux.Handle("/", spaHandler("web/dist"))
-
-	fmt.Printf("leaderboard serve — http://localhost%s  (blis: %s, results: %s)\n",
-		*addr, c.blisDir, c.outDir)
-	return http.ListenAndServe(*addr, withCORS(mux))
+	return mux
 }
 
 // handleRun executes one candidate against blis, writes the result under
@@ -136,6 +150,46 @@ func (s *server) handleResults(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, records)
+}
+
+// handleResultDelete removes one stored run — results/<group>/<run>.json — and its
+// optional <run>.requests.json sidecar (written by CLI runs with --keep-requests). It is
+// the browser counterpart to deleting the file by hand: a run declared from the board can
+// also be taken off it from the board, without a rebuild. Both path segments are validated
+// before anything is touched, so a crafted id cannot delete outside the results tree.
+func (s *server) handleResultDelete(w http.ResponseWriter, r *http.Request) {
+	group := r.PathValue("group")
+	run := r.PathValue("run")
+	if !serveGroupIDPattern.MatchString(group) {
+		httpError(w, http.StatusBadRequest,
+			fmt.Sprintf("group_id %q must be lower-case letters and digits — it is a directory name", group))
+		return
+	}
+	if !serveRunIDPattern.MatchString(run) {
+		httpError(w, http.StatusBadRequest,
+			fmt.Sprintf("run_id %q must be lower-case letters, digits, dot, dash or underscore, "+
+				"starting with a letter or digit — it is a filename", run))
+		return
+	}
+
+	record := filepath.Join(s.outDir, group, run+".json")
+	if _, err := os.Stat(record); errors.Is(err, os.ErrNotExist) {
+		httpError(w, http.StatusNotFound,
+			fmt.Sprintf("no run %q under group %q to delete", run, group))
+		return
+	}
+	if err := os.Remove(record); err != nil {
+		httpError(w, http.StatusInternalServerError, fmt.Sprintf("delete %s: %v", record, err))
+		return
+	}
+	// The sidecar is optional, so its absence is success, not an error; only a real
+	// removal failure is worth reporting.
+	sidecar := filepath.Join(s.outDir, group, run+".requests.json")
+	if err := os.Remove(sidecar); err != nil && !errors.Is(err, os.ErrNotExist) {
+		httpError(w, http.StatusInternalServerError, fmt.Sprintf("delete %s: %v", sidecar, err))
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"deleted": run})
 }
 
 // runOnce is the production executor: check the hardware against the upstream
@@ -273,7 +327,7 @@ func spaHandler(dir string) http.Handler {
 func withCORS(h http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Access-Control-Allow-Origin", "*")
-		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
 		w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
 		if r.Method == http.MethodOptions {
 			w.WriteHeader(http.StatusNoContent)

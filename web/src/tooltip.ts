@@ -1,5 +1,5 @@
 /**
- * Renders the `data-tip` explanations (`.derived`, `.info`, `.eq`) as a single tooltip
+ * Renders the `data-tip` explanations (`.derived`, `.info`) as a single tooltip
  * element parked at the end of `<body>`, positioned under (or over) whatever the pointer
  * or keyboard focus is on.
  *

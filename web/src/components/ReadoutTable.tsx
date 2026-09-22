@@ -9,7 +9,6 @@ import {
   deploymentSpec,
   distinctHardware,
   distinctModels,
-  findTwins,
   gpuCount,
   nextSort,
   removeSort,
@@ -18,9 +17,13 @@ import {
   varyingDeploymentFields,
 } from '../model'
 import type { Column, SortSpec } from '../model'
+import { splitBySlo } from '../slo'
+import type { SloTargets } from '../slo'
 import { Derived } from './Derived'
+import { DeleteRunButton } from './DeleteRunButton'
 import { DqBand } from './DqBand'
 import { ReproPanel } from './ReproPanel'
+import { SloBand } from './SloBand'
 import { SortNote } from './SortNote'
 
 interface Props {
@@ -47,6 +50,22 @@ interface Props {
   revealTarget?: RevealTarget | null
   /** Called once the reveal has scrolled and highlighted, so App can clear the request. */
   onRevealed?: () => void
+  /**
+   * Whether the per-run delete control is offered. It is true only when the run server is
+   * reachable — deleting removes the run's results file from disk, which the static build
+   * cannot do — so the trash button never appears where it could not work. Defaults to
+   * false, so a caller (or test) that omits it renders no delete affordance.
+   */
+  canDelete?: boolean
+  /** Opens the delete confirmation for a run. App owns the confirm, the call, and the reload. */
+  onDelete?: (record: RunRecord) => void
+  /**
+   * The parsed SLO targets: a maximum-milliseconds ceiling per latency metric. A run must
+   * sit at or below every set target to stay in the ranked table; the rest are relocated to
+   * the SloBand beneath it, never dropped. Defaults to no targets, so existing callers and
+   * tests are unaffected. Applied only to the ranked table, never to the disqualified band.
+   */
+  sloTargets?: SloTargets
 }
 
 /** True when `hardware` is empty (all) or lists this record's accelerator. */
@@ -62,7 +81,17 @@ function keptByHardware(record: RunRecord, hardware: string[]): boolean {
  * on load; no per-column best is marked, because across mixed models that would crown the
  * smaller model rather than the better deployment (E4, E5).
  */
-export function ReadoutTable({ workload, models, hardware = [], revealTarget, onRevealed }: Props) {
+export function ReadoutTable({
+  workload,
+  models,
+  hardware = [],
+  revealTarget,
+  onRevealed,
+  canDelete = false,
+  onDelete,
+  sloTargets = {},
+}: Props) {
+  const showDelete = canDelete && onDelete != null
   const group = workload.groups[0]! // one comparability group per workload since E1
   const [sort, setSort] = useState<SortSpec[]>([])
   // The run_id of the row currently pulsing from a reveal, or null. Local to the table so
@@ -78,14 +107,21 @@ export function ReadoutTable({ workload, models, hardware = [], revealTarget, on
   const disqualified = useMemo(() => group.disqualified.filter(keep), [group.disqualified, keep])
   const records = useMemo(() => group.records.filter(keep), [group.records, keep])
 
-  const twins = useMemo(() => findTwins(records), [records])
   const varying = useMemo(() => varyingDeploymentFields(records), [records])
   // Only label the model or GPU type when the table holds more than one: a single-model
   // or single-accelerator table already names it in its filter card.
   const showModel = useMemo(() => distinctModels(complete).length > 1, [complete])
   const showHardware = useMemo(() => distinctHardware(complete).length > 1, [complete])
-  const rows = useMemo(() => sortRecords(complete, sort), [complete, sort])
+  // The SLO targets split the model/hardware-kept complete runs into the ranked (passing)
+  // rows and the ones a target pulled out. The table ranks only the passing rows; the rest
+  // go to the SloBand beneath it. With no targets set, passing is the whole set and hidden
+  // is empty, so the table is unchanged.
+  const { passing, hidden } = useMemo(() => splitBySlo(complete, sloTargets), [complete, sloTargets])
+  const rows = useMemo(() => sortRecords(passing, sort), [passing, sort])
   const repro = useReproToggles(rows)
+  // The table is replaced by a short note only when a target removed every row, not when the
+  // group simply has no complete runs, which renders the empty table as before.
+  const allHiddenBySlo = passing.length === 0 && hidden.length > 0
 
   // The disqualified band works over the same filtered rows, so its would-be rank is
   // computed against exactly the complete runs on screen.
@@ -119,53 +155,64 @@ export function ReadoutTable({ workload, models, hardware = [], revealTarget, on
 
   return (
     <>
-      <TableTools
-        sort={sort}
-        onRemoveSort={(key) => setSort(removeSort(sort, key))}
-        repro={repro}
-        showControls={true}
-      />
+      {allHiddenBySlo ? (
+        <p className="slonote">
+          No runs meet the SLO targets. Every complete run missed at least one target you set;
+          each is listed below with the target it missed.
+        </p>
+      ) : (
+        <>
+          <TableTools
+            sort={sort}
+            onRemoveSort={(key) => setSort(removeSort(sort, key))}
+            repro={repro}
+            showControls={true}
+          />
 
-      <div className="tscroll">
-        <table className="readout">
-          <thead>
-            <tr className="grp">
-              {headerGroups.map((h, i) => (
-                <th
-                  key={`${h.group}-${i}`}
-                  colSpan={h.span}
-                  scope="colgroup"
-                  className={i > 0 ? 'gsep' : undefined}
-                >
-                  {h.group}
-                </th>
-              ))}
-            </tr>
-            <tr>
-              {COLUMNS.map((col) => (
-                <HeaderCell key={col.key} col={col} sort={sort} onSort={toggle} />
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((record) => (
-              <DataRow
-                key={record.run_id}
-                record={record}
-                varying={varying}
-                twins={twins[record.run_id]}
-                showModel={showModel}
-                showHardware={showHardware}
-                open={repro.isOpen(record)}
-                onToggleRepro={() => repro.toggle(record)}
-                revealed={revealedKey === record.run_id}
-              />
-            ))}
-          </tbody>
-        </table>
-      </div>
+          <div className="tscroll">
+            <table className="readout">
+              <thead>
+                <tr className="grp">
+                  {headerGroups.map((h, i) => (
+                    <th
+                      key={`${h.group}-${i}`}
+                      colSpan={h.span}
+                      scope="colgroup"
+                      className={i > 0 ? 'gsep' : undefined}
+                    >
+                      {h.group}
+                    </th>
+                  ))}
+                </tr>
+                <tr>
+                  {COLUMNS.map((col) => (
+                    <HeaderCell key={col.key} col={col} sort={sort} onSort={toggle} />
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {rows.map((record) => (
+                  <DataRow
+                    key={record.run_id}
+                    record={record}
+                    varying={varying}
+                    showModel={showModel}
+                    showHardware={showHardware}
+                    open={repro.isOpen(record)}
+                    onToggleRepro={() => repro.toggle(record)}
+                    revealed={revealedKey === record.run_id}
+                    onDelete={showDelete ? onDelete : undefined}
+                  />
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </>
+      )}
 
-      <DqBand group={filtered} />
+      <SloBand hidden={hidden} targets={sloTargets} />
+
+      <DqBand group={filtered} onDelete={showDelete ? onDelete : undefined} />
     </>
   )
 }
@@ -375,16 +422,15 @@ function HeaderCell({
 function DataRow({
   record,
   varying,
-  twins,
   showModel,
   showHardware,
   open,
   onToggleRepro,
   revealed,
+  onDelete,
 }: {
   record: RunRecord
   varying: string[]
-  twins: string[] | undefined
   showModel: boolean
   showHardware: boolean
   /** Whether this row's reproduce panel is open, and how to flip it. The state lives in
@@ -393,6 +439,8 @@ function DataRow({
   onToggleRepro: () => void
   /** Whether this row is the one a reveal is currently highlighting (§7). */
   revealed: boolean
+  /** Opens the delete confirmation for this run, or undefined when deletion is not offered. */
+  onDelete?: (record: RunRecord) => void
 }) {
   const panelId = `repro-${record.group_id}-${record.run_id}`
 
@@ -409,12 +457,12 @@ function DataRow({
         <DeploymentCell
           record={record}
           varying={varying}
-          twins={twins}
           showModel={showModel}
           showHardware={showHardware}
           reproOpen={open}
           onToggleRepro={onToggleRepro}
           reproPanelId={panelId}
+          onDelete={onDelete}
         />
         {NUMERIC_COLUMNS.map((col) => (
           <ValueCell key={col.key} col={col} record={record} />
@@ -444,22 +492,23 @@ const KNOBS_BEFORE_COLLAPSE = 4
 function DeploymentCell({
   record,
   varying,
-  twins,
   showModel,
   showHardware,
   reproOpen,
   onToggleRepro,
   reproPanelId,
+  onDelete,
 }: {
   record: RunRecord
   varying: string[]
-  twins: string[] | undefined
   showModel: boolean
   showHardware: boolean
   /** Whether this row's reproduce panel is open, and how to flip it. */
   reproOpen: boolean
   onToggleRepro: () => void
   reproPanelId: string
+  /** Opens the delete confirmation for this run, or undefined when deletion is not offered. */
+  onDelete?: (record: RunRecord) => void
 }) {
   const [expanded, setExpanded] = useState(false)
   const spec = deploymentSpec(record, varying)
@@ -483,6 +532,7 @@ function DeploymentCell({
       >
         <span aria-hidden="true">{reproOpen ? '▾' : '▸'}</span>
       </button>
+      {onDelete && <DeleteRunButton record={record} onDelete={onDelete} variant="onrow" />}
       <div className="depbox">
         {showModel && <span className="dep-model">{record.deployment.model}</span>}
         {showHardware && <span className="dep-hw">{record.deployment.hardware}</span>}
@@ -493,17 +543,6 @@ function DeploymentCell({
               <i>{p.field}</i> {p.value}
             </span>
           ))}
-          {twins && (
-            <span
-              className="eq"
-              tabIndex={0}
-              role="note"
-              data-tip={`Metrics identical to ${twins.join(', ')} — this knob changed nothing at this load.`}
-              aria-label={`Metrics identical to ${twins.join(', ')}`}
-            >
-              ≡
-            </span>
-          )}
         </span>
 
         {(knobs.length > 0 || (expanded && spec.rest.length > 0)) && (
