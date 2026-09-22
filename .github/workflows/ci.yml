@@ -1,0 +1,71 @@
+name: ci
+
+# Run the hermetic review gate on every PR and on main: the Go unit tests and lint,
+# and the web type-check, tests and build. This is `make verify-all` minus the one
+# step that is not hermetic — `make drift`, which hard-fails unless the ../inference-sim
+# sibling is checked out. The drift *logic* is still exercised here: its Compare unit
+# tests run under `go test ./...`, and TestUpstreamMetricsOutputMatchesTheContract
+# self-skips when upstream source is absent rather than failing. Enforcing drift
+# against upstream main would turn every leaderboard PR red the moment upstream adds a
+# field, which a PR author cannot fix from here; that check stays opt-in via `make drift`.
+#
+# The Go and web checks share no toolchain, so they run as two parallel jobs.
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  go:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out leaderboard
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod   # track the version the module declares (1.24)
+          cache: true
+
+      - name: Lint (gofmt + go vet)
+        run: make lint
+
+      - name: Unit tests
+        run: make test
+
+  web:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - name: Check out leaderboard
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22             # matches the Dockerfile's node:22 web stage
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      # gen:types:check regenerates src/types.ts from schema/run.schema.json and fails
+      # on any diff — catches a committed types.ts that drifted from the schema.
+      - name: Types match schema
+        run: npm run gen:types:check
+
+      - name: Type-check
+        run: npm run typecheck
+
+      - name: Tests
+        run: npm test
+
+      - name: Build
+        run: npm run build
