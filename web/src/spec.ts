@@ -62,7 +62,7 @@ export const DIST_DEFAULTS: Record<string, Record<string, number>> = {
 
 /**
  * defaultSpec is the WorkloadSpec a new workload opens on: one rate-based client at a
- * lognormal token distribution, runnable as authored. Model-free — the model is chosen
+ * gaussian token distribution, runnable as authored. Model-free — the model is chosen
  * at run time, and a model pinned in a client is rejected by the server (P6). seed and
  * horizon are group-side knobs carried by the profile, not the spec, so they are absent
  * here.
@@ -77,16 +77,16 @@ export function defaultSpec(): SpecObject {
   }
 }
 
-/** newClient is a fresh rate-based client at blis's lognormal token defaults — the shape
- * the "Add client" button appends and the default spec's sole client. lognormal takes
- * mu (log-space mean) and sigma, per blis; mu 6.2 ≈ 500 tokens in, 4.85 ≈ 128 out. */
+/** newClient is a fresh rate-based client at a gaussian token distribution — the shape
+ * the "Add client" button appends and the default spec's sole client. gaussian takes
+ * mean/std_dev with a min/max clamp, per blis; ~512 tokens in, ~128 out. */
 export function newClient(id: string): SpecObject {
   return {
     id,
     rate_fraction: 1,
     arrival: { process: 'poisson' },
-    input_distribution: { type: 'lognormal', params: { mu: 6.2, sigma: 0.5 } },
-    output_distribution: { type: 'lognormal', params: { mu: 4.85, sigma: 0.5 } },
+    input_distribution: { type: 'gaussian', params: { mean: 512, std_dev: 128, min: 1, max: 2048 } },
+    output_distribution: { type: 'gaussian', params: { mean: 128, std_dev: 32, min: 1, max: 2048 } },
     prefix_length: 50,
     streaming: false,
   }

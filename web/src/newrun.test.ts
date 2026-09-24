@@ -14,24 +14,63 @@ import {
   postRun,
   saveThenRun,
   suggestRunId,
+  suggestWorkloadName,
   yamlRow,
 } from './newrun'
 import type { FormValues } from './newrun'
+import { NAME_PATTERN } from './workloads'
 import type { ProfileBody } from './workloads'
-import { MODELS } from './catalog'
+import type { ModelInfo } from './models'
 
 const groups = loadGroups(fixture as unknown as RunRecord[])
+
+/**
+ * A stand-in for the catalog the form fetches from GET /api/models. The live list is read
+ * from blis-catalog server-side, so the tests supply their own: the models these tests
+ * name (the dense qwen/qwen3-14b default, yi-34b, and the MoE mixtral) plus enough others
+ * to exercise the membership check. The org-prefix invariant every real entry carries is
+ * enforced and tested in internal/modelcatalog, its authoritative source.
+ */
+const catalogModels: ModelInfo[] = [
+  { name: '01-ai/yi-34b', moe: false },
+  { name: 'meta-llama/llama-3.1-8b-instruct', moe: false },
+  { name: 'mistralai/mixtral-8x7b-v0.1', moe: true },
+  { name: 'qwen/qwen2.5-7b-instruct', moe: false },
+  { name: 'qwen/qwen3-14b', moe: false },
+  { name: 'qwen/qwen3-30b-a3b', moe: true },
+]
 const main = groups.find((g) => g.groupId === '5063e40dceb2')!
 
 /**
- * A custom-workload form that lands a new H100 tp8 row in the fixture's main group.
- * initialValues opens in custom mode seeded from FALLBACK_GROUP, which is the same work
- * as the main group, so an untouched custom form joins it. A custom workload is saved to
- * the catalog on Run, so the form carries a name; the helper supplies a valid one that
- * clashes with none of the test profiles.
+ * A custom-workload form. The custom card authors a single-client gaussian workload-spec,
+ * so an untouched form does not join the fixture's flat-distribution main group; the tests
+ * that need a table to join use customTable below, whose work matches this form. A custom
+ * workload is saved to the catalog on Run, so the form carries a name; the helper supplies
+ * a valid one that clashes with none of the test profiles.
  */
 function valid(overrides: Partial<FormValues> = {}): FormValues {
   return { ...initialValues(), runId: 'h100-tp8', tp: '8', customName: 'custom-run', ...overrides }
+}
+
+/** The table an untouched custom form lands in: its own single-client gaussian workload,
+ * carrying main's records (deployments) so the join, twin and alias checks still have rows
+ * to collide against now that custom is a workload-spec rather than main's distribution.
+ * The group is taken from the form itself so it cannot drift from what the card builds. */
+const customTable = { ...main, groupId: 'custom-target', group: interpret(valid(), [], []).output!.group }
+const withCustomTable = [...groups, customTable]
+
+/** A workload-spec profile whose spec is exactly the custom form's default work, so the
+ * custom card twins it (P3: one name per workload) — the counterpart to mainClone for the
+ * spec-backed custom card. */
+function customClone(name = 'main-clone'): ProfileBody {
+  const g = interpret(valid(), [], []).output!.group
+  return {
+    name,
+    seed: g.seed,
+    horizon_ticks: g.horizon_ticks,
+    request_timeout_s: g.request_timeout_s,
+    workload: { type: 'workload-spec', spec_sha256: null, spec: g.workload.spec as Record<string, unknown> },
+  }
 }
 
 /** A distribution profile whose work is exactly the main group's, so selecting it plus
@@ -150,16 +189,17 @@ describe('suggestRunId: a descriptive default, so the page is immediately runnab
   })
 
   it('deduplicates against the table it would join, so the default never overwrites a row', () => {
-    // The main group already holds h100-tp1. This candidate is H100 tp1 too (so its base id
-    // collides) but differs in a knob (so it is not a twin), which is exactly the case the
-    // suffix is for: a runnable id that does not overwrite the existing row.
+    // customTable already holds h100-tp1 (it carries main's records). This candidate is
+    // H100 tp1 too (so its base id collides) but differs in a knob (so it is not a twin),
+    // which is exactly the case the suffix is for: a runnable id that does not overwrite the
+    // existing row.
     const v = valid({ tp: '1', maxNumSeqs: '8' })
     expect(
-      interpret({ ...v, runId: 'h100-tp1' }, groups, []).issues.some((i) => /already holds/.test(i.message)),
+      interpret({ ...v, runId: 'h100-tp1' }, withCustomTable, []).issues.some((i) => /already holds/.test(i.message)),
     ).toBe(true)
-    const suggested = suggestRunId(v, groups, [])
+    const suggested = suggestRunId(v, withCustomTable, [])
     expect(suggested).toMatch(/^h100-tp1-\d+$/)
-    expect(interpret({ ...v, runId: suggested }, groups, []).output).not.toBeNull()
+    expect(interpret({ ...v, runId: suggested }, withCustomTable, []).output).not.toBeNull()
   })
 
   it('is stable: re-suggesting from a form that already holds the suggestion is a fixed point', () => {
@@ -173,6 +213,42 @@ describe('initialValues: opens with a descriptive run id, not a blank field', ()
   it('seeds a valid, non-empty id from the default candidate', () => {
     expect(initialValues().runId).toBe('h100-tp1')
     expect(RUN_ID_PATTERN.test(initialValues().runId)).toBe(true)
+  })
+
+  it('seeds a suggested custom name, not a blank field', () => {
+    expect(initialValues().customName).toBe('custom-1')
+    expect(NAME_PATTERN.test(initialValues().customName)).toBe(true)
+  })
+})
+
+describe('suggestWorkloadName: a unique custom name, so the card need not be named by hand', () => {
+  it('is custom-1 when the catalog holds nothing to clash with', () => {
+    expect(suggestWorkloadName([])).toBe('custom-1')
+    expect(NAME_PATTERN.test(suggestWorkloadName([]))).toBe(true)
+  })
+
+  it('deduplicates against existing catalog names, so it never reuses a taken one', () => {
+    const named = (name: string): ProfileBody => ({ ...mainClone(), name })
+    expect(suggestWorkloadName([named('custom-1')])).toBe('custom-2')
+    expect(suggestWorkloadName([named('custom-1'), named('custom-2')])).toBe('custom-3')
+  })
+
+  it('fills the lowest free slot rather than always appending', () => {
+    const named = (name: string): ProfileBody => ({ ...mainClone(), name })
+    // custom-2 is taken but custom-1 is free: take the free one.
+    expect(suggestWorkloadName([named('custom-2')])).toBe('custom-1')
+  })
+
+  it('ignores names that are not of the custom-N shape', () => {
+    const named = (name: string): ProfileBody => ({ ...mainClone(), name })
+    expect(suggestWorkloadName([named('chatbot'), named('custom')])).toBe('custom-1')
+  })
+
+  it('is stable: re-suggesting from a catalog that already holds the suggestion is unaffected', () => {
+    // suggestWorkloadName reads only the catalog, never the current field, so setting the
+    // field to its output does not feed back into a new suggestion — the sync effect converges.
+    const once = suggestWorkloadName([])
+    expect(suggestWorkloadName([])).toBe(once)
   })
 })
 
@@ -222,17 +298,43 @@ describe('interpret: a selected profile', () => {
 })
 
 describe('interpret: the custom card', () => {
-  it('builds a distribution group from the card fields', () => {
+  type SpecClient = {
+    concurrency?: number
+    input_distribution: { type: string; params: Record<string, number> }
+    output_distribution: { type: string; params: Record<string, number> }
+  }
+  /** The sole gaussian client the card authors, for asserting on the spec content. */
+  const client = (out: ReturnType<typeof interpret>['output']): SpecClient =>
+    (out!.group.workload.spec as unknown as { clients: SpecClient[] }).clients[0]!
+
+  it('builds a single-client gaussian workload-spec group from the card fields', () => {
     const { output } = interpret(valid(), groups, [])
-    expect(output?.group.workload.type).toBe('distribution')
-    expect(output?.target.group?.groupId).toBe('5063e40dceb2')
+    expect(output?.group.workload.type).toBe('workload-spec')
+    const c = client(output)
+    expect(c.input_distribution.type).toBe('gaussian')
+    expect(c.output_distribution.type).toBe('gaussian')
+  })
+
+  it('maps the card min/max/mean/stdev onto the gaussian params, so a large output runs', () => {
+    const { output, issues } = interpret(
+      valid({ outputTokens: '8000', outputTokensStdev: '512', outputTokensMin: '1', outputTokensMax: '10048' }),
+      groups,
+      [],
+    )
+    expect(issues).toEqual([])
+    expect(client(output).output_distribution.params).toEqual({
+      mean: 8000,
+      std_dev: 512,
+      min: 1,
+      max: 10048,
+    })
   })
 
   it('makes tokens, seed and deadline editable — each changes the group it would hash', () => {
     const base = interpret(valid(), groups, []).output!.group
-    const withTokens = interpret(valid({ promptTokens: '1024' }), groups, []).output!.group
-    expect(withTokens.workload.prompt_tokens).toBe(1024)
-    expect(canonical(withTokens)).not.toBe(canonical(base))
+    const withTokens = interpret(valid({ promptTokens: '1024' }), groups, [])
+    expect(client(withTokens.output).input_distribution.params.mean).toBe(1024)
+    expect(canonical(withTokens.output!.group)).not.toBe(canonical(base))
 
     const withSeed = interpret(valid({ seed: '99' }), groups, []).output!.group
     expect(withSeed.seed).toBe(99)
@@ -243,23 +345,40 @@ describe('interpret: the custom card', () => {
     expect(canonical(withDeadline)).not.toBe(canonical(base))
   })
 
-  it('carries the derived arrival process into the group it would hash', () => {
+  it('carries the closed-loop load into the client concurrency, and is new work vs the fixture', () => {
     const { output } = interpret(valid({ loadKind: 'concurrency', loadValue: '32' }), groups, [])
-    expect(output?.group.workload.arrival_process).toBe('closed-loop')
+    expect(client(output).concurrency).toBe(32)
     expect(output?.target.group).toBeNull()
+  })
+
+  it('warns, but does not block, when the mean falls outside the clamp', () => {
+    const { output, issues, notes } = interpret(
+      valid({ outputTokens: '8000', outputTokensMin: '1', outputTokensMax: '2048' }),
+      groups,
+      [],
+    )
+    expect(issues).toEqual([])
+    expect(output).not.toBeNull()
+    expect(notes.join(' ')).toMatch(/mean \(8000\) is outside \[1, 2048\]/)
+  })
+
+  it('blocks a max below the min', () => {
+    const { output, issues } = interpret(valid({ outputTokensMin: '500', outputTokensMax: '100' }), groups, [])
+    expect(output).toBeNull()
+    expect(issues.some((i) => i.field === 'outputTokensMax' && /at least the min/.test(i.message))).toBe(true)
   })
 })
 
 describe('interpret: a custom workload is saved to the catalog', () => {
-  it('offers the custom distribution as a new distribution profile, saved under the given name', () => {
+  it('offers the custom workload as a new workload-spec profile, saved under the given name', () => {
     const { output, issues, notes } = interpret(valid({ customName: 'my-load' }), groups, [])
     expect(issues).toEqual([])
     expect(notes).toEqual([])
     expect(output?.workloadName).toBe('my-load')
     expect(output?.saveProfile?.name).toBe('my-load')
-    expect(output?.saveProfile?.workload.type).toBe('distribution')
-    // The saved profile is exactly the work the run declares, so it hashes to the same table.
-    expect(output?.saveProfile?.workload.num_requests).toBe(output?.group.workload.num_requests)
+    expect(output?.saveProfile?.workload.type).toBe('workload-spec')
+    // The profile carries the same spec the run declares, as YAML the server parses.
+    expect(output?.saveProfile?.workload.spec_yaml).toContain('type: gaussian')
     expect(output?.saveProfile?.seed).toBe(output?.group.seed)
     expect(output?.saveProfile?.request_timeout_s).toBe(output?.group.request_timeout_s)
   })
@@ -276,9 +395,10 @@ describe('interpret: a custom workload is saved to the catalog', () => {
   })
 
   it('reuses a content twin under a different name rather than saving a duplicate, and warns', () => {
-    // The untouched custom card is the same work as main-clone (both are the main group),
-    // so it twins that saved profile: P3 forbids a second name for one workload.
-    const { output, notes } = interpret(valid({ customName: 'fresh-name' }), groups, [mainClone()])
+    // The untouched custom card is the same work as customClone (both the card's default
+    // gaussian spec), so it twins that saved profile: P3 forbids a second name for one
+    // workload.
+    const { output, notes } = interpret(valid({ customName: 'fresh-name' }), groups, [customClone()])
     expect(output).not.toBeNull()
     expect(output?.saveProfile).toBeNull()
     expect(output?.workloadName).toBe('main-clone')
@@ -286,7 +406,7 @@ describe('interpret: a custom workload is saved to the catalog', () => {
   })
 
   it('saves nothing when the same name already holds this exact work', () => {
-    const { output, notes } = interpret(valid({ customName: 'main-clone' }), groups, [mainClone()])
+    const { output, notes } = interpret(valid({ customName: 'main-clone' }), groups, [customClone()])
     expect(output?.saveProfile).toBeNull()
     expect(output?.workloadName).toBe('main-clone')
     expect(notes.join(' ')).toMatch(/main-clone/)
@@ -383,8 +503,11 @@ describe('customFieldsFrom: switching to Custom prefills the card', () => {
 })
 
 describe('interpret: refusals', () => {
+  // withCustomTable so the custom form joins a real table (customTable carries main's
+  // records): the run_id, deployment-twin and hardware-alias collisions are checked against
+  // the rows already in the table the candidate would land in.
   const messages = (values: FormValues, profiles: ProfileBody[] = []) =>
-    interpret(values, groups, profiles).issues.map((i) => i.message)
+    interpret(values, withCustomTable, profiles, catalogModels).issues.map((i) => i.message)
 
   it('rejects a run_id that is not a usable filename', () => {
     expect(messages(valid({ runId: 'H100 TP8' })).join(' ')).toMatch(/lower-case/)
@@ -413,9 +536,9 @@ describe('interpret: refusals', () => {
     expect(messages(valid({ hardware: 'B200' })).join(' ')).toMatch(/hardware_config\.json/)
   })
 
-  it('rejects a model that is not in the upstream catalogue', () => {
-    expect(messages(valid({ model: 'gpt-4' })).join(' ')).toMatch(/model_configs\//)
-    expect(interpret(valid({ model: 'gpt-4' }), groups, []).output).toBeNull()
+  it('rejects a model that is not in the catalogue', () => {
+    expect(messages(valid({ model: 'gpt-4' })).join(' ')).toMatch(/blis-catalog/)
+    expect(interpret(valid({ model: 'gpt-4' }), groups, [], catalogModels).output).toBeNull()
   })
 
   it('rejects non-positive load and request counts in the custom card', () => {
@@ -554,6 +677,7 @@ describe('interpret: MoE knobs', () => {
       valid({ model: moe, enableExpertParallel: true, moeCommBackend: 'pplx', runId: 'moe' }),
       groups,
       [],
+      catalogModels,
     ).output!
     expect(out.deployment.enable_expert_parallel).toBe(true)
     expect(out.deployment.moe_comm_backend).toBe('pplx')
@@ -565,7 +689,7 @@ describe('interpret: MoE knobs', () => {
   })
 
   it('omits the MoE flags when off, leaving a dense candidate unchanged', () => {
-    const out = interpret(valid({ model: moe, runId: 'plain' }), groups, []).output!
+    const out = interpret(valid({ model: moe, runId: 'plain' }), groups, [], catalogModels).output!
     expect(out.deployment.enable_expert_parallel).toBeUndefined()
     expect(out.deployment.moe_comm_backend).toBeUndefined()
     expect(out.argv).not.toContain('--enable-expert-parallel')
@@ -577,13 +701,14 @@ describe('interpret: MoE knobs', () => {
       valid({ model: 'qwen/qwen3-14b', enableExpertParallel: true }),
       groups,
       [],
+      catalogModels,
     )
     expect(output).toBeNull()
     expect(issues.some((i) => i.field === 'enableExpertParallel' && /dense/.test(i.message))).toBe(true)
   })
 
   it('rejects a MoE backend without dp>1 or expert parallelism', () => {
-    const { issues } = interpret(valid({ model: moe, moeCommBackend: 'pplx' }), groups, [])
+    const { issues } = interpret(valid({ model: moe, moeCommBackend: 'pplx' }), groups, [], catalogModels)
     expect(issues.some((i) => i.field === 'moeCommBackend' && /dp > 1 or expert/.test(i.message))).toBe(true)
   })
 })
@@ -652,13 +777,16 @@ describe('interpret: prefill/decode disaggregation', () => {
 describe('interpret: the declaration it writes', () => {
   const output = interpret(valid(), groups, []).output!
 
-  it('writes a runnable runs.yaml holding the group, the flags in full, and the row', () => {
+  it('writes the declaration holding the workload-spec group, the flags in full, and the row', () => {
     expect(output.yamlFile).toContain('schema_version: 1')
     expect(output.yamlFile).toContain('model: qwen/qwen3-14b')
-    expect(output.yamlFile).toContain('      value: 6')
+    // The custom workload is a spec now, so the group block carries the inline spec.
+    expect(output.yamlFile).toContain('type: workload-spec')
+    expect(output.yamlFile).toContain('type: gaussian')
+    expect(output.yamlFile).toContain('aggregate_rate: 6')
     expect(output.yamlFile).toContain('max_num_batched_tokens: 8192')
     expect(output.yamlFile).toContain('- {run_id: h100-tp8, hardware: H100, tp: 8}')
-    // arrival_process is derived by the CLI, so authoring it would be rejected.
+    // arrival_process is a derived field of the flat distribution, absent from a spec run.
     expect(output.yamlFile).not.toContain('arrival_process')
   })
 
@@ -736,24 +864,34 @@ describe('postRun', () => {
   })
 })
 
-describe('catalog: every model is one the leaderboard will accept', () => {
+describe('interpret: model validation against the fetched catalog', () => {
   // schema/run.schema.json and internal/spec/spec.go both require the model to be
-  // org-prefixed (this pattern). blis itself accepts a bare model_configs dir name
-  // — bundledModelConfigDir strips the org — but the leaderboard's own validation
-  // rejects it, so a bare entry here produces a record that fails on write.
+  // org-prefixed. The catalog is now fetched from the server (internal/modelcatalog builds
+  // each name as <org>/<dir>, and tests that invariant); interpret's job here is to accept
+  // the fetched names and reject anything absent — but only once the list has loaded.
   const ORG_PREFIXED = /^[^/]+\/[^/]+$/
 
-  it.each(MODELS)('%s is org-prefixed', (model) => {
-    expect(model).toMatch(ORG_PREFIXED)
+  it.each(catalogModels.map((m) => m.name))('%s is org-prefixed', (name) => {
+    expect(name).toMatch(ORG_PREFIXED)
   })
 
-  it('offers no model interpret would flag', () => {
-    for (const model of MODELS) {
-      const modelIssues = interpret(valid({ model }), groups, []).issues.filter(
+  it('flags none of the fetched catalog models', () => {
+    for (const { name } of catalogModels) {
+      const modelIssues = interpret(valid({ model: name }), groups, [], catalogModels).issues.filter(
         (i) => i.field === 'model',
       )
-      expect(modelIssues, model).toEqual([])
+      expect(modelIssues, name).toEqual([])
     }
+  })
+
+  it('rejects a model absent from the fetched catalog', () => {
+    const { issues } = interpret(valid({ model: 'gpt-4' }), groups, [], catalogModels)
+    expect(issues.some((i) => i.field === 'model')).toBe(true)
+  })
+
+  it('skips the model check until the catalog loads (empty list)', () => {
+    const { issues } = interpret(valid({ model: 'gpt-4' }), groups, [], [])
+    expect(issues.some((i) => i.field === 'model')).toBe(false)
   })
 })
 

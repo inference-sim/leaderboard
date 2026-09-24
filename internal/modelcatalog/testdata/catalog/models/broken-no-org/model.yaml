@@ -1,0 +1,4 @@
+name: broken
+source:
+  provider: huggingface
+  repo: bare-name-no-slash

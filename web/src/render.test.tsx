@@ -593,6 +593,8 @@ describe('NewRun', () => {
       onWorkloadInitialized={() => {}}
       runIdEdited={false}
       onRunIdEdited={() => {}}
+      customNameEdited={false}
+      onCustomNameEdited={() => {}}
       running={false}
       errorMessage={null}
       onRun={() => {}}
@@ -635,8 +637,10 @@ describe('NewRun', () => {
   })
 
   it('falls back to the editable custom card, tokens and deadline included', () => {
-    expect(html).toContain('Input tokens (mean)')
-    expect(html).toContain('Output tokens (mean)')
+    expect(html).toContain('Input mean')
+    expect(html).toContain('Input max')
+    expect(html).toContain('Output mean')
+    expect(html).toContain('Output max')
     expect(html).toContain('Deadline (s, negative disables)')
     expect(html).toContain('author a workload in the Workloads tab')
   })
@@ -647,6 +651,13 @@ describe('NewRun', () => {
     expect(html).toContain('Name')
     expect(html).toContain('placeholder="my-workload"')
     expect(html).toContain('Saved to the catalog under this name when you run it')
+  })
+
+  it('opens the custom name with a suggested unique value, not a blank field', () => {
+    // The name is prefilled the way the run id is, so the card is runnable without typing
+    // one. The mount effect then dedupes it against the catalog, but effects do not run
+    // under renderToStaticMarkup, so this pins the seeded starting value.
+    expect(html).toContain('value="custom-1"')
   })
 
   it('exposes the candidate serving knobs directly, grouped by theme', () => {

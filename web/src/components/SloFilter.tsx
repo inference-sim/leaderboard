@@ -61,10 +61,10 @@ export function SloFilter({ metrics, targets, onChange }: Props) {
   const throughput = metrics.filter((m) => m.group === 'throughput')
   const setSlot = (key: string, value: string) => onChange({ ...targets, [key]: value })
 
-  const section = (heading: string, rows: SloMetric[]) =>
+  const section = (group: SloMetric['group'], heading: string, rows: SloMetric[]) =>
     rows.length > 0 && (
       <div className="slogroup">
-        <div className="slogrouphd">{heading}</div>
+        <div className={`slogrouphd slogrouphd--${group}`}>{heading}</div>
         <div className="slorows">
           {rows.map((m) => (
             <SloRow key={m.key} metric={m} value={targets[m.key] ?? ''} onSet={(v) => setSlot(m.key, v)} />
@@ -95,7 +95,7 @@ export function SloFilter({ metrics, targets, onChange }: Props) {
       <div className="slopreview" hidden={open}>
         {chips.length > 0 ? (
           chips.map((c) => (
-            <span key={c.key} className="slochip">
+            <span key={c.key} className={`slochip slochip--${c.group}`}>
               {c.text}
             </span>
           ))
@@ -105,8 +105,8 @@ export function SloFilter({ metrics, targets, onChange }: Props) {
       </div>
 
       <div id={bodyId} className="slobody" hidden={!open}>
-        {section('Latency (max ms)', latency)}
-        {section('Throughput (min per second)', throughput)}
+        {section('latency', 'Latency (max ms)', latency)}
+        {section('throughput', 'Throughput (min per second)', throughput)}
         <div className="sloactions">
           <button type="button" className="tagaction" onClick={() => onChange(emptyTargets())}>
             Clear

@@ -174,9 +174,9 @@ describe('targetChips', () => {
 
   it('labels each set target with its direction and formatted value, in metric order', () => {
     expect(targetChips({ ttft_p99_ms: 500, e2e_p99_ms: 5000, tokens_per_sec: 1000 })).toEqual([
-      { key: 'ttft_p99_ms', text: 'TTFT p99 ≤ 500.0ms' },
-      { key: 'e2e_p99_ms', text: 'E2E p99 ≤ 5.00s' },
-      { key: 'tokens_per_sec', text: 'Tokens/s ≥ 1,000.0' },
+      { key: 'ttft_p99_ms', text: 'TTFT p99 ≤ 500.0ms', group: 'latency' },
+      { key: 'e2e_p99_ms', text: 'E2E p99 ≤ 5.00s', group: 'latency' },
+      { key: 'tokens_per_sec', text: 'Tokens/s ≥ 1,000.0', group: 'throughput' },
     ])
   })
 })
