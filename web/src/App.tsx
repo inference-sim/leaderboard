@@ -15,14 +15,15 @@ import { SLO_METRICS, emptyTargets, parseTargets } from './slo'
 import type { RawTargets } from './slo'
 import { NewRun } from './components/NewRun'
 import { LiveRunBanner } from './components/LiveRunBanner'
-import { Workloads } from './components/Workloads'
+import { Catalog } from './components/Catalog'
+import { ErrorBoundary } from './components/ErrorBoundary'
 import { emptyFilterNoun } from './filter'
 import { initialValues, saveThenRun } from './newrun'
 import type { FormValues, Output } from './newrun'
 import { runDeclFromOutput, workloadKeyForGroup } from './liverun'
 import type { LiveRun, RevealTarget } from './liverun'
 
-type View = 'board' | 'declare' | 'workloads'
+type View = 'board' | 'declare' | 'catalog'
 
 // Line icons, stroked in currentColor like the copy glyph, so the rail reads as icons
 // alone when collapsed. Each is the accessible name's picture: ranked bars, stacked
@@ -35,19 +36,24 @@ function BoardIcon() {
   )
 }
 
-function WorkloadsIcon() {
-  return (
-    <svg className="navico" viewBox="0 0 24 24" aria-hidden="true">
-      <path d="M12 3 21 8l-9 5-9-5 9-5ZM3 12l9 5 9-5M3 16l9 5 9-5" />
-    </svg>
-  )
-}
-
 function DeclareIcon() {
   return (
     <svg className="navico" viewBox="0 0 24 24" aria-hidden="true">
       <rect x="4" y="4" width="16" height="16" rx="2" />
       <path d="M12 9v6M9 12h6" />
+    </svg>
+  )
+}
+
+// Catalog: what BLIS can run (models and hardware), a grid of items in the rail's stroke
+// vocabulary, distinct from the ranked bars and the workload layers.
+function CatalogIcon() {
+  return (
+    <svg className="navico" viewBox="0 0 24 24" aria-hidden="true">
+      <rect x="3" y="3" width="7" height="7" rx="1" />
+      <rect x="14" y="3" width="7" height="7" rx="1" />
+      <rect x="3" y="14" width="7" height="7" rx="1" />
+      <rect x="14" y="14" width="7" height="7" rx="1" />
     </svg>
   )
 }
@@ -75,7 +81,7 @@ function BlisIcon() {
 
 const VIEWS: { view: View; hash: string; label: string; icon: ReactNode }[] = [
   { view: 'board', hash: '#/', label: 'Leaderboard', icon: <BoardIcon /> },
-  { view: 'workloads', hash: '#/workloads', label: 'Workloads', icon: <WorkloadsIcon /> },
+  { view: 'catalog', hash: '#/catalog', label: 'Catalog', icon: <CatalogIcon /> },
   { view: 'declare', hash: '#/declare', label: 'Declare a run', icon: <DeclareIcon /> },
 ]
 
@@ -93,7 +99,16 @@ function initialCollapsed(): boolean {
 
 function viewFromHash(hash: string): View {
   if (hash.startsWith('#/declare')) return 'declare'
-  if (hash.startsWith('#/workloads')) return 'workloads'
+  // Catalog holds the Models, Hardware and Workloads tabs. The old top-level #/workloads,
+  // #/models and #/hardware links (and the Declare form's workload hand-off) all land on
+  // Catalog, which reads the hash to pick its inner tab.
+  if (
+    hash.startsWith('#/catalog') ||
+    hash.startsWith('#/models') ||
+    hash.startsWith('#/hardware') ||
+    hash.startsWith('#/workloads')
+  )
+    return 'catalog'
   return 'board'
 }
 
@@ -308,48 +323,52 @@ export function App() {
             </p>
           </header>
 
-          {view === 'declare' ? (
-            <NewRun
-              groups={groups}
-              values={formValues}
-              onChange={setFormValues}
-              workloadInitialized={workloadInitialized}
-              onWorkloadInitialized={() => setWorkloadInitialized(true)}
-              runIdEdited={runIdEdited}
-              onRunIdEdited={() => setRunIdEdited(true)}
-              customNameEdited={customNameEdited}
-              onCustomNameEdited={() => setCustomNameEdited(true)}
-              running={liveRun?.status === 'running'}
-              errorMessage={liveRun?.status === 'error' ? liveRun.message : null}
-              onRun={startRun}
-            />
-          ) : view === 'workloads' ? (
-            <Workloads boardWorkloads={workloads} />
-          ) : (
-            <>
-              {(liveRun?.status === 'running' || liveRun?.status === 'done') && (
-                <LiveRunBanner
-                  liveRun={liveRun}
-                  onDismiss={() => setLiveRun(null)}
-                  onReveal={onReveal}
-                />
-              )}
-              {deleteError && (
-                <p className="dek issue" role="alert">
-                  {deleteError}
-                </p>
-              )}
-              <Leaderboard
-                workloads={workloads}
-                selectedKey={selectedKey}
-                onSelect={setSelectedKey}
-                revealTarget={revealTarget}
-                onRevealed={onRevealed}
-                canDelete={serverAvailable}
-                onDelete={requestDelete}
+          {/* A crash in any one view shows a contained message instead of blanking the whole
+              app; keyed by view so switching tabs clears it. */}
+          <ErrorBoundary resetKey={view}>
+            {view === 'declare' ? (
+              <NewRun
+                groups={groups}
+                values={formValues}
+                onChange={setFormValues}
+                workloadInitialized={workloadInitialized}
+                onWorkloadInitialized={() => setWorkloadInitialized(true)}
+                runIdEdited={runIdEdited}
+                onRunIdEdited={() => setRunIdEdited(true)}
+                customNameEdited={customNameEdited}
+                onCustomNameEdited={() => setCustomNameEdited(true)}
+                running={liveRun?.status === 'running'}
+                errorMessage={liveRun?.status === 'error' ? liveRun.message : null}
+                onRun={startRun}
               />
-            </>
-          )}
+            ) : view === 'catalog' ? (
+              <Catalog boardWorkloads={workloads} />
+            ) : (
+              <>
+                {(liveRun?.status === 'running' || liveRun?.status === 'done') && (
+                  <LiveRunBanner
+                    liveRun={liveRun}
+                    onDismiss={() => setLiveRun(null)}
+                    onReveal={onReveal}
+                  />
+                )}
+                {deleteError && (
+                  <p className="dek issue" role="alert">
+                    {deleteError}
+                  </p>
+                )}
+                <Leaderboard
+                  workloads={workloads}
+                  selectedKey={selectedKey}
+                  onSelect={setSelectedKey}
+                  revealTarget={revealTarget}
+                  onRevealed={onRevealed}
+                  canDelete={serverAvailable}
+                  onDelete={requestDelete}
+                />
+              </>
+            )}
+          </ErrorBoundary>
         </div>
       </main>
 

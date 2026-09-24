@@ -21,6 +21,7 @@ import type { FormValues } from './newrun'
 import { NAME_PATTERN } from './workloads'
 import type { ProfileBody } from './workloads'
 import type { ModelInfo } from './models'
+import type { HardwareInfo } from './hardware'
 
 const groups = loadGroups(fixture as unknown as RunRecord[])
 
@@ -38,6 +39,21 @@ const catalogModels: ModelInfo[] = [
   { name: 'qwen/qwen2.5-7b-instruct', moe: false },
   { name: 'qwen/qwen3-14b', moe: false },
   { name: 'qwen/qwen3-30b-a3b', moe: true },
+]
+
+/**
+ * A stand-in for the catalog the form fetches from GET /api/hardware, read server-side from
+ * the upstream hardware_config.json. It carries the names these tests name plus the
+ * A100-80/A100-SXM pair, which upstream defines with identical specs: the server hands each
+ * name the other as its alias, exactly as internal/hardware.Entries does, so the membership
+ * and duplicate-row checks have the same shape the running app sees.
+ */
+const A100_SPEC = { MemoryGiB: 80, TFlopsPeak: 312 }
+const catalogHardware: HardwareInfo[] = [
+  { name: 'A100-80', aliases: ['A100-SXM'], spec: A100_SPEC },
+  { name: 'A100-SXM', aliases: ['A100-80'], spec: A100_SPEC },
+  { name: 'H100', aliases: [], spec: { MemoryGiB: 80, TFlopsPeak: 989.5 } },
+  { name: 'L40S', aliases: [], spec: { MemoryGiB: 48, TFlopsPeak: 362 } },
 ]
 const main = groups.find((g) => g.groupId === '5063e40dceb2')!
 
@@ -507,7 +523,9 @@ describe('interpret: refusals', () => {
   // records): the run_id, deployment-twin and hardware-alias collisions are checked against
   // the rows already in the table the candidate would land in.
   const messages = (values: FormValues, profiles: ProfileBody[] = []) =>
-    interpret(values, withCustomTable, profiles, catalogModels).issues.map((i) => i.message)
+    interpret(values, withCustomTable, profiles, catalogModels, catalogHardware).issues.map(
+      (i) => i.message,
+    )
 
   it('rejects a run_id that is not a usable filename', () => {
     expect(messages(valid({ runId: 'H100 TP8' })).join(' ')).toMatch(/lower-case/)
@@ -534,6 +552,28 @@ describe('interpret: refusals', () => {
 
   it('rejects hardware that is not in the upstream catalogue', () => {
     expect(messages(valid({ hardware: 'B200' })).join(' ')).toMatch(/hardware_config\.json/)
+  })
+
+  it('accepts an alias name the catalogue knows, since blis does too', () => {
+    // A100-80 is a valid upstream name (an alias of A100-SXM), so it passes the membership
+    // check; only the duplicate-row guard, when a rival row already holds A100-SXM, refuses it.
+    const hwIssue = interpret(
+      valid({ runId: 'a100-80-tp8', hardware: 'A100-80' }),
+      groups,
+      [],
+      catalogModels,
+      catalogHardware,
+    ).issues.some((i) => i.field === 'hardware')
+    expect(hwIssue).toBe(false)
+  })
+
+  it('skips the hardware check until the catalogue has loaded', () => {
+    // With no hardware list in hand (the server has not answered yet) the form cannot judge
+    // the accelerator, so an unknown name is not rejected — the same deferral the model check
+    // makes. interpret is called without the hardware argument, as the form does before the
+    // fetch resolves.
+    const issues = interpret(valid({ hardware: 'B200' }), withCustomTable, [], catalogModels).issues
+    expect(issues.some((i) => /hardware_config\.json/.test(i.message))).toBe(false)
   })
 
   it('rejects a model that is not in the catalogue', () => {

@@ -1,4 +1,5 @@
 import type { RunGroup, RunRecord } from './load'
+import { numeric } from './format'
 
 export type ColumnGroup = 'candidate' | 'latency' | 'throughput' | 'health'
 
@@ -140,6 +141,42 @@ export interface KnobChip {
   label: string
   /** True for an extra_flags entry: a flag with no first-class field. */
   extra: boolean
+  /**
+   * Set for a structured field (routing_scorers, disaggregation): one self-contained
+   * token per scorer or pool ("precise-prefix-cache ×2", "prefill 2"). The chip renders
+   * `label` (the field name) once and each item beside it. Absent for a scalar field,
+   * whose whole value already lives in `label`.
+   */
+  items?: string[]
+}
+
+/**
+ * The two structured deployment fields as a list of per-item tokens, or null for any
+ * scalar field. String() would collapse an array or object to "[object Object]"; this
+ * spells out what the reader recognises from the command line — the scorer profile as
+ * name ×weight, the disaggregation pools and any non-default transfer physics, gated by
+ * the same "emit when on / non-default" rule as blisrun.Argv (see argvFor).
+ */
+function structuredItems(field: string, value: unknown): string[] | null {
+  if (field === 'routing_scorers' && Array.isArray(value)) {
+    return (value as NonNullable<RunRecord['deployment']['routing_scorers']>).map(
+      (s) => `${s.name} ×${numeric(s.weight)}`,
+    )
+  }
+  if (field === 'disaggregation' && value !== null && typeof value === 'object') {
+    const pd = value as NonNullable<RunRecord['deployment']['disaggregation']>
+    const items: string[] = []
+    if (pd.prefill_instances > 0) items.push(`prefill ${pd.prefill_instances}`)
+    if (pd.decode_instances > 0) items.push(`decode ${pd.decode_instances}`)
+    if (pd.prefill_decode_instances > 0) items.push(`both ${pd.prefill_decode_instances}`)
+    if (pd.decider !== 'never') items.push(`decider ${pd.decider}`)
+    if (pd.decider === 'prefix-threshold') items.push(`prefix-threshold ${pd.prefix_threshold}`)
+    if (pd.transfer_bandwidth !== 25) items.push(`transfer-bw ${numeric(pd.transfer_bandwidth)} GB/s`)
+    if (pd.transfer_base_latency !== 0.05) items.push(`transfer-lat ${numeric(pd.transfer_base_latency)} ms`)
+    if (pd.transfer_contention) items.push('contention')
+    return items
+  }
+  return null
 }
 
 /**
@@ -151,7 +188,9 @@ export function knobChips(record: RunRecord, varyingFields: string[]): KnobChip[
   const chips: KnobChip[] = []
   for (const field of varyingFields) {
     if (PROMINENT_FIELDS.has(field)) continue
-    chips.push({ label: `${field} ${String(deployment[field])}`, extra: false })
+    const items = structuredItems(field, deployment[field])
+    if (items) chips.push({ label: field, extra: false, items })
+    else chips.push({ label: `${field} ${String(deployment[field])}`, extra: false })
   }
   for (const [flag, value] of Object.entries(record.deployment.extra_flags ?? {})) {
     chips.push({ label: `--${flag} ${String(value)}`, extra: true })
@@ -173,6 +212,9 @@ export const KEY_SPEC_FIELDS = ['tp', 'dp', 'num_instances'] as const
 export interface SpecPair {
   field: string
   value: string
+  /** Set for a structured field: see {@link KnobChip.items}. When present, `value` is
+   *  empty and the tokens carry the value. */
+  items?: string[]
 }
 
 /**
@@ -210,7 +252,11 @@ export function deploymentSpec(record: RunRecord, varyingFields: string[]): Depl
     // model and hardware have their own slots in the cell; extra_flags is always a chip.
     if (field === 'extra_flags' || field === 'hardware' || field === 'model' || KEY_SPEC_SET.has(field))
       continue
-    if (varying.has(field)) knobs.push({ label: `${field} ${String(deployment[field])}`, extra: false })
+    const items = structuredItems(field, deployment[field])
+    if (varying.has(field)) {
+      if (items) knobs.push({ label: field, extra: false, items })
+      else knobs.push({ label: `${field} ${String(deployment[field])}`, extra: false })
+    } else if (items) rest.push({ field, value: '', items })
     else rest.push({ field, value: String(deployment[field]) })
   }
   // extra_flags is the escape hatch: every entry is part of row identity (A3), so it

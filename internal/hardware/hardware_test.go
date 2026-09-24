@@ -60,6 +60,39 @@ func TestNamesExcludesProseKeysAndIsSorted(t *testing.T) {
 	}
 }
 
+func TestEntriesAreSortedWithAliasesAndSpecs(t *testing.T) {
+	c := testCatalog(t)
+	entries := c.Entries()
+
+	var names []string
+	for _, e := range entries {
+		names = append(names, e.Name)
+	}
+	if want := []string{"A100-80", "A100-SXM", "H100", "L40S"}; !reflect.DeepEqual(names, want) {
+		t.Errorf("Entries names = %v, want %v", names, want)
+	}
+
+	byName := make(map[string]Entry, len(entries))
+	for _, e := range entries {
+		byName[e.Name] = e
+	}
+	// The spec-identical pair carries each other as an alias; a distinct accelerator
+	// carries none.
+	if got := byName["A100-80"].Aliases; !reflect.DeepEqual(got, []string{"A100-SXM"}) {
+		t.Errorf("A100-80 aliases = %v, want [A100-SXM]", got)
+	}
+	if got := byName["H100"].Aliases; len(got) != 0 {
+		t.Errorf("H100 aliases = %v, want none", got)
+	}
+	// The numeric spec is carried through verbatim for the page to render.
+	if got := byName["H100"].Spec["MemoryGiB"]; got != 80.0 {
+		t.Errorf("H100 MemoryGiB = %v, want 80", got)
+	}
+	if got := byName["H100"].Spec["TFlopsPeak"]; got != 989.5 {
+		t.Errorf("H100 TFlopsPeak = %v, want 989.5", got)
+	}
+}
+
 func TestLoadMissingFileNamesThePath(t *testing.T) {
 	_, err := Load(filepath.Join("testdata", "nope.json"))
 	if err == nil {

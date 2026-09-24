@@ -2,6 +2,7 @@ import type { RunRecord } from '../load'
 import { distinctModels, knobChips, varyingDeploymentFields } from '../model'
 import { missText, sloMisses } from '../slo'
 import type { SloTargets } from '../slo'
+import { Knob } from './Knob'
 
 /**
  * The runs a set SLO target pulled out of the ranking, shown rather than hidden. A sibling
@@ -42,9 +43,7 @@ export function SloBand({ hidden, targets }: { hidden: RunRecord[]; targets: Slo
                 {record.deployment.hardware} tp{record.deployment.tp}
               </span>
               {chips.map((chip) => (
-                <span key={chip.label} className={chip.extra ? 'knob extra' : 'knob'}>
-                  {chip.label}
-                </span>
+                <Knob key={chip.label} chip={chip} />
               ))}
             </div>
             <ul className="slomisses">

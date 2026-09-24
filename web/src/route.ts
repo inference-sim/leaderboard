@@ -1,8 +1,9 @@
 /**
  * The `?workload=<name>` deep link, shared by the two places that carry it: the Declare
  * form (`#/declare?workload=…`, which preselects the workload to run) and the Workloads
- * tab (`#/workloads?workload=…`, which opens that saved workload's card). Keeping the
- * convention in one module means the reader and the writer cannot drift apart.
+ * tab of the Catalog (`#/catalog/workloads?workload=…`, which opens that saved workload's
+ * card). Keeping the convention in one module means the reader and the writer cannot drift
+ * apart.
  */
 
 /** The workload name in the route hash's query, or null when absent or empty. */
@@ -13,7 +14,7 @@ export function workloadParam(hash: string): string | null {
   return name === '' ? null : name
 }
 
-/** The Workloads-tab route that opens on a named workload's card. */
+/** The Catalog Workloads-tab route that opens on a named workload's card. */
 export function workloadsHref(name: string): string {
-  return `#/workloads?workload=${encodeURIComponent(name)}`
+  return `#/catalog/workloads?workload=${encodeURIComponent(name)}`
 }

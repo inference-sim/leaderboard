@@ -97,6 +97,12 @@ code {
   line-height: 1.5;
 }
 
+/* Monospace utility for names, ids, and numeric values (model names, hardware specs, config
+ * fields). Referenced across the catalog and workload views. */
+.mono {
+  font-family: var(--font-mono);
+}
+
 .group {
   margin-bottom: 64px;
 }
@@ -431,20 +437,18 @@ code {
 }
 
 /*
- * The table frame is the scroll port on both axes: `overflow-x` for a table wider than
- * the screen (the frozen first column pins against it), and a capped `max-height` so a
- * long table scrolls its body inside the frame while the sticky header rows below freeze
- * against its top. Without the height cap the frame grows to the full table and the whole
- * page scrolls instead, leaving the "sticky" header nothing to stick to. The cap only
- * bites once a table is taller than it; a short table shows in full with no inner scroll.
+ * No scroll frame around the table: it grows to its full height and rides the page's own
+ * scroll, so it reads as the page's main content rather than a cramped inner widget. The
+ * wrapper is deliberately NOT an overflow scroll container — an `overflow` here would
+ * capture the sticky `thead` and pin it to this box instead of letting it freeze against
+ * the viewport (see the sticky header rules below). The cost is that a table wider than the
+ * content column scrolls the whole page sideways rather than an inner frame; the first
+ * column pins left through that scroll (its `left: 0` sticky now anchors to the page), so
+ * the deployment stays in view. The table carries its own panel ground, since there is no
+ * frame left to supply it — the header cells are opaque so scrolled rows never show through.
  */
 .tscroll {
-  overflow-x: auto;
-  overflow-y: auto;
-  max-height: 80vh;
-  border: 1px solid var(--line);
-  border-radius: 3px;
-  background: var(--panel);
+  /* intentionally empty — see the note above on why this must not scroll */
 }
 
 table.readout {
@@ -452,6 +456,7 @@ table.readout {
   border-collapse: collapse;
   font-size: 13px;
   min-width: 760px;
+  background: var(--panel);
   /* Height of the grouped-header row, so the column-label row beneath it can freeze at
    * exactly that offset (both header rows stay visible when the body scrolls). Kept in
    * step with `.grp th`'s fixed line-height plus its 8px/4px vertical padding. */
@@ -778,6 +783,24 @@ td.dep {
   border-color: var(--warn-line);
   background: var(--warn-bg);
   color: var(--warn-ink);
+}
+
+/* A structured argument (routing_scorers, disaggregation) is not one value but several:
+ * the field name leads, then one boxed token per scorer or pool. The group is a single
+ * flex item so its label and tokens stay together and wrap as a unit inside the knobs
+ * row, rather than the label being orphaned from its tokens across a wrap. */
+.knobgroup {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 5px 6px;
+}
+
+.knobgroup-label {
+  font-family: var(--font-mono);
+  font-style: normal;
+  font-size: 11.5px;
+  color: var(--muted);
 }
 
 /* A deployment argument value can be long (a path, a long identifier). The container
@@ -3702,4 +3725,320 @@ button.danger {
     opacity: 0;
     transform: translateY(6px);
   }
+}
+
+/* ---------- Catalog (Models + Hardware tabs) ---------- */
+
+/* Two tabs of what BLIS can run, in the same hairline-on-graph-paper vocabulary as the
+ * Workloads gallery — no drop shadows, 3px radius, the teal accent held in reserve. Models
+ * read as a grouped, openable index; accelerators, which carry structured numbers, read as
+ * spec cards. */
+
+/* The Catalog's inner tab bar: Models / Hardware, an underline-selected row above the active
+ * panel. Sits below the page heading and intro. */
+.subtabs {
+  display: flex;
+  gap: 4px;
+  margin: 0 0 24px;
+  border-bottom: 1px solid var(--line);
+}
+
+.subtab {
+  padding: 8px 14px;
+  margin-bottom: -1px;
+  border: none;
+  border-bottom: 2px solid transparent;
+  background: none;
+  font: inherit;
+  font-size: 14px;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.subtab:hover {
+  color: var(--ink);
+}
+
+.subtab.active {
+  color: var(--accent-ink);
+  border-bottom-color: var(--accent);
+  font-weight: 600;
+}
+
+.subtab:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: -2px;
+}
+
+/* Models grouped under their provider org. The orgs stack; each carries a quiet heading
+ * and the models beneath it as an accordion list. */
+.model-orgs {
+  margin-top: 18px;
+  display: grid;
+  gap: 22px;
+}
+
+.model-org-name {
+  margin: 0 0 8px;
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--ink);
+}
+
+/* The models under an org: full-width rows in one hairline container, like the Workloads
+ * list, so a row can open in place to reveal its config. */
+.model-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  border: 1px solid var(--line-strong);
+  border-radius: 3px;
+  background: var(--panel);
+  overflow: hidden;
+}
+
+.model-item + .model-item {
+  border-top: 1px solid var(--line);
+}
+
+.model-item.open {
+  background: var(--paper);
+}
+
+/* The row face is the toggle: a full-width button so the keyboard reaches it, the caret and
+ * name on the left and the MoE badge pushed to the right. */
+.model-face {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 12px;
+  border: none;
+  background: none;
+  text-align: left;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+}
+
+.model-face:hover {
+  background: var(--accent-soft);
+}
+
+.model-face:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: -2px;
+}
+
+.model-name {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  font-size: 13px;
+}
+
+/* The disclosure caret: points right when closed, a quarter-turn down when open. */
+.model-caret {
+  flex: none;
+  color: var(--muted);
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2.5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  transition: transform 120ms ease;
+}
+
+.model-caret.open {
+  transform: rotate(90deg);
+}
+
+/* The config panel that opens beneath a model, indented to line up past the caret. */
+.model-config {
+  padding: 2px 12px 14px 34px;
+}
+
+/* The opened model's detail: model.yaml tags beside the config.json block. The tag column is
+ * kept narrow so the config gets the room; the two stack on a narrow screen. */
+.model-detail {
+  display: grid;
+  grid-template-columns: minmax(190px, 240px) minmax(0, 1fr);
+  gap: 18px;
+  align-items: start;
+  padding-top: 4px;
+}
+
+@media (max-width: 680px) {
+  .model-detail {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* A quiet column heading over the tags, matching the CopyBlock label opposite it. */
+.model-detail-head {
+  margin: 0 0 8px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--muted);
+}
+
+/* The provenance tags: a stacked list of small label-over-value chips. */
+.mtags {
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.mtag {
+  padding: 6px 10px;
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  background: var(--panel);
+}
+
+.mtag-key {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  opacity: 0.85;
+}
+
+.mtag-val {
+  margin: 1px 0 0;
+  font-size: 12.5px;
+  overflow-wrap: anywhere;
+}
+
+/* A tag's value link inherits the tag's ink so a colored chip stays cohesive. */
+.mtag-val a {
+  color: inherit;
+}
+
+/* One tone per source field, from the shared tag palette (the same soft/ink/line triples the
+ * Workloads tags and MoE badge use), so the fields read as a color key rather than grey rows. */
+.mtag-teal {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+  color: var(--accent-ink);
+}
+
+.mtag-purple {
+  background: var(--alt-bg);
+  border-color: var(--alt-line);
+  color: var(--alt-ink);
+}
+
+.mtag-amber {
+  background: var(--warn-bg);
+  border-color: var(--warn-line);
+  color: var(--warn-ink);
+}
+
+/* A date is secondary, so retrieved stays quiet: the graph-paper ground and muted ink. */
+.mtag-neutral {
+  background: var(--paper);
+  border-color: var(--line-strong);
+  color: var(--muted);
+}
+
+/* The MoE badge, in the alt purple reserved for that meaning elsewhere (.tag-workload-spec),
+ * so mixture-of-experts reads the same colour wherever it appears. Same box as the amber
+ * preset badge (.badge.builtin), minus its leading margin since it sits at a row's end. */
+.badge.moe {
+  display: inline-block;
+  padding: 1px 7px;
+  border-radius: 10px;
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  border: 1px solid var(--alt-line);
+  background: var(--alt-bg);
+  color: var(--alt-ink);
+  vertical-align: middle;
+  white-space: nowrap;
+}
+
+/* Accelerators as spec cards: one per distinct accelerator (alias groups collapsed). */
+.hw-grid {
+  margin-top: 18px;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(258px, 1fr));
+  gap: 12px;
+}
+
+.hw-card {
+  border: 1px solid var(--line-strong);
+  border-radius: 3px;
+  background: var(--panel);
+  padding: 14px 16px;
+}
+
+.hw-card-head {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+  margin-bottom: 10px;
+}
+
+.hw-card-head h4 {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+}
+
+/* The other names for the same accelerator, spec-identical, named rather than repeated as a
+ * second card. */
+.hw-alias {
+  font-size: 11.5px;
+  color: var(--muted);
+}
+
+.hw-specs {
+  margin: 0;
+  display: grid;
+  gap: 5px;
+}
+
+/* Each spec as a label/value pair, the value right-aligned in mono like the numbers
+ * elsewhere on the board, the label muted. */
+.hw-spec {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.hw-spec dt {
+  font-size: 12.5px;
+  color: var(--muted);
+}
+
+.hw-spec dd {
+  margin: 0;
+  font-size: 13px;
+  text-align: right;
+}
+
+/* ---------- Error boundary ---------- */
+
+/* The message shown when a view throws instead of blanking the whole app. The error text is
+ * verbatim in a critical-colored block, so a reader can report exactly what broke. */
+.viewerror-msg {
+  margin: 12px 0 0;
+  padding: 12px 14px;
+  border: 1px solid var(--crit-line);
+  border-left: 3px solid var(--crit-line);
+  border-radius: 3px;
+  background: var(--crit-bg);
+  color: var(--crit-ink);
+  overflow-x: auto;
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  white-space: pre-wrap;
+  word-break: break-word;
 }

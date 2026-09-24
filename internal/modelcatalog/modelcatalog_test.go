@@ -1,9 +1,58 @@
 package modelcatalog
 
 import (
+	"errors"
 	"path/filepath"
+	"strings"
 	"testing"
 )
+
+const catalogRoot = "testdata/catalog"
+
+func TestConfigReturnsProvenanceAndPrettyConfig(t *testing.T) {
+	d, err := Config(catalogRoot, "qwen/qwen3-30b-a3b")
+	if err != nil {
+		t.Fatalf("Config: %v", err)
+	}
+	if !d.MoE {
+		t.Error("qwen3-30b-a3b should be MoE")
+	}
+	if d.Source.Repo != "Qwen/Qwen3-30B-A3B" || d.Source.Revision != "abc123" {
+		t.Errorf("source = %+v, want repo Qwen/Qwen3-30B-A3B @ abc123", d.Source)
+	}
+	if !strings.Contains(d.Config, "num_experts") {
+		t.Errorf("config should carry the raw config.json, got %q", d.Config)
+	}
+	// Provider is carried through model.yaml's source block for the provenance tags.
+	if d.Source.Provider != "huggingface" {
+		t.Errorf("source.provider = %q, want huggingface", d.Source.Provider)
+	}
+	// config.json is pretty-printed for reading: the fixture is a single minified line, so
+	// indentation only appears if it was reformatted.
+	if !strings.Contains(d.Config, "\n  ") {
+		t.Errorf("config should be indented, got %q", d.Config)
+	}
+}
+
+func TestConfigModelWithoutConfigJSONHasEmptyConfig(t *testing.T) {
+	d, err := Config(catalogRoot, "someorg/dense-no-config")
+	if err != nil {
+		t.Fatalf("Config: %v", err)
+	}
+	if d.MoE {
+		t.Error("a model with no config.json is dense")
+	}
+	if d.Config != "" {
+		t.Errorf("config = %q, want empty for a model that ships no config.json", d.Config)
+	}
+}
+
+func TestConfigUnknownNameIsNotFound(t *testing.T) {
+	_, err := Config(catalogRoot, "acme/does-not-exist")
+	if !errors.Is(err, ErrNotFound) {
+		t.Fatalf("Config unknown name error = %v, want ErrNotFound", err)
+	}
+}
 
 // The fixture tree under testdata/catalog/models covers: a MoE model whose org needs
 // lowercasing (Qwen), a dense model, a MoE model flagged by a different top-level expert

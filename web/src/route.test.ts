@@ -21,8 +21,8 @@ describe('workloadParam', () => {
 })
 
 describe('workloadsHref', () => {
-  it('builds the Workloads-tab deep link for a name', () => {
-    expect(workloadsHref('chat-6rps')).toBe('#/workloads?workload=chat-6rps')
+  it('builds the Catalog Workloads-tab deep link for a name', () => {
+    expect(workloadsHref('chat-6rps')).toBe('#/catalog/workloads?workload=chat-6rps')
   })
 
   it('encodes reserved characters so the round trip is faithful', () => {

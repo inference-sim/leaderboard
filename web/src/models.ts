@@ -17,6 +17,25 @@ export interface ModelInfo {
   moe: boolean
 }
 
+/** A model's provenance from model.yaml, shown as tags. A field absent from model.yaml is an
+ * empty string and its tag is omitted. Mirrors internal/modelcatalog.Source. */
+export interface ModelSource {
+  provider: string
+  repo: string
+  revision: string
+  retrieved: string
+}
+
+/** One model's full detail, fetched on demand when a reader opens it in the catalog: the
+ * list fields, its provenance (shown as tags), and the config.json blis reads (pretty-printed,
+ * or an empty string when the model ships none). Mirrors internal/modelcatalog.Detail. */
+export interface ModelDetail {
+  name: string
+  moe: boolean
+  source: ModelSource
+  config: string
+}
+
 const UNREACHABLE =
   'Could not reach the model server. Start it with `make build && ./bin/leaderboard serve`, then try again.'
 
@@ -52,4 +71,35 @@ export async function listModels(fetchImpl: typeof fetch = fetch): Promise<Model
     throw new Error(message)
   }
   return (parsed as { models?: ModelInfo[] } | null)?.models ?? []
+}
+
+/** getModelConfig fetches one model's detail (provenance + config.json), the same shape as
+ * listModels' error handling: a fetch rejection means the server is down, an HTTP error
+ * carries the server's {error} message (a 404 for an unknown model). fetchImpl is injectable
+ * for tests. */
+export async function getModelConfig(
+  name: string,
+  fetchImpl: typeof fetch = fetch,
+): Promise<ModelDetail> {
+  let res: Response
+  try {
+    res = await fetchImpl(`/api/models/config?name=${encodeURIComponent(name)}`)
+  } catch {
+    throw new Error(UNREACHABLE)
+  }
+  const text = await res.text()
+  let parsed: unknown = null
+  try {
+    parsed = text ? JSON.parse(text) : null
+  } catch {
+    parsed = null
+  }
+  if (!res.ok) {
+    const message =
+      parsed && typeof parsed === 'object' && 'error' in parsed
+        ? String((parsed as { error: unknown }).error)
+        : `The model server returned HTTP ${res.status}.`
+    throw new Error(message)
+  }
+  return parsed as ModelDetail
 }

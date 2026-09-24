@@ -99,6 +99,8 @@ func (s *server) routes() *http.ServeMux {
 	mux.HandleFunc("DELETE /api/results/{group}/{run}", s.handleResultDelete)
 	s.registerWorkloadRoutes(mux)
 	mux.HandleFunc("GET /api/models", s.handleModels)
+	mux.HandleFunc("GET /api/models/config", s.handleModelConfig)
+	mux.HandleFunc("GET /api/hardware", s.handleHardware)
 	// Serve the built web app when it exists, so `leaderboard serve` is the whole
 	// thing in one process. In development the Vite dev server proxies /api here
 	// instead, and this static handler is never reached.

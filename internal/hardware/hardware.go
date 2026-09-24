@@ -101,3 +101,34 @@ func (c *Catalog) Aliases(name string) []string {
 	sort.Strings(out)
 	return out
 }
+
+// Entry is one accelerator the way the Catalog page shows it: its name, blis's
+// numeric spec, and the other names whose spec is byte-identical (aliases — one
+// accelerator, not a rival candidate).
+type Entry struct {
+	Name    string         `json:"name"`
+	Aliases []string       `json:"aliases"`
+	Spec    map[string]any `json:"spec"`
+}
+
+// Entries returns every hardware entry, sorted by name, exposing the parsed specs
+// the Catalog page renders. It reuses Names and Aliases so the sort order and the
+// alias grouping cannot drift from what the run-time checks already use.
+func (c *Catalog) Entries() []Entry {
+	names := c.Names()
+	out := make([]Entry, 0, len(names))
+	for _, name := range names {
+		// Aliases returns nil for an accelerator with none; send [] rather than a nil slice
+		// so the JSON is "aliases":[] not null, and the client never has to guard a spread.
+		aliases := c.Aliases(name)
+		if aliases == nil {
+			aliases = []string{}
+		}
+		out = append(out, Entry{
+			Name:    name,
+			Aliases: aliases,
+			Spec:    c.specs[name],
+		})
+	}
+	return out
+}

@@ -128,6 +128,76 @@ describe('deploymentSpec', () => {
   })
 })
 
+describe('structured deployment fields render as per-item chips, never "[object Object]"', () => {
+  // routing_scorers and disaggregation are the two structured deployment fields. String()
+  // collapses them to "[object Object]"; the chip instead names the field once and lists
+  // one token per scorer / pool, mirroring the value blis takes on the command line.
+  const weighted = (): RunRecord => {
+    const rec: RunRecord = JSON.parse(JSON.stringify(main.records[0]))
+    rec.deployment.routing_policy = 'weighted'
+    rec.deployment.routing_scorers = [
+      { name: 'precise-prefix-cache', weight: 2 },
+      { name: 'queue-depth', weight: 1 },
+    ]
+    return rec
+  }
+
+  it('lists one token per scorer, name ×weight', () => {
+    const chip = knobChips(weighted(), ['routing_scorers']).find((c) => c.label === 'routing_scorers')
+    expect(chip).toBeDefined()
+    expect(chip!.items).toEqual(['precise-prefix-cache ×2', 'queue-depth ×1'])
+    expect(JSON.stringify(chip)).not.toContain('object Object')
+  })
+
+  it('lists the disaggregation pools that are on, and only non-default transfer knobs', () => {
+    const rec = weighted()
+    rec.deployment.disaggregation = {
+      prefill_instances: 2,
+      decode_instances: 2,
+      prefill_decode_instances: 0,
+      decider: 'never',
+      prefix_threshold: 16,
+      transfer_bandwidth: 25,
+      transfer_base_latency: 0.05,
+      transfer_contention: false,
+    }
+    const chip = knobChips(rec, ['disaggregation']).find((c) => c.label === 'disaggregation')
+    expect(chip!.items).toEqual(['prefill 2', 'decode 2'])
+  })
+
+  it('spells out the shared pool, decider and any non-default transfer physics', () => {
+    const rec = weighted()
+    rec.deployment.disaggregation = {
+      prefill_instances: 1,
+      decode_instances: 0,
+      prefill_decode_instances: 3,
+      decider: 'prefix-threshold',
+      prefix_threshold: 32,
+      transfer_bandwidth: 50,
+      transfer_base_latency: 0.1,
+      transfer_contention: true,
+    }
+    const chip = knobChips(rec, ['disaggregation']).find((c) => c.label === 'disaggregation')
+    expect(chip!.items).toEqual([
+      'prefill 1',
+      'both 3',
+      'decider prefix-threshold',
+      'prefix-threshold 32',
+      'transfer-bw 50 GB/s',
+      'transfer-lat 0.1 ms',
+      'contention',
+    ])
+  })
+
+  it('groups a constant structured field the same way when it folds into rest', () => {
+    const spec = deploymentSpec(weighted(), [])
+    const pair = spec.rest.find((p) => p.field === 'routing_scorers')
+    expect(pair).toBeDefined()
+    expect(pair!.items).toEqual(['precise-prefix-cache ×2', 'queue-depth ×1'])
+    expect(JSON.stringify(pair)).not.toContain('object Object')
+  })
+})
+
 describe('distinctHardware / distinctModels', () => {
   it('counts the accelerators present, so the cell can drop a one-GPU-type label', () => {
     expect(distinctHardware(main.complete)).toEqual(['A100-SXM', 'H100', 'L40S'])
