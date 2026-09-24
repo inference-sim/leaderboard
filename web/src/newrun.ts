@@ -17,9 +17,11 @@
  */
 
 import type { RunGroup, RunRecord } from './load'
-import { HARDWARE, MODELS, SPECULATIVE_METHODS, aliasesOf, isMoEModel } from './catalog'
-import { NAME_PATTERN, profileToGroup, saveWorkload } from './workloads'
-import type { ProfileBody } from './workloads'
+import { HARDWARE, SPECULATIVE_METHODS, aliasesOf } from './catalog'
+import { isMoE } from './models'
+import type { ModelInfo } from './models'
+import { NAME_PATTERN, deriveMax, gaussianSpec, profileToGroup, saveWorkload } from './workloads'
+import type { ProfileBody, TokenStat } from './workloads'
 import { serializeSpec, type SpecObject } from './spec'
 
 export type Group = RunRecord['group']
@@ -137,14 +139,20 @@ export interface FormValues {
    * reused, so it needs a name; the two workload types are saved-or-preset (workloadSel)
    * and custom-distribution (this). */
   customName: string
-  // --- the custom card (read only when workloadSel === ''): a flat distribution ---
+  // --- the custom card (read only when workloadSel === ''): a guided single-client
+  // gaussian workload-spec. mean/stdev/min/max per token stream map onto a blis gaussian
+  // distribution, so the card is a simplified front end for a one-client spec. ---
   loadKind: LoadKind
   loadValue: string
   numRequests: string
   promptTokens: string
   promptTokensStdev: string
+  promptTokensMin: string
+  promptTokensMax: string
   outputTokens: string
   outputTokensStdev: string
+  outputTokensMin: string
+  outputTokensMax: string
   seed: string
   requestTimeoutS: string
 }
@@ -215,29 +223,94 @@ export type CardFields = Pick<
   | 'numRequests'
   | 'promptTokens'
   | 'promptTokensStdev'
+  | 'promptTokensMin'
+  | 'promptTokensMax'
   | 'outputTokens'
   | 'outputTokensStdev'
+  | 'outputTokensMin'
+  | 'outputTokensMax'
   | 'seed'
   | 'requestTimeoutS'
 >
 
+/** cardTokenFields flattens one token stream's card fields (mean/stdev/min/max) from a
+ * TokenStat, so the input and output halves are filled the same way. */
+function cardTokenFields(
+  kind: 'prompt' | 'output',
+  s: TokenStat,
+): Pick<CardFields, `${'prompt' | 'output'}Tokens${'' | 'Stdev' | 'Min' | 'Max'}`> {
+  return {
+    [`${kind}Tokens`]: String(s.mean),
+    [`${kind}TokensStdev`]: String(s.std_dev),
+    [`${kind}TokensMin`]: String(s.min),
+    [`${kind}TokensMax`]: String(s.max),
+  } as Pick<CardFields, `${'prompt' | 'output'}Tokens${'' | 'Stdev' | 'Min' | 'Max'}`>
+}
+
+/** gaussianStat reads a TokenStat back out of a gaussian distribution object, or null if
+ * the object is not a gaussian the card can represent. Used to prefill the card from a
+ * saved single-client gaussian spec. */
+function gaussianStat(dist: unknown): TokenStat | null {
+  if (!dist || typeof dist !== 'object') return null
+  const d = dist as { type?: unknown; params?: Record<string, unknown> }
+  if (d.type !== 'gaussian' || !d.params) return null
+  const num = (v: unknown) => (typeof v === 'number' ? v : NaN)
+  const stat = {
+    mean: num(d.params.mean),
+    std_dev: num(d.params.std_dev),
+    min: num(d.params.min),
+    max: num(d.params.max),
+  }
+  return Object.values(stat).every((n) => Number.isFinite(n)) ? stat : null
+}
+
+/** cardFromSpec extracts the card's token stats from a spec that is a single gaussian
+ * client — the shape the card itself authors — so re-selecting a saved custom workload
+ * prefills the card. Returns null for any richer spec the card cannot represent. */
+function cardFromSpec(spec: unknown): { input: TokenStat; output: TokenStat } | null {
+  if (!spec || typeof spec !== 'object') return null
+  const clients = (spec as { clients?: unknown }).clients
+  if (!Array.isArray(clients) || clients.length !== 1) return null
+  const c = clients[0] as { input_distribution?: unknown; output_distribution?: unknown }
+  const input = gaussianStat(c.input_distribution)
+  const output = gaussianStat(c.output_distribution)
+  return input && output ? { input, output } : null
+}
+
 /**
- * The custom card's starting values when the user picks "Custom" (R5). A distribution
- * profile prefills the card from itself; a spec profile — which the flat card cannot
- * represent — or a fresh page prefills from FALLBACK_GROUP, so the card never pretends
- * to hold a spec.
+ * The custom card's starting values when the user picks "Custom" (R5). The card is a
+ * single-client gaussian spec, so it prefills from a legacy distribution profile (bounds
+ * derived), from a saved single-gaussian-client spec (bounds as authored), or — for a
+ * richer spec the card cannot represent, or a fresh page — from FALLBACK_GROUP.
  */
 export function customFieldsFrom(profile: ProfileBody | null): CardFields {
   if (profile && profile.workload.type === 'distribution') {
     const w = profile.workload
+    const pMean = w.prompt_tokens ?? 0
+    const pStd = w.prompt_tokens_stdev ?? 0
+    const oMean = w.output_tokens ?? 0
+    const oStd = w.output_tokens_stdev ?? 0
     return {
       loadKind: (w.load?.kind ?? 'rate') as LoadKind,
       loadValue: numeric(w.load?.value ?? 0),
       numRequests: String(w.num_requests ?? 0),
-      promptTokens: String(w.prompt_tokens ?? 0),
-      promptTokensStdev: String(w.prompt_tokens_stdev ?? 0),
-      outputTokens: String(w.output_tokens ?? 0),
-      outputTokensStdev: String(w.output_tokens_stdev ?? 0),
+      ...cardTokenFields('prompt', { mean: pMean, std_dev: pStd, min: 1, max: deriveMax(pMean, pStd) }),
+      ...cardTokenFields('output', { mean: oMean, std_dev: oStd, min: 1, max: deriveMax(oMean, oStd) }),
+      seed: String(profile.seed),
+      requestTimeoutS: String(profile.request_timeout_s),
+    }
+  }
+  const fromSpec = profile?.workload.type === 'workload-spec' ? cardFromSpec(profile.workload.spec) : null
+  if (profile && fromSpec) {
+    const spec = profile.workload.spec as { num_requests?: unknown; aggregate_rate?: unknown; clients?: unknown[] }
+    const client = (spec.clients?.[0] ?? {}) as { concurrency?: unknown }
+    const concurrency = typeof client.concurrency === 'number' ? client.concurrency : null
+    return {
+      loadKind: (concurrency != null ? 'concurrency' : 'rate') as LoadKind,
+      loadValue: numeric(concurrency ?? (typeof spec.aggregate_rate === 'number' ? spec.aggregate_rate : 0)),
+      numRequests: String(typeof spec.num_requests === 'number' ? spec.num_requests : 0),
+      ...cardTokenFields('prompt', fromSpec.input),
+      ...cardTokenFields('output', fromSpec.output),
       seed: String(profile.seed),
       requestTimeoutS: String(profile.request_timeout_s),
     }
@@ -247,10 +320,18 @@ export function customFieldsFrom(profile: ProfileBody | null): CardFields {
     loadKind: w.load.kind as LoadKind,
     loadValue: numeric(w.load.value),
     numRequests: String(w.num_requests),
-    promptTokens: String(w.prompt_tokens),
-    promptTokensStdev: String(w.prompt_tokens_stdev),
-    outputTokens: String(w.output_tokens),
-    outputTokensStdev: String(w.output_tokens_stdev),
+    ...cardTokenFields('prompt', {
+      mean: w.prompt_tokens,
+      std_dev: w.prompt_tokens_stdev,
+      min: 1,
+      max: deriveMax(w.prompt_tokens, w.prompt_tokens_stdev),
+    }),
+    ...cardTokenFields('output', {
+      mean: w.output_tokens,
+      std_dev: w.output_tokens_stdev,
+      min: 1,
+      max: deriveMax(w.output_tokens, w.output_tokens_stdev),
+    }),
     seed: String(FALLBACK_GROUP.seed),
     requestTimeoutS: String(FALLBACK_GROUP.request_timeout_s),
   }
@@ -293,7 +374,8 @@ function runIdBase(hardware: string, tp: string): string {
 export function suggestRunId(values: FormValues, groups: RunGroup[], profiles: ProfileBody[]): string {
   const base = runIdBase(values.hardware, values.tp)
   const noop: (field: Issue['field'], message: string) => void = () => {}
-  const group = values.workloadSel === '' ? customGroup(values, noop) : profileGroup(values, profiles, noop)
+  const group =
+    values.workloadSel === '' ? customGroup(values, noop, () => {}) : profileGroup(values, profiles, noop)
   const taken = new Set<string>()
   if (group) for (const r of findTarget(group, groups).group?.records ?? []) taken.add(r.run_id)
   if (!taken.has(base)) return base
@@ -304,11 +386,28 @@ export function suggestRunId(values: FormValues, groups: RunGroup[], profiles: P
 }
 
 /**
+ * The custom card's suggested name: the lowest-numbered `custom-N` (N ≥ 1) that no catalog
+ * profile already holds. A custom workload is saved to the catalog on Run (P3), so it needs
+ * a name that is both valid and unique, the same reason the run id is deduplicated. This
+ * lets the card open on a usable name rather than a blank field, and gives a fresh one for
+ * the next custom run once the last is saved. It reads only the catalog, never the current
+ * field, so setting the field to its output is a fixed point and the sync effect converges.
+ */
+export function suggestWorkloadName(profiles: ProfileBody[]): string {
+  const taken = new Set(profiles.map((p) => p.name))
+  for (let n = 1; ; n++) {
+    const candidate = `custom-${n}`
+    if (!taken.has(candidate)) return candidate
+  }
+}
+
+/**
  * Default form state: the custom card, seeded from the fallback. The component upgrades
  * this to the first catalog entry once profiles load (R2); with no server the page stays
  * here, which is exactly today's offline authoring capability (R8). The run id opens on
- * the candidate's descriptive base; the component's sync effect dedupes it against the
- * board on mount and keeps it current until the reader types their own.
+ * the candidate's descriptive base and the custom name on `custom-1`; the component's sync
+ * effects dedupe both against the board and the catalog on mount and keep them current
+ * until the reader types their own.
  */
 export function initialValues(): FormValues {
   const d = FALLBACK_DEPLOYMENT
@@ -348,7 +447,7 @@ export function initialValues(): FormValues {
     speculativeAcceptanceRate: String(d.speculative_acceptance_rate),
     speculativeMethod: d.speculative_method,
     workloadSel: '',
-    customName: '',
+    customName: suggestWorkloadName([]),
     ...customFieldsFrom(null),
   }
 }
@@ -363,6 +462,7 @@ export function interpret(
   values: FormValues,
   groups: RunGroup[],
   profiles: ProfileBody[],
+  models: ModelInfo[] = [],
 ): Interpretation {
   const issues: Issue[] = []
   const push = (field: Issue['field'], message: string) => issues.push({ field, message })
@@ -466,7 +566,7 @@ export function interpret(
   // MoE knobs. blis fatally rejects --enable-expert-parallel on a dense model, and only
   // charges the MoE comm cost for a MoE model on trained-physics with dp>1 or expert
   // parallelism. The form guards all of that before a run is spent (mirrors cmd/root.go).
-  const moe = isMoEModel(values.model)
+  const moe = isMoE(models, values.model)
   const trainedPhysics = values.latencyModel === 'trained-physics'
   if (values.enableExpertParallel) {
     if (!moe) push('enableExpertParallel', `Expert parallelism needs a MoE model; ${values.model} is dense.`)
@@ -532,26 +632,35 @@ export function interpret(
     )
   }
 
-  if (!MODELS.includes(values.model)) {
+  // The model catalog is fetched from the server (GET /api/models, read from the
+  // blis-catalog clone), so an empty list means it has not loaded yet or could not be
+  // reached: with no catalog in hand the form cannot judge the model and skips the check
+  // rather than rejecting every value. Once loaded, an unknown model is rejected against
+  // the fetched names.
+  if (models.length > 0 && !models.some((m) => m.name === values.model)) {
     push(
       'model',
-      `${values.model || 'No model'} is not in ../inference-sim/model_configs/; ` +
-        `the catalogue holds ${MODELS.join(', ')}.`,
+      `${values.model || 'No model'} is not in the blis-catalog; ` +
+        `the catalogue holds ${models.map((m) => m.name).join(', ')}.`,
     )
   }
 
   // The work offered: a selected catalog profile, or the custom card. Model is no longer
   // a group field (E1) — it rides on the candidate — so the group is model-free either way.
-  const group = values.workloadSel === '' ? customGroup(values, push) : profileGroup(values, profiles, push)
+  // notes collects non-blocking warnings (a clamped custom distribution, a reused twin).
+  const notes: string[] = []
+  const group =
+    values.workloadSel === ''
+      ? customGroup(values, push, (m) => notes.push(m))
+      : profileGroup(values, profiles, push)
 
   // The two workload types the page offers: a chosen catalog workload (a preset or saved
-  // profile, named by workloadSel), or a custom distribution defined below. A custom
-  // workload is saved to the catalog on Run so it can be reused, so it carries a name and
-  // resolves to either a new profile to save or an existing one to reuse (P3: one name per
+  // profile, named by workloadSel), or a custom workload defined below. A custom workload
+  // is saved to the catalog on Run so it can be reused, so it carries a name and resolves
+  // to either a new profile to save or an existing one to reuse (P3: one name per
   // workload). A chosen workload saves nothing and names the profile it selected.
   let workloadName = values.workloadSel
   let saveProfile: ProfileBody | null = null
-  const notes: string[] = []
   if (values.workloadSel === '' && group) {
     const resolved = resolveCustomWorkload(values.customName, group, profiles, push)
     workloadName = resolved.workloadName
@@ -695,12 +804,17 @@ function profileGroup(
   return profileToGroup(profile)
 }
 
-/** The group for the custom card: always a distribution (R5). The card's numbers are
- * validated here the way internal/spec's Load validates them, so a run this accepts is
- * one blis accepts. */
+/** The group for the custom card: a single-client gaussian workload-spec (R5). The card
+ * is a guided front end for a one-client spec, so its numbers are validated against blis's
+ * gaussian rules — the sampler clamps every draw to [min, max] and floors it at 1
+ * (../inference-sim/sim/workload/distribution_test.go), so the only hard bound error is
+ * min > max — and then folded into a WorkloadSpec by gaussianSpec. Unlike the flat
+ * synthesize path (root.go:365), a mean outside [min, max] is not rejected; it is a soft
+ * warning, because blis accepts it and clamps. */
 function customGroup(
   values: FormValues,
   push: (field: Issue['field'], message: string) => void,
+  note: (message: string) => void,
 ): Group {
   const numRequests = Number(values.numRequests)
   if (!Number.isInteger(numRequests) || numRequests <= 0) {
@@ -715,22 +829,46 @@ function customGroup(
         : 'Concurrency is a positive number of in-flight sessions.',
     )
   }
-  const promptTokens = Number(values.promptTokens)
-  if (!Number.isInteger(promptTokens) || promptTokens <= 0) {
-    push('promptTokens', 'Input tokens (mean) is a whole number, 1 or more.')
+  // One token stream's gaussian stats, each field validated and the whole checked for a
+  // usable clamp. `label` is the reader's word ("Input"/"Output"); the field keys tie the
+  // message to the input that is wrong.
+  const stream = (
+    label: string,
+    meanF: 'promptTokens' | 'outputTokens',
+    stdevF: 'promptTokensStdev' | 'outputTokensStdev',
+    minF: 'promptTokensMin' | 'outputTokensMin',
+    maxF: 'promptTokensMax' | 'outputTokensMax',
+  ): TokenStat => {
+    const mean = Number(values[meanF])
+    if (!Number.isInteger(mean) || mean <= 0) {
+      push(meanF, `${label} tokens (mean) is a whole number, 1 or more.`)
+    }
+    const std_dev = Number(values[stdevF])
+    if (!Number.isInteger(std_dev) || std_dev < 0) {
+      push(stdevF, `${label}-token spread is a whole number, 0 or more.`)
+    }
+    const min = Number(values[minF])
+    if (!Number.isInteger(min) || min < 1) {
+      push(minF, `${label} tokens (min) is a whole number, 1 or more.`)
+    }
+    const max = Number(values[maxF])
+    if (!Number.isInteger(max) || max < 1) {
+      push(maxF, `${label} tokens (max) is a whole number, 1 or more.`)
+    }
+    if (Number.isInteger(min) && Number.isInteger(max) && max < min) {
+      push(maxF, `${label} tokens (max) must be at least the min (${min}).`)
+    } else if (
+      Number.isInteger(mean) &&
+      Number.isInteger(min) &&
+      Number.isInteger(max) &&
+      (mean < min || mean > max)
+    ) {
+      note(`${label} tokens: the mean (${mean}) is outside [${min}, ${max}], so every request clamps to a bound.`)
+    }
+    return { mean, std_dev, min, max }
   }
-  const promptTokensStdev = Number(values.promptTokensStdev)
-  if (!Number.isInteger(promptTokensStdev) || promptTokensStdev < 0) {
-    push('promptTokensStdev', 'Input-token spread is a whole number, 0 or more.')
-  }
-  const outputTokens = Number(values.outputTokens)
-  if (!Number.isInteger(outputTokens) || outputTokens <= 0) {
-    push('outputTokens', 'Output tokens (mean) is a whole number, 1 or more.')
-  }
-  const outputTokensStdev = Number(values.outputTokensStdev)
-  if (!Number.isInteger(outputTokensStdev) || outputTokensStdev < 0) {
-    push('outputTokensStdev', 'Output-token spread is a whole number, 0 or more.')
-  }
+  const input = stream('Input', 'promptTokens', 'promptTokensStdev', 'promptTokensMin', 'promptTokensMax')
+  const output = stream('Output', 'outputTokens', 'outputTokensStdev', 'outputTokensMin', 'outputTokensMax')
   const seed = Number(values.seed)
   if (!Number.isInteger(seed) || seed < 0) {
     push('seed', 'The seed is a non-negative whole number.')
@@ -742,22 +880,29 @@ function customGroup(
       'A deadline of 0 is rejected by blis; use a positive number of seconds, or a negative value to disable it.',
     )
   }
+
+  // The card is a one-client spec; gaussianSpec builds it, and the group carries it in the
+  // same workload-spec shape profileToGroup produces, so findTarget and the argv/runs.yaml
+  // writers treat a custom run exactly like a selected spec workload. The flat
+  // distribution fields are the not-applicable placeholder zeros a spec record carries.
+  const spec = gaussianSpec({ numRequests, load: { kind: values.loadKind, value: loadValue }, input, output })
   return {
     seed,
     horizon_ticks: null,
     request_timeout_s: requestTimeoutS,
     workload: {
-      type: 'distribution',
-      arrival_process: arrivalProcess(values.loadKind),
-      num_requests: numRequests,
-      load: { kind: values.loadKind, value: loadValue },
-      prompt_tokens: promptTokens,
-      prompt_tokens_stdev: promptTokensStdev,
-      output_tokens: outputTokens,
-      output_tokens_stdev: outputTokensStdev,
+      type: 'workload-spec',
+      arrival_process: 'constant',
+      num_requests: 0,
+      load: { kind: 'rate', value: 0 },
+      prompt_tokens: 0,
+      prompt_tokens_stdev: 0,
+      output_tokens: 0,
+      output_tokens_stdev: 0,
       spec_file: null,
       spec_sha256: null,
-    },
+      spec,
+    } as Group['workload'],
   }
 }
 
@@ -790,17 +935,17 @@ function resolveCustomWorkload(
     push('customName', 'Use lower-case letters, digits, dash, underscore or dot.')
     return { workloadName: name, saveProfile: null, notes }
   }
-  const content = canonical(group)
+  const content = workloadContentKey(group)
   const named = profiles.find((p) => p.name === name)
   if (named) {
-    if (canonical(profileToGroup(named)) === content) {
+    if (workloadContentKey(profileToGroup(named)) === content) {
       notes.push(`"${name}" is already saved with this exact work. The run will use it, and nothing new is saved.`)
       return { workloadName: name, saveProfile: null, notes }
     }
     push('customName', `A different workload named "${name}" already exists. Choose another name.`)
     return { workloadName: name, saveProfile: null, notes }
   }
-  const twin = profiles.find((p) => canonical(profileToGroup(p)) === content)
+  const twin = profiles.find((p) => workloadContentKey(profileToGroup(p)) === content)
   if (twin) {
     notes.push(`This matches the saved workload "${twin.name}". The run will use it, and nothing new is saved.`)
     return { workloadName: twin.name, saveProfile: null, notes }
@@ -808,39 +953,53 @@ function resolveCustomWorkload(
   return { workloadName: name, saveProfile: customProfileBody(name, group), notes }
 }
 
-/** Builds the distribution profile a custom workload is saved to the catalog as: the flat
- * fields and group-side knobs the card holds, under the given name. Mirrors the catalog's
- * distribution profile shape (cmd/leaderboard.profileBody), so the server's create path
- * accepts it with no Go change. */
+/** workloadContentKey is a group's twin-detection key: its canonical form with the derived
+ * spec_sha256 dropped. A freshly built custom group has no sha yet (the server computes it)
+ * while a saved spec profile carries one, so comparing on the raw canonical would never
+ * match identical specs. Dropping the hash compares the spec content that actually decides
+ * the work, mirroring the server's content-twin key (internal/catalog.contentKey); the
+ * server stays the final authority at save time. */
+function workloadContentKey(group: Group): string {
+  const w = group.workload as Record<string, unknown>
+  const { spec_sha256: _dropped, ...workload } = w
+  return canonical({ ...group, workload })
+}
+
+/** Builds the workload-spec profile a custom workload is saved to the catalog as: the
+ * one-client gaussian spec the card holds and the group-side knobs, under the given name.
+ * Mirrors the catalog's workload-spec profile shape (cmd/leaderboard.profileBody), so the
+ * server's create path accepts it with no Go change. */
 function customProfileBody(name: string, group: Group): ProfileBody {
-  const w = group.workload
+  // A custom workload is a single-client gaussian spec, so it saves as a workload-spec
+  // profile — the same shape the Workloads editor saves. The server parses spec_yaml and
+  // computes its spec_sha256, so the browser sends the YAML, not a hash.
+  const spec = group.workload.spec as unknown as SpecObject
   return {
     name,
     seed: group.seed,
     horizon_ticks: group.horizon_ticks,
     request_timeout_s: group.request_timeout_s,
     workload: {
-      type: 'distribution',
-      num_requests: w.num_requests,
-      load: { kind: w.load.kind, value: w.load.value },
-      prompt_tokens: w.prompt_tokens,
-      prompt_tokens_stdev: w.prompt_tokens_stdev,
-      output_tokens: w.output_tokens,
-      output_tokens_stdev: w.output_tokens_stdev,
+      type: 'workload-spec',
+      spec_yaml: serializeSpec(spec),
     },
   }
 }
 
 /**
  * Whether this declaration joins an existing table or starts a new one. The comparison
- * is on the whole canonicalised group block, which is what group_id hashes — so this
- * answers the question the same way the CLI will, for either workload variant, without
- * reimplementing the hash. Model no longer decides the table (E1): changing the model
- * keeps the same work, so a run against a new model joins the existing workload's table
- * rather than starting one. Only a change to the work offered starts a new table.
+ * is on the canonicalised group block minus the derived spec_sha256 (workloadContentKey):
+ * that hash is what group_id folds in, but a form-built group has not been hashed yet
+ * (the server does it), so a custom run that repeats committed work would otherwise never
+ * recognise its own table. Comparing the spec content instead answers the question the
+ * same way the CLI will, for either workload variant, without reimplementing the hash.
+ * Model no longer decides the table (E1): changing the model keeps the same work, so a run
+ * against a new model joins the existing workload's table rather than starting one. Only a
+ * change to the work offered starts a new table.
  */
 export function findTarget(group: Group, groups: RunGroup[]): Target {
-  const match = groups.find((g) => canonical(g.group) === canonical(group))
+  const key = workloadContentKey(group)
+  const match = groups.find((g) => workloadContentKey(g.group) === key)
   return { group: match ?? null }
 }
 

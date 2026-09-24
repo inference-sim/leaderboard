@@ -145,13 +145,19 @@ export function missText(miss: SloMiss): string {
  * 1,000.0", in metric order. Used by the collapsed filter card to preview what is set
  * without expanding: a ceiling reads with ≤, a floor with ≥, each at the column precision.
  */
-export function targetChips(targets: SloTargets): { key: string; text: string }[] {
-  const out: { key: string; text: string }[] = []
+export function targetChips(
+  targets: SloTargets,
+): { key: string; text: string; group: SloMetric['group'] }[] {
+  const out: { key: string; text: string; group: SloMetric['group'] }[] = []
   for (const m of SLO_METRICS) {
     const t = targets[m.key]
     if (t == null) continue
     const v = m.digits != null ? formatNumber(t, m.digits) : formatMs(t)
-    out.push({ key: m.key, text: `${m.label} ${m.higherIsBetter ? '≥' : '≤'} ${v}` })
+    out.push({
+      key: m.key,
+      text: `${m.label} ${m.higherIsBetter ? '≥' : '≤'} ${v}`,
+      group: m.group,
+    })
   }
   return out
 }

@@ -110,29 +110,69 @@ export function bodyToForm(body: ProfileBody): FormValues {
   }
 }
 
-/** distributionToSpec lifts a legacy distribution workload into the equivalent
- * WorkloadSpec, so an existing profile opens in the spec editor rather than breaking. The
- * mean/stdev pair maps onto a blis gaussian, which needs mean, std_dev, min and max — the
- * bounds are derived from the mean and spread so the result validates. */
-function distributionToSpec(w: WorkloadBody): SpecObject {
-  const gaussian = (mean: number, stdev: number) => ({
+/** One token distribution's gaussian statistics, as the custom card and the converter
+ * both express them: a mean and spread with a clamp. */
+export interface TokenStat {
+  mean: number
+  std_dev: number
+  min: number
+  max: number
+}
+
+/** deriveMax is the clamp ceiling used when a mean/stdev pair carries no explicit max:
+ * four standard deviations above the mean covers all but a negligible tail, so the
+ * gaussian is not silently truncated. Shared so the card's default and the legacy
+ * converter agree. */
+export function deriveMax(mean: number, stdev: number): number {
+  return Math.max(1, Math.round(mean + 4 * stdev))
+}
+
+/** gaussianSpec builds a single-client WorkloadSpec with gaussian input and output
+ * distributions from explicit token statistics. Both the custom card (explicit min/max
+ * from the user) and distributionToSpec (bounds derived for a legacy distribution) build
+ * on it, so the two produce the same shape and the custom card is simply a guided front
+ * end for a one-client spec. */
+export function gaussianSpec(opts: {
+  numRequests: number
+  load: { kind: 'rate' | 'concurrency'; value: number }
+  input: TokenStat
+  output: TokenStat
+}): SpecObject {
+  const dist = (s: TokenStat) => ({
     type: 'gaussian',
-    params: { mean, std_dev: stdev, min: 1, max: Math.max(1, Math.round(mean + 4 * stdev)) },
+    params: { mean: s.mean, std_dev: s.std_dev, min: s.min, max: s.max },
   })
   const client: SpecObject = {
     id: 'c0',
     arrival: { process: 'poisson' },
-    input_distribution: gaussian(w.prompt_tokens ?? 0, w.prompt_tokens_stdev ?? 0),
-    output_distribution: gaussian(w.output_tokens ?? 0, w.output_tokens_stdev ?? 0),
+    input_distribution: dist(opts.input),
+    output_distribution: dist(opts.output),
   }
-  let spec: SpecObject = { version: '2', num_requests: w.num_requests ?? 0, clients: [client] }
-  if (w.load?.kind === 'concurrency') {
-    spec = setPath(spec, ['clients', 0, 'concurrency'], w.load.value)
+  let spec: SpecObject = { version: '2', num_requests: opts.numRequests, clients: [client] }
+  if (opts.load.kind === 'concurrency') {
+    spec = setPath(spec, ['clients', 0, 'concurrency'], opts.load.value)
   } else {
-    spec = setPath(spec, ['aggregate_rate'], w.load?.value ?? 0)
+    spec = setPath(spec, ['aggregate_rate'], opts.load.value)
     spec = setPath(spec, ['clients', 0, 'rate_fraction'], 1)
   }
   return spec
+}
+
+/** distributionToSpec lifts a legacy distribution workload into the equivalent
+ * WorkloadSpec, so an existing profile opens in the spec editor rather than breaking. The
+ * mean/stdev pair maps onto a blis gaussian, and the bounds are derived from the mean and
+ * spread so the result validates. */
+function distributionToSpec(w: WorkloadBody): SpecObject {
+  const pMean = w.prompt_tokens ?? 0
+  const pStd = w.prompt_tokens_stdev ?? 0
+  const oMean = w.output_tokens ?? 0
+  const oStd = w.output_tokens_stdev ?? 0
+  return gaussianSpec({
+    numRequests: w.num_requests ?? 0,
+    load: w.load ?? { kind: 'rate', value: 0 },
+    input: { mean: pMean, std_dev: pStd, min: 1, max: deriveMax(pMean, pStd) },
+    output: { mean: oMean, std_dev: oStd, min: 1, max: deriveMax(oMean, oStd) },
+  })
 }
 
 /** The variant every profile authored here is stored as: the editor is spec-first, so a

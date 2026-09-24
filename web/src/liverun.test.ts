@@ -11,9 +11,10 @@ const groups = loadGroups(records)
 const workloads = loadWorkloads(records)
 const main = groups.find((g) => g.groupId === '5063e40dceb2')!
 
-/** A custom-workload form that lands an H100 tp8 row in the fixture's main group, the
- * same shape newrun.test.ts uses: the untouched custom form is the main group's work. A
- * custom workload is saved to the catalog on Run, so it carries a name. */
+/** A custom-workload form, the same shape newrun.test.ts uses. The custom card authors a
+ * single-client gaussian workload-spec now, so it names its own workload, not the
+ * fixture's flat-distribution main group. A custom workload is saved to the catalog on
+ * Run, so it carries a name. */
 function valid(overrides: Partial<FormValues> = {}): FormValues {
   return { ...initialValues(), runId: 'h100-tp8', tp: '8', customName: 'custom-run', ...overrides }
 }
@@ -44,8 +45,6 @@ describe('runDeclFromOutput', () => {
     const decl = runDeclFromOutput(output)
     expect(decl.workloadKey).toBe(workloadKey(output.group))
     expect(decl.workloadTitle).toBe(workloadTitle(output.group))
-    // The untouched custom form is the main group's work, so it names the main table.
-    expect(decl.workloadKey).toBe(workloadKey(main.group))
   })
 })
 

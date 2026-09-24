@@ -6,7 +6,6 @@ import {
   DEFAULT_ROUTING_SCORERS,
   KV_CACHE_DTYPES,
   LATENCY_MODELS,
-  MODELS,
   MOE_COMM_BACKENDS,
   PD_DECIDERS,
   PREEMPTION_POLICIES,
@@ -16,10 +15,11 @@ import {
   SELECTABLE_HARDWARE,
   SPECULATIVE_METHODS,
   TP_CHOICES,
-  isMoEModel,
 } from '../catalog'
-import { customFieldsFrom, interpret, suggestRunId } from '../newrun'
+import { customFieldsFrom, interpret, suggestRunId, suggestWorkloadName } from '../newrun'
 import type { FormValues, Output } from '../newrun'
+import { isMoE, listModels } from '../models'
+import type { ModelInfo } from '../models'
 import { workloadParam, workloadsHref } from '../route'
 import { listWorkloads, profileKnobs, profileSummary } from '../workloads'
 import type { ProfileBody } from '../workloads'
@@ -48,6 +48,13 @@ interface Props {
   runIdEdited: boolean
   /** Marks the run id as reader-owned, freezing the auto-sync. */
   onRunIdEdited: () => void
+  /** Whether the reader has typed their own custom workload name. Lifted alongside the
+   * values, like runIdEdited, so the suggested `custom-N` keeps syncing against the catalog
+   * until they take it over, and a remount after a failed run does not resume syncing and
+   * clobber the name they had chosen. */
+  customNameEdited: boolean
+  /** Marks the custom name as reader-owned, freezing its auto-sync. */
+  onCustomNameEdited: () => void
   /** True while a run is in flight. Disables the Run button (a second concurrent run is
    * already impossible, since the click moves the reader to the board). */
   running: boolean
@@ -62,8 +69,8 @@ interface Props {
  * Declares one run and runs it. The form selects the work (a catalog workload, preset or
  * saved, or a simple inline custom workload) plus a model and a candidate; the Run button
  * sends them to `leaderboard serve`, which executes blis from the upstream checkout (blis
- * resolves defaults.yaml, hardware_config.json and the model_configs/ cache relative to
- * that directory, so a browser cannot run it) and writes the same
+ * resolves defaults.yaml and hardware_config.json relative to that directory, and the
+ * model catalog via BLIS_CATALOG, so a browser cannot run it) and writes the same
  * results/<group_id>/<run_id>.json the CLI does. The result appears in place and on the
  * leaderboard, without a rebuild.
  *
@@ -81,11 +88,14 @@ export function NewRun({
   onWorkloadInitialized,
   runIdEdited,
   onRunIdEdited,
+  customNameEdited,
+  onCustomNameEdited,
   running,
   errorMessage,
   onRun,
 }: Props) {
   const [profiles, setProfiles] = useState<ProfileBody[]>([])
+  const [models, setModels] = useState<ModelInfo[]>([])
   const [loadError, setLoadError] = useState<string | null>(null)
 
   // The catalog is the single source of named workloads (R1). It is fetched with the same
@@ -118,6 +128,25 @@ export function NewRun({
     }
   }, [])
 
+  // The model catalog is fetched the same way as the workload catalog: served live from
+  // the blis-catalog clone (GET /api/models) rather than frozen into the front-end. There
+  // is no committed fallback — when it cannot be loaded the picker is empty and the same
+  // load error is shown, and interpret() skips the model check until the list arrives.
+  useEffect(() => {
+    let cancelled = false
+    listModels().then(
+      (ms) => {
+        if (!cancelled) setModels(ms)
+      },
+      (e) => {
+        if (!cancelled) setLoadError(e instanceof Error ? e.message : String(e))
+      },
+    )
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
   // Keep the run id in step with the candidate it names, until the reader takes it over.
   // suggestRunId derives <hardware>-tp<tp> and dedupes it against the table this candidate
   // would join, so the page is runnable without typing a filename and the id never
@@ -131,9 +160,21 @@ export function NewRun({
     setValues((v) => (v.runId === suggested ? v : { ...v, runId: suggested }))
   }, [values, groups, profiles, runIdEdited, setValues])
 
+  // Keep the custom workload's name in step the same way, but only while the custom card is
+  // the chosen work (workloadSel === ''): a saved workload names itself, so its selection is
+  // left alone. suggestWorkloadName gives the lowest free custom-N against the catalog, so
+  // the card opens on a valid, unique name and the next custom run gets a fresh one once the
+  // last is saved. It reads only the catalog, not values.customName, so the effect converges;
+  // once the reader types their own (customNameEdited) it stops, across a failed-run remount.
+  useEffect(() => {
+    if (customNameEdited || values.workloadSel !== '') return
+    const suggested = suggestWorkloadName(profiles)
+    setValues((v) => (v.customName === suggested ? v : { ...v, customName: suggested }))
+  }, [values.workloadSel, profiles, customNameEdited, setValues])
+
   const { issues, output, notes } = useMemo(
-    () => interpret(values, groups, profiles),
-    [values, groups, profiles],
+    () => interpret(values, groups, profiles, models),
+    [values, groups, profiles, models],
   )
 
   const set = <K extends keyof FormValues>(key: K, value: FormValues[K]) =>
@@ -160,7 +201,7 @@ export function NewRun({
   // The expert-parallel and MoE-comm-backend knobs are always shown so the candidate box keeps
   // a stable shape; a dense model disables them rather than hiding them (blis rejects them on a
   // dense model, and switching to one already clears them to off/empty).
-  const modelIsMoE = isMoEModel(values.model)
+  const modelIsMoE = isMoE(models, values.model)
 
   // The two workload types the page offers: a saved or preset workload (chosen from the
   // catalog), or a custom distribution defined inline and saved to the catalog on Run. The
@@ -181,9 +222,9 @@ export function NewRun({
     ...presets.map((p) => ({ value: p.name, label: p.name, hint: 'preset' })),
     ...saved.map((p) => ({ value: p.name, label: p.name })),
   ]
-  const modelOptions: SelectOption[] = MODELS.map((m) => ({ value: m, label: m }))
-  if (!MODELS.includes(values.model)) {
-    modelOptions.push({ value: values.model, label: values.model || '(none)' })
+  const modelOptions: SelectOption[] = models.map((m) => ({ value: m.name, label: m.name }))
+  if (values.model !== '' && !models.some((m) => m.name === values.model)) {
+    modelOptions.push({ value: values.model, label: values.model })
   }
 
   // One serving knob as a number field. min is '0' for the fields where 0 is a valid
@@ -296,7 +337,13 @@ export function NewRun({
 
             {isCustom ? (
               <>
-                <CustomCard values={values} set={set} issueFor={issueFor} loadIsRate={loadIsRate} />
+                <CustomCard
+                  values={values}
+                  set={set}
+                  issueFor={issueFor}
+                  loadIsRate={loadIsRate}
+                  onNameEdited={onCustomNameEdited}
+                />
                 {notes.map((note) => (
                   <p key={note} className="nrnote nrwarn" role="status">
                     {note}
@@ -371,7 +418,7 @@ export function NewRun({
                         model: v,
                         // A dense model cannot carry the MoE knobs (blis rejects them), so
                         // switching to one clears them rather than leaving a dead selection.
-                        ...(isMoEModel(v) ? {} : { enableExpertParallel: false, moeCommBackend: '' }),
+                        ...(isMoE(models, v) ? {} : { enableExpertParallel: false, moeCommBackend: '' }),
                       }))
                     }
                     options={modelOptions}
@@ -825,21 +872,25 @@ function PdCard({
 }
 
 /**
- * The simple inline custom workload (R4): input and output token shape (gaussian, fixed),
- * request count, offered load, seed and deadline. It is deliberately the flat distribution
- * subset; anything richer (cohorts, other distributions, trace-driven) is the Workloads
- * tab's job, and a labeled link says so.
+ * The simple inline custom workload (R4): input and output token shape as a gaussian
+ * (mean, spread and a min/max clamp), request count, offered load, seed and deadline. It
+ * is a guided single-client WorkloadSpec; anything richer (cohorts, other distributions,
+ * trace-driven, several clients) is the Workloads tab's job.
  */
 function CustomCard({
   values,
   set,
   issueFor,
   loadIsRate,
+  onNameEdited,
 }: {
   values: FormValues
   set: <K extends keyof FormValues>(key: K, value: FormValues[K]) => void
   issueFor: (field: keyof FormValues) => { message: string } | undefined
   loadIsRate: boolean
+  /** Freezes the suggested-name auto-sync once the reader types their own, mirroring the
+   * run id field. */
+  onNameEdited: () => void
 }) {
   const num = (field: keyof FormValues, label: string, step = '1', min = '0') => (
     <>
@@ -857,6 +908,26 @@ function CustomCard({
       {issueFor(field) && <p className="nrerr">{issueFor(field)!.message}</p>}
     </>
   )
+  // Two related whole-number fields share one row, so the four token-shape knobs per stream
+  // read as two compact pairs (mean ± stdev, min / max) rather than eight stacked rows.
+  const duo = (a: keyof FormValues, aLabel: string, b: keyof FormValues, bLabel: string) => (
+    <div className="nrduo">
+      {([[a, aLabel], [b, bLabel]] as const).map(([field, label]) => (
+        <label className="nrsub" key={field}>
+          <span className="nrlabel">{label}</span>
+          <input
+            type="number"
+            min="1"
+            step="1"
+            value={String(values[field])}
+            onChange={(e) => set(field, e.target.value as FormValues[typeof field])}
+            aria-invalid={issueFor(field) != null}
+          />
+          {issueFor(field) && <p className="nrerr">{issueFor(field)!.message}</p>}
+        </label>
+      ))}
+    </div>
+  )
   return (
     <div className="nrcard">
       <label className="nrrow">
@@ -866,16 +937,19 @@ function CustomCard({
           value={values.customName}
           placeholder="my-workload"
           spellCheck={false}
-          onChange={(e) => set('customName', e.target.value)}
+          onChange={(e) => {
+            onNameEdited()
+            set('customName', e.target.value)
+          }}
           aria-invalid={issueFor('customName') != null}
         />
       </label>
       {issueFor('customName') && <p className="nrerr">{issueFor('customName')!.message}</p>}
 
-      {num('promptTokens', 'Input tokens (mean)', '1', '1')}
-      {num('promptTokensStdev', 'Input tokens (± stdev)')}
-      {num('outputTokens', 'Output tokens (mean)', '1', '1')}
-      {num('outputTokensStdev', 'Output tokens (± stdev)')}
+      {duo('promptTokens', 'Input mean', 'promptTokensStdev', '± stdev')}
+      {duo('promptTokensMin', 'Input min', 'promptTokensMax', 'Input max')}
+      {duo('outputTokens', 'Output mean', 'outputTokensStdev', '± stdev')}
+      {duo('outputTokensMin', 'Output min', 'outputTokensMax', 'Output max')}
       {num('numRequests', 'Requests', '1', '1')}
 
       <div className="nrrow">

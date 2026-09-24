@@ -1,0 +1,4 @@
+name: dense
+source:
+  provider: huggingface
+  repo: someorg/Dense-Model

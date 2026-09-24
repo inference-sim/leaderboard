@@ -37,7 +37,7 @@ describe('SloFilter', () => {
       <SloFilter metrics={SLO_METRICS} targets={targets} onChange={() => {}} />,
     )
     // ttft and tokens/s are valid; e2e '0' is a no-op, so two chips.
-    expect((html.match(/class="slochip"/g) ?? []).length).toBe(2)
+    expect((html.match(/class="slochip /g) ?? []).length).toBe(2)
     expect(html).toContain('TTFT p99 ≤ 500.0ms')
     expect(html).toContain('Tokens/s ≥ 1,000.0')
     expect(html).not.toContain('No targets set')

@@ -1,0 +1,4 @@
+name: scout-nested-moe
+source:
+  provider: huggingface
+  repo: meta-llama/Llama-4-Scout

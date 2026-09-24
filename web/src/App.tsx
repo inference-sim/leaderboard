@@ -131,6 +131,10 @@ export function App() {
   // descriptive auto-id keeps syncing until they type their own, and a remount after a
   // failed run does not resume syncing over the id they had chosen.
   const [runIdEdited, setRunIdEdited] = useState(false)
+  // Whether the reader has taken over the custom workload's name, alongside runIdEdited and
+  // for the same reason: the suggested custom-N keeps syncing against the catalog until they
+  // type their own, and a remount after a failed run does not resume over the name they chose.
+  const [customNameEdited, setCustomNameEdited] = useState(false)
   // Which workload the board shows, lifted from Leaderboard so a reveal can select the one
   // that holds the target row. null falls back to the first workload.
   const [selectedKey, setSelectedKey] = useState<string | null>(null)
@@ -313,6 +317,8 @@ export function App() {
               onWorkloadInitialized={() => setWorkloadInitialized(true)}
               runIdEdited={runIdEdited}
               onRunIdEdited={() => setRunIdEdited(true)}
+              customNameEdited={customNameEdited}
+              onCustomNameEdited={() => setCustomNameEdited(true)}
               running={liveRun?.status === 'running'}
               errorMessage={liveRun?.status === 'error' ? liveRun.message : null}
               onRun={startRun}

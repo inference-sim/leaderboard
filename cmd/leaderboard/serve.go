@@ -49,6 +49,10 @@ type server struct {
 	outDir      string
 	blisDir     string
 	catalogPath string
+	// catalogRoot is the blis-catalog clone (BLIS_CATALOG) the model list is read from,
+	// the same clone blis resolves configs against. A field so handleModels is testable
+	// without the environment; production sets it from os.Getenv in cmdServe.
+	catalogRoot string
 	execute     func(g schema.Group, runID string, dep schema.Deployment, workloadName string) (schema.Record, error)
 	// validateSpec hands a raw inline WorkloadSpec to blis to surface its own parse and
 	// semantic errors (§5). nil error means blis accepts it.
@@ -74,7 +78,7 @@ func cmdServe(args []string) error {
 		catPath = filepath.Join(c.outDir, "workloads.yaml")
 	}
 
-	s := &server{outDir: c.outDir, blisDir: c.blisDir, catalogPath: catPath}
+	s := &server{outDir: c.outDir, blisDir: c.blisDir, catalogPath: catPath, catalogRoot: os.Getenv("BLIS_CATALOG")}
 	s.execute = s.runOnce
 	s.validateSpec = s.validateSpecWithBlis
 
@@ -94,6 +98,7 @@ func (s *server) routes() *http.ServeMux {
 	// collide; the method+path pattern needs Go 1.22's ServeMux, same as the workload routes.
 	mux.HandleFunc("DELETE /api/results/{group}/{run}", s.handleResultDelete)
 	s.registerWorkloadRoutes(mux)
+	mux.HandleFunc("GET /api/models", s.handleModels)
 	// Serve the built web app when it exists, so `leaderboard serve` is the whole
 	// thing in one process. In development the Vite dev server proxies /api here
 	// instead, and this static handler is never reached.

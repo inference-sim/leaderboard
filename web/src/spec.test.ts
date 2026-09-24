@@ -97,16 +97,20 @@ describe('load switching preserves unrelated fields', () => {
 })
 
 describe('distributions carry blis-valid parameters', () => {
-  it('defaults a client to lognormal with mu and sigma (not mean)', () => {
+  it('defaults a client to gaussian with mean, std_dev, min and max', () => {
     const c = newClient('c0')
     const inParams = getPath(c, ['input_distribution', 'params']) as Record<string, unknown>
-    expect(getStr(c, ['input_distribution', 'type'])).toBe('lognormal')
-    expect(Object.keys(inParams).sort()).toEqual(['mu', 'sigma'])
+    expect(getStr(c, ['input_distribution', 'type'])).toBe('gaussian')
+    expect(Object.keys(inParams).sort()).toEqual(['max', 'mean', 'min', 'std_dev'])
   })
 
   it('changeDistType swaps to the new type\'s required params, keeping shared ones', () => {
-    // lognormal (mu, sigma) → gaussian (mean, std_dev, min, max): no shared keys, all default.
-    const g = changeDistType(newClient('c0'), ['input_distribution'], 'gaussian')
+    // gaussian (the default) → lognormal (mu, sigma): no shared keys, all default.
+    const ln = changeDistType(newClient('c0'), ['input_distribution'], 'lognormal')
+    expect(getStr(ln, ['input_distribution', 'type'])).toBe('lognormal')
+    expect(Object.keys(getPath(ln, ['input_distribution', 'params']) as object).sort()).toEqual(['mu', 'sigma'])
+    // lognormal → gaussian keeps nothing stale: exactly mean, std_dev, min, max.
+    const g = changeDistType(ln, ['input_distribution'], 'gaussian')
     expect(getStr(g, ['input_distribution', 'type'])).toBe('gaussian')
     expect(Object.keys(getPath(g, ['input_distribution', 'params']) as object).sort()).toEqual([
       'max',
@@ -114,14 +118,12 @@ describe('distributions carry blis-valid parameters', () => {
       'min',
       'std_dev',
     ])
-    // gaussian → lognormal and back keeps nothing stale: exactly mu, sigma.
-    const back = changeDistType(g, ['input_distribution'], 'lognormal')
-    expect(Object.keys(getPath(back, ['input_distribution', 'params']) as object).sort()).toEqual(['mu', 'sigma'])
   })
 
   it('changeDistType preserves a shared parameter value', () => {
     // lognormal → pareto_lognormal shares mu and sigma; their values carry over.
-    const c = setNum(newClient('c0'), ['input_distribution', 'params', 'mu'], '7.1')
+    const ln = changeDistType(newClient('c0'), ['input_distribution'], 'lognormal')
+    const c = setNum(ln, ['input_distribution', 'params', 'mu'], '7.1')
     const p = changeDistType(c, ['input_distribution'], 'pareto_lognormal')
     expect(getNum(p, ['input_distribution', 'params', 'mu'])).toBe('7.1')
   })

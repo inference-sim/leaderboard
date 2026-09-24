@@ -149,6 +149,16 @@ function ClientFields({ obj, index, onChange, onRemove }: ClientProps) {
     const distPath: Path = [...base, `${kind}_distribution`]
     const type = getStr(obj, [...distPath, 'type']) || 'lognormal'
     const params = DIST_PARAMS[type] ?? []
+    const field = (p: string) => (
+      <div className="field" key={p}>
+        <label htmlFor={id(`${kind}-${p}`)}>{`${kind} ${p}`}</label>
+        <input id={id(`${kind}-${p}`)} type="number" {...b.num([...distPath, 'params', p])} />
+      </div>
+    )
+    // min and max are one clamp: keep them paired so a narrow pane wraps them together
+    // rather than stranding max on its own row.
+    const clamp = params.filter((p) => p === 'min' || p === 'max')
+    const scalar = params.filter((p) => p !== 'min' && p !== 'max')
     return (
       <div className="field-row">
         <div className="field">
@@ -160,12 +170,8 @@ function ClientFields({ obj, index, onChange, onRemove }: ClientProps) {
             options={DIST_TYPES.map((t) => ({ value: t, label: t }))}
           />
         </div>
-        {params.map((p) => (
-          <div className="field" key={p}>
-            <label htmlFor={id(`${kind}-${p}`)}>{`${kind} ${p}`}</label>
-            <input id={id(`${kind}-${p}`)} type="number" {...b.num([...distPath, 'params', p])} />
-          </div>
-        ))}
+        {scalar.map(field)}
+        {clamp.length > 0 && <div className="field-pair">{clamp.map(field)}</div>}
         {params.length === 0 && (
           <div className="field">
             <p className="dek">Set the {type} file or bins in the YAML pane.</p>

@@ -101,6 +101,78 @@ func TestSplitMetricsWithNoRequestsReturnsNoSidecar(t *testing.T) {
 // The end-to-end runner needs a real blis, so it is gated. It is also the only
 // place the plan's C5 finding is checked against the simulator: --timeout 3 must
 // still produce timed_out_requests, and the record must be disqualified for it.
+// TestRunFinalizesWorkloadSpecSHA is hermetic: a stub binary stands in for blis and
+// writes a known metrics file, so the test exercises Run's record-building without the
+// simulator. It pins the fix for the custom card, which posts a workload-spec group with
+// its inline spec but no spec_sha256 (the browser cannot compute the Go content hash). Run
+// must fill it from the spec itself, or the record fails schema validation with
+// "spec_sha256: got null, want string".
+func TestRunFinalizesWorkloadSpecSHA(t *testing.T) {
+	dir := t.TempDir()
+	// A stub that behaves like blis for this test: write the fixture metrics to the last
+	// argument (Argv puts the metrics path last), ignoring every flag.
+	stub := filepath.Join(dir, "blis-stub.sh")
+	script := "#!/bin/sh\nfor a in \"$@\"; do last=\"$a\"; done\ncat > \"$last\" <<'JSON'\n" + blisOutput + "\nJSON\n"
+	if err := os.WriteFile(stub, []byte(script), 0o755); err != nil {
+		t.Fatalf("write stub: %v", err)
+	}
+	// commit/binarySHA256 satisfy the record's provenance patterns; the point of the test
+	// is the workload block, not provenance, so any well-formed values do.
+	r := &Runner{Binary: stub, Cwd: dir, commit: "abcdef1", binarySHA256: "0123456789abcdef"}
+
+	spec := map[string]any{
+		"version":        "2",
+		"aggregate_rate": 6,
+		"num_requests":   100,
+		"clients": []any{map[string]any{
+			"id":                  "c0",
+			"rate_fraction":       1,
+			"arrival":             map[string]any{"process": "poisson"},
+			"input_distribution":  map[string]any{"type": "gaussian", "params": map[string]any{"mean": 8000, "std_dev": 512, "min": 1, "max": 10048}},
+			"output_distribution": map[string]any{"type": "gaussian", "params": map[string]any{"mean": 1000, "std_dev": 256, "min": 1, "max": 2024}},
+		}},
+	}
+	// The group the custom card posts: a workload-spec with the inline spec and NO sha.
+	g := schema.Group{
+		Seed: 42, RequestTimeoutS: 300,
+		Workload: schema.Workload{
+			Type: "workload-spec", ArrivalProcess: "constant",
+			Load: schema.Load{Kind: "rate", Value: 0},
+			Spec: spec,
+		},
+	}
+	d := schema.Deployment{
+		Model:    "qwen/qwen3-14b",
+		Hardware: "L40S", TP: 1, DP: 1, NumInstances: 1,
+		MaxModelLen: 40960, BlockSizeInTokens: 16, MaxNumSeqs: 256,
+		MaxNumBatchedTokens: 8192, LongPrefillTokenThreshold: 0,
+		Scheduler: "fcfs", PreemptionPolicy: "fcfs",
+		RoutingPolicy: "round-robin", AdmissionPolicy: "always-admit",
+		KVCacheDtype: "auto", LatencyModel: "trained-physics",
+		GPUMemoryUtilization: 0.9,
+		ExtraFlags:           map[string]string{},
+	}
+
+	rec, err := r.Run(g, RunSpec{RunID: "spec-run", Deployment: d}, filepath.Join(dir, "m.json"))
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if rec.Group.Workload.SpecSHA256 == nil {
+		t.Fatal("workload-spec record has a nil spec_sha256; Run did not finalize it")
+	}
+	want, err := schema.SpecSHA256(spec)
+	if err != nil {
+		t.Fatalf("SpecSHA256: %v", err)
+	}
+	if *rec.Group.Workload.SpecSHA256 != want {
+		t.Errorf("spec_sha256 = %q, want %q (the content hash of the inline spec)", *rec.Group.Workload.SpecSHA256, want)
+	}
+	// The regression: without the finalized sha the schema rejects the record.
+	if err := schema.ValidateRecord(rec); err != nil {
+		t.Errorf("runner produced a record the schema rejects: %v", err)
+	}
+}
+
 func TestIntegrationRunProducesADisqualifiedTimeoutRecord(t *testing.T) {
 	if os.Getenv("LEADERBOARD_INTEGRATION") == "" {
 		t.Skip("set LEADERBOARD_INTEGRATION=1 and run `make blis` first")

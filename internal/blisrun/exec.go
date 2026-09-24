@@ -109,6 +109,17 @@ func (r *Runner) Run(g schema.Group, c RunSpec, metricsPath string) (schema.Reco
 		if err != nil {
 			return schema.Record{}, fmt.Errorf("blisrun: %s: %w", c.RunID, err)
 		}
+		// spec_sha256 is the content hash of the inline spec and is folded into group_id, so
+		// it must reflect the spec actually run. A record built from a saved profile arrives
+		// with it set, but one built inline by the web app (the custom card) carries the spec
+		// without a hash, so it is computed here from the spec itself — the single source of
+		// truth — rather than trusted from the request. g is a value, so this stays local to
+		// the record this run writes.
+		sha, err := schema.SpecSHA256(g.Workload.Spec)
+		if err != nil {
+			return schema.Record{}, fmt.Errorf("blisrun: %s: spec_sha256: %w", c.RunID, err)
+		}
+		g.Workload.SpecSHA256 = &sha
 	}
 	argv := Argv(r.Binary, g, c.Deployment, metricsPath, specPath)
 
