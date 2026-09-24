@@ -151,12 +151,14 @@ spec:
           resources:
             requests:
               cpu: "4"
-              memory: 256Mi
+              memory: 512Mi
             limits:
               # blis runs are CPU-seconds, not GPU; headroom lets a run complete
-              # without starving the server.
+              # without starving the server. A blis subprocess can spike RSS well
+              # past 1Gi (more so with more cores to parallelise over), so the
+              # memory limit is sized to absorb that peak rather than OOM-kill it.
               cpu: "4"
-              memory: 1Gi
+              memory: 4Gi
           securityContext:
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: false
