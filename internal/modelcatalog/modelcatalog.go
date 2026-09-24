@@ -11,7 +11,9 @@
 package modelcatalog
 
 import (
+	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -20,6 +22,10 @@ import (
 
 	"gopkg.in/yaml.v3"
 )
+
+// ErrNotFound is returned by Config when no catalog entry has the requested canonical
+// name, so the handler can answer 404 rather than 500.
+var ErrNotFound = errors.New("model not found in catalog")
 
 // Model is one offered model: its canonical name and whether blis treats it as MoE.
 type Model struct {
@@ -35,12 +41,35 @@ type Model struct {
 	MoE bool `json:"moe"`
 }
 
-// modelYAML is the slice of model.yaml this package reads: the HuggingFace source repo,
-// whose org half prefixes the canonical name.
+// modelYAML is the slice of model.yaml this package reads: the source block, whose repo's
+// org half prefixes the canonical name and whose fields are shown as provenance tags.
 type modelYAML struct {
 	Source struct {
-		Repo string `yaml:"repo"`
+		Provider  string `yaml:"provider"`
+		Repo      string `yaml:"repo"`
+		Revision  string `yaml:"revision"`
+		Retrieved string `yaml:"retrieved"`
 	} `yaml:"source"`
+}
+
+// Source is a model's provenance from model.yaml: where blis fetches its weights from, and
+// when the entry was last retrieved. The model view shows these as tags. A field absent from
+// model.yaml is empty and the view omits its tag.
+type Source struct {
+	Provider  string `json:"provider"`
+	Repo      string `json:"repo"`
+	Revision  string `json:"revision"`
+	Retrieved string `json:"retrieved"`
+}
+
+// Detail is one model with everything the Catalog's model view shows on demand: the list
+// fields, its provenance (shown as tags), and the config.json blis reads (pretty-printed, or
+// empty when the directory ships none).
+type Detail struct {
+	Name   string `json:"name"`
+	MoE    bool   `json:"moe"`
+	Source Source `json:"source"`
+	Config string `json:"config"`
 }
 
 // expertKeys are the config.json keys that mark a model as MoE. A model whose config
@@ -84,16 +113,85 @@ func List(catalogRoot string) ([]Model, error) {
 	return models, nil
 }
 
+// Config finds the catalog entry whose canonical name is `name` and returns its detail: the
+// MoE flag, the model.yaml provenance, and the pretty-printed config.json. It enumerates the
+// catalog and matches on the canonical name rather than building a path from the caller's
+// input, so an untrusted name can never read outside the models tree. An unknown name is
+// ErrNotFound (404), an unreadable catalog an error (500).
+func Config(catalogRoot, name string) (Detail, error) {
+	if catalogRoot == "" {
+		return Detail{}, fmt.Errorf("no model catalog: set BLIS_CATALOG to a blis-catalog clone")
+	}
+	modelsDir := filepath.Join(catalogRoot, "models")
+	entries, err := os.ReadDir(modelsDir)
+	if err != nil {
+		return Detail{}, fmt.Errorf("reading model catalog %s: %w", modelsDir, err)
+	}
+	for _, e := range entries {
+		if !e.IsDir() {
+			continue
+		}
+		dir := e.Name()
+		my, ok := readModelYAML(filepath.Join(modelsDir, dir))
+		if !ok {
+			continue
+		}
+		org, _, found := strings.Cut(my.Source.Repo, "/")
+		if !found || org == "" {
+			continue
+		}
+		if strings.ToLower(org)+"/"+dir != name {
+			continue
+		}
+		configPath := filepath.Join(modelsDir, dir, "config.json")
+		moe, err := isMoE(configPath)
+		if err != nil {
+			return Detail{}, err
+		}
+		cfg, err := readConfigPretty(configPath)
+		if err != nil {
+			return Detail{}, err
+		}
+		return Detail{
+			Name: name,
+			MoE:  moe,
+			Source: Source{
+				Provider:  my.Source.Provider,
+				Repo:      my.Source.Repo,
+				Revision:  my.Source.Revision,
+				Retrieved: my.Source.Retrieved,
+			},
+			Config: cfg,
+		}, nil
+	}
+	return Detail{}, fmt.Errorf("%q: %w", name, ErrNotFound)
+}
+
+// readConfigPretty returns config.json indented for reading. A missing file is "" (not
+// every entry ships one, same as isMoE treats it). A present but unparseable file is shown
+// verbatim rather than erroring: the viewer should still display what is there, even though
+// blis would choke on it.
+func readConfigPretty(configPath string) (string, error) {
+	raw, err := os.ReadFile(configPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return "", nil
+		}
+		return "", fmt.Errorf("reading %s: %w", configPath, err)
+	}
+	var buf bytes.Buffer
+	if err := json.Indent(&buf, raw, "", "  "); err != nil {
+		return string(raw), nil
+	}
+	return buf.String(), nil
+}
+
 // orgOf reads model.yaml in dir and returns the org half of source.repo. ok is false when
 // the file is missing or the repo carries no "<org>/" prefix, so the caller skips the
 // directory rather than emitting a name it cannot make canonical.
 func orgOf(dir string) (org string, ok bool) {
-	raw, err := os.ReadFile(filepath.Join(dir, "model.yaml"))
-	if err != nil {
-		return "", false
-	}
-	var m modelYAML
-	if err := yaml.Unmarshal(raw, &m); err != nil {
+	m, ok := readModelYAML(dir)
+	if !ok {
 		return "", false
 	}
 	before, _, found := strings.Cut(m.Source.Repo, "/")
@@ -101,6 +199,20 @@ func orgOf(dir string) (org string, ok bool) {
 		return "", false
 	}
 	return before, true
+}
+
+// readModelYAML reads and decodes model.yaml in dir. ok is false when the file is missing or
+// will not parse, so a malformed entry is skipped rather than surfaced half-formed.
+func readModelYAML(dir string) (modelYAML, bool) {
+	raw, err := os.ReadFile(filepath.Join(dir, "model.yaml"))
+	if err != nil {
+		return modelYAML{}, false
+	}
+	var m modelYAML
+	if err := yaml.Unmarshal(raw, &m); err != nil {
+		return modelYAML{}, false
+	}
+	return m, true
 }
 
 // isMoE reports whether config.json declares experts. The expert key may sit at the top

@@ -5,6 +5,7 @@ import { rowId } from '../liverun'
 import { distinctModels, dqSummary } from '../model'
 import { Derived } from './Derived'
 import { DeleteRunButton } from './DeleteRunButton'
+import { Knob } from './Knob'
 import { ReproPanel } from './ReproPanel'
 
 /**
@@ -83,9 +84,7 @@ export function DqBand({
                 {e.hardware} tp{e.tp}
               </span>
               {e.chips.map((chip) => (
-                <span key={chip.label} className={chip.extra ? 'knob extra' : 'knob'}>
-                  {chip.label}
-                </span>
+                <Knob key={chip.label} chip={chip} />
               ))}
               {e.reasons.map((r) => (
                 <span key={r.code} className={`chip ${r.class === 'altered' ? 'alt' : 'crit'}`}>

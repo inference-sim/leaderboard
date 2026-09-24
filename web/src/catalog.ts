@@ -1,53 +1,14 @@
 /**
  * Snapshots of upstream facts the form needs to offer choices. This screen is
  * pure front-end — it emits a declaration for the CLI to run rather than running
- * blis itself — so the option lists cannot be read from the simulator at request
+ * blis itself — so these option lists cannot be read from the simulator at request
  * time and are committed here instead.
  *
- * Refresh with, from this repo's root:
- *
- *   python3 -c "import json;print(list(json.load(open('../inference-sim/hardware_config.json'))))"
- *   ls ../inference-sim/model_configs/
- *
- * Last checked against ../inference-sim @ 07622594 on 2026-09-16.
+ * The model and hardware catalogues are the exceptions: they are served live from the
+ * running server (GET /api/models, GET /api/hardware) rather than snapshotted here, so they
+ * cannot go stale. See models.ts and hardware.ts. What remains below are the closed sets of
+ * flag values blis accepts, refreshed against ../inference-sim/cmd/root.go as noted per list.
  */
-
-export interface HardwareOption {
-  name: string
-  /**
-   * Set when hardware_config.json defines this name with specs identical to
-   * another entry. An alias is a duplicate row rather than a second candidate, so
-   * `internal/spec.Check` rejects a group holding both — the form says so before
-   * the CLI has to.
-   */
-  aliasOf?: string
-}
-
-export const HARDWARE: HardwareOption[] = [
-  { name: 'H100' },
-  { name: 'A100-SXM' },
-  { name: 'A100-80', aliasOf: 'A100-SXM' },
-  { name: 'L40S' },
-]
-
-/**
- * The accelerators the picker offers: the canonical entries only. An alias (A100-80, which
- * hardware_config.json defines with the same specs as A100-SXM) is the same accelerator, not
- * a second choice, so it is not a separate button. It stays in HARDWARE as the alias metadata
- * aliasesOf() reads, so a record filed under the alias name — e.g. one declared through the
- * CLI — is still recognized as a duplicate row rather than a rival.
- */
-export const SELECTABLE_HARDWARE = HARDWARE.filter((hw) => !hw.aliasOf)
-
-/** The two names that collide, in both directions. */
-export function aliasesOf(name: string): string[] {
-  const out: string[] = []
-  for (const hw of HARDWARE) {
-    if (hw.name === name && hw.aliasOf) out.push(hw.aliasOf)
-    if (hw.aliasOf === name) out.push(hw.name)
-  }
-  return out
-}
 
 /** Tensor-parallel widths worth offering as one click. Any integer is legal. */
 export const TP_CHOICES = [1, 2, 4, 8, 16, 32, 64]

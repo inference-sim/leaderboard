@@ -12,7 +12,6 @@ import {
   ROUTING_POLICIES,
   ROUTING_SCORERS,
   SCHEDULERS,
-  SELECTABLE_HARDWARE,
   SPECULATIVE_METHODS,
   TP_CHOICES,
 } from '../catalog'
@@ -20,6 +19,8 @@ import { customFieldsFrom, interpret, suggestRunId, suggestWorkloadName } from '
 import type { FormValues, Output } from '../newrun'
 import { isMoE, listModels } from '../models'
 import type { ModelInfo } from '../models'
+import { collapseHardwareAliases, listHardware } from '../hardware'
+import type { HardwareInfo } from '../hardware'
 import { workloadParam, workloadsHref } from '../route'
 import { listWorkloads, profileKnobs, profileSummary } from '../workloads'
 import type { ProfileBody } from '../workloads'
@@ -96,6 +97,7 @@ export function NewRun({
 }: Props) {
   const [profiles, setProfiles] = useState<ProfileBody[]>([])
   const [models, setModels] = useState<ModelInfo[]>([])
+  const [hardware, setHardware] = useState<HardwareInfo[]>([])
   const [loadError, setLoadError] = useState<string | null>(null)
 
   // The catalog is the single source of named workloads (R1). It is fetched with the same
@@ -147,6 +149,26 @@ export function NewRun({
     }
   }, [])
 
+  // The hardware catalogue is fetched the same way as the model catalogue: served live from
+  // the upstream hardware_config.json (GET /api/hardware) rather than frozen into the
+  // front-end. There is no committed fallback — when it cannot be loaded the picker shows
+  // only the seeded current value and the same load error, and interpret() skips the
+  // hardware check until the list arrives.
+  useEffect(() => {
+    let cancelled = false
+    listHardware().then(
+      (hw) => {
+        if (!cancelled) setHardware(hw)
+      },
+      (e) => {
+        if (!cancelled) setLoadError(e instanceof Error ? e.message : String(e))
+      },
+    )
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
   // Keep the run id in step with the candidate it names, until the reader takes it over.
   // suggestRunId derives <hardware>-tp<tp> and dedupes it against the table this candidate
   // would join, so the page is runnable without typing a filename and the id never
@@ -173,8 +195,8 @@ export function NewRun({
   }, [values.workloadSel, profiles, customNameEdited, setValues])
 
   const { issues, output, notes } = useMemo(
-    () => interpret(values, groups, profiles, models),
-    [values, groups, profiles, models],
+    () => interpret(values, groups, profiles, models, hardware),
+    [values, groups, profiles, models, hardware],
   )
 
   const set = <K extends keyof FormValues>(key: K, value: FormValues[K]) =>
@@ -225,6 +247,15 @@ export function NewRun({
   const modelOptions: SelectOption[] = models.map((m) => ({ value: m.name, label: m.name }))
   if (values.model !== '' && !models.some((m) => m.name === values.model)) {
     modelOptions.push({ value: values.model, label: values.model })
+  }
+
+  // The accelerators offered, folded so a spec-identical pair (A100-80/A100-SXM) is one
+  // button, not two rival candidates. The list is served live (GET /api/hardware); until it
+  // arrives it is empty, so the seeded current value is kept as its own button — the picker
+  // is never blank and a value declared through the CLI under an alias name still shows.
+  const hardwareNames = collapseHardwareAliases(hardware).map((hw) => hw.name)
+  if (values.hardware !== '' && !hardwareNames.includes(values.hardware)) {
+    hardwareNames.unshift(values.hardware)
   }
 
   // One serving knob as a number field. min is '0' for the fields where 0 is a valid
@@ -431,16 +462,16 @@ export function NewRun({
                     Accelerator
                   </span>
                   <div className="seg seg-wrap" role="radiogroup" aria-labelledby="hw-label">
-                    {SELECTABLE_HARDWARE.map((hw) => (
-                      <label key={hw.name} className={values.hardware === hw.name ? 'on' : undefined}>
+                    {hardwareNames.map((name) => (
+                      <label key={name} className={values.hardware === name ? 'on' : undefined}>
                         <input
                           type="radio"
                           name="hardware"
-                          value={hw.name}
-                          checked={values.hardware === hw.name}
-                          onChange={() => set('hardware', hw.name)}
+                          value={name}
+                          checked={values.hardware === name}
+                          onChange={() => set('hardware', name)}
                         />
-                        {hw.name}
+                        {name}
                       </label>
                     ))}
                   </div>

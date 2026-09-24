@@ -619,12 +619,16 @@ describe('NewRun', () => {
     expect(html).toContain('qwen/qwen3-14b')
   })
 
-  it('offers the canonical accelerators, not the A100-80 alias of A100-SXM', () => {
-    for (const name of ['H100', 'A100-SXM', 'L40S']) expect(html).toContain(name)
-    // A100-80 is the same accelerator as A100-SXM upstream, so it is not a second button;
-    // it survives only as aliasesOf() metadata for the duplicate-row guard.
+  it('feeds the accelerator picker from the server, seeding it with the current value', () => {
+    // The picker is now fed by GET /api/hardware (a mount effect), like the model select,
+    // rather than a baked-in list. Effects do not run under renderToStaticMarkup, so this
+    // offline shape shows only the seeded current value; the rest of the catalogue (L40S,
+    // A100-SXM, ...) arrives once the server answers.
+    expect(html).toContain('Accelerator')
+    expect(html).toContain('H100')
+    expect(html).not.toContain('L40S')
+    // The A100-80 alias is never offered as its own button — it is folded into A100-SXM.
     expect(html).not.toContain('A100-80')
-    expect(html).not.toContain('= A100-SXM')
   })
 
   it('opens with a descriptive run id already in the field, not a blank one to fill', () => {

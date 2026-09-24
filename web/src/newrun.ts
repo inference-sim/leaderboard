@@ -17,12 +17,15 @@
  */
 
 import type { RunGroup, RunRecord } from './load'
-import { HARDWARE, SPECULATIVE_METHODS, aliasesOf } from './catalog'
+import { SPECULATIVE_METHODS } from './catalog'
+import { hardwareAliases } from './hardware'
+import type { HardwareInfo } from './hardware'
 import { isMoE } from './models'
 import type { ModelInfo } from './models'
 import { NAME_PATTERN, deriveMax, gaussianSpec, profileToGroup, saveWorkload } from './workloads'
 import type { ProfileBody, TokenStat } from './workloads'
 import { serializeSpec, type SpecObject } from './spec'
+import { numeric } from './format'
 
 export type Group = RunRecord['group']
 export type Deployment = RunRecord['deployment']
@@ -463,6 +466,7 @@ export function interpret(
   groups: RunGroup[],
   profiles: ProfileBody[],
   models: ModelInfo[] = [],
+  hardware: HardwareInfo[] = [],
 ): Interpretation {
   const issues: Issue[] = []
   const push = (field: Issue['field'], message: string) => issues.push({ field, message })
@@ -624,11 +628,17 @@ export function interpret(
     }
   }
 
-  if (!HARDWARE.some((hw) => hw.name === values.hardware)) {
+  // The hardware catalogue is fetched from the server (GET /api/hardware, read from the
+  // upstream hardware_config.json), so an empty list means it has not loaded yet or could
+  // not be reached: with none in hand the form cannot judge the accelerator and skips the
+  // check rather than rejecting every value, exactly as the model check does. Once loaded,
+  // an unknown name is rejected — an alias name counts as known, since blis accepts it and
+  // the list carries every name upstream defines.
+  if (hardware.length > 0 && !hardware.some((hw) => hw.name === values.hardware)) {
     push(
       'hardware',
       `${values.hardware || 'No accelerator'} is not in ../inference-sim/hardware_config.json; ` +
-        `the catalogue holds ${HARDWARE.map((hw) => hw.name).join(', ')}.`,
+        `the catalogue holds ${hardware.map((hw) => hw.name).join(', ')}.`,
     )
   }
 
@@ -748,7 +758,7 @@ export function interpret(
             'Two rows that differ in nothing differ invisibly, so the CLI rejects the pair — change a knob.',
         )
       }
-      for (const alias of aliasesOf(values.hardware)) {
+      for (const alias of hardwareAliases(hardware, values.hardware)) {
         const clash = existing.records.find((r) => r.deployment.hardware === alias)
         if (clash) {
           push(
@@ -1261,16 +1271,6 @@ export function argvFor(
 
   add('--metrics-path', metricsPath)
   return a
-}
-
-/**
- * Renders a number the way Go's strconv.FormatFloat(v, 'f', -1, 64) does for the
- * magnitudes this schema holds: 6 stays "6", 6.5 stays "6.5", and no value picks up
- * an exponent.
- */
-export function numeric(value: number): string {
-  if (Number.isInteger(value)) return value.toFixed(0)
-  return String(value)
 }
 
 /**

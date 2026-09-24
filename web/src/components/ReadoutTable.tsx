@@ -21,6 +21,7 @@ import { splitBySlo } from '../slo'
 import type { SloTargets } from '../slo'
 import { Derived } from './Derived'
 import { DeleteRunButton } from './DeleteRunButton'
+import { Knob } from './Knob'
 import { DqBand } from './DqBand'
 import { ReproPanel } from './ReproPanel'
 import { SloBand } from './SloBand'
@@ -548,15 +549,15 @@ function DeploymentCell({
         {(knobs.length > 0 || (expanded && spec.rest.length > 0)) && (
           <span className="dep-knobs">
             {knobs.map((chip) => (
-              <span key={chip.label} className={chip.extra ? 'knob extra' : 'knob'}>
-                {chip.label}
-              </span>
+              <Knob key={chip.label} chip={chip} />
             ))}
             {expanded &&
               spec.rest.map((p) => (
-                <span key={p.field} className="knob rest">
-                  {p.field} {p.value}
-                </span>
+                <Knob
+                  key={p.field}
+                  rest
+                  chip={{ label: p.items ? p.field : `${p.field} ${p.value}`, extra: false, items: p.items }}
+                />
               ))}
           </span>
         )}
