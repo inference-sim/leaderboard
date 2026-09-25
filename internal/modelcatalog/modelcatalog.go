@@ -39,6 +39,31 @@ type Model struct {
 	// (--enable-expert-parallel, --moe-comm-backend) apply. blis fatally rejects those on
 	// a dense model, so the form guards them by this flag.
 	MoE bool `json:"moe"`
+	// Spec is the architecture summary the Catalog's model cards show without opening a
+	// model, derived from the same config.json blis reads. A field the config omits is left
+	// zero (empty for strings) and the card omits its row rather than showing a fabricated
+	// number.
+	Spec Spec `json:"spec"`
+}
+
+// Spec is a model's architecture at a glance, read from config.json. Every field is one of
+// blis's own numbers from the file it resolves against, not a value derived here. A
+// multimodal model keeps these under text_config (as llama-4-scout does), so each field is
+// read top-level first and then from text_config — deterministic regardless of map order,
+// and always the text tower, never the vision one. `omitempty` drops an absent field from
+// the JSON so the client renders undefined the same as a missing row.
+type Spec struct {
+	Arch      string `json:"arch,omitempty"`      // architectures[0]
+	ModelType string `json:"modelType,omitempty"` // model_type
+	Context   int64  `json:"context,omitempty"`   // max_position_embeddings, else model_max_length
+	Layers    int64  `json:"layers,omitempty"`    // num_hidden_layers
+	Hidden    int64  `json:"hidden,omitempty"`    // hidden_size
+	Heads     int64  `json:"heads,omitempty"`     // num_attention_heads
+	KVHeads   int64  `json:"kvHeads,omitempty"`   // num_key_value_heads
+	Dtype     string `json:"dtype,omitempty"`     // torch_dtype
+	Experts   int64  `json:"experts,omitempty"`   // num_experts | n_routed_experts | num_local_experts
+	Active    int64  `json:"active,omitempty"`    // num_experts_per_tok
+	Vocab     int64  `json:"vocab,omitempty"`     // vocab_size
 }
 
 // modelYAML is the slice of model.yaml this package reads: the source block, whose repo's
@@ -103,11 +128,15 @@ func List(catalogRoot string) ([]Model, error) {
 		if !ok {
 			continue
 		}
-		moe, err := isMoE(filepath.Join(modelsDir, dir, "config.json"))
+		cfg, err := readConfigJSON(filepath.Join(modelsDir, dir, "config.json"))
 		if err != nil {
 			return nil, err
 		}
-		models = append(models, Model{Name: strings.ToLower(org) + "/" + dir, MoE: moe})
+		models = append(models, Model{
+			Name: strings.ToLower(org) + "/" + dir,
+			MoE:  declaresExperts(cfg),
+			Spec: deriveSpec(cfg),
+		})
 	}
 	sort.Slice(models, func(i, j int) bool { return models[i].Name < models[j].Name })
 	return models, nil
@@ -223,18 +252,115 @@ func readModelYAML(dir string) (modelYAML, bool) {
 // unparseable one is an error worth surfacing, since it is a file blis itself would choke
 // on.
 func isMoE(configPath string) (bool, error) {
+	cfg, err := readConfigJSON(configPath)
+	if err != nil {
+		return false, err
+	}
+	return declaresExperts(cfg), nil
+}
+
+// readConfigJSON reads and decodes config.json to a generic tree. A missing file is (nil,
+// nil): not every entry ships a config, and a nil tree reads as dense with an empty spec. A
+// present but unparseable file is an error worth surfacing, since it is one blis would choke
+// on too.
+func readConfigJSON(configPath string) (any, error) {
 	raw, err := os.ReadFile(configPath)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return false, nil
+			return nil, nil
 		}
-		return false, fmt.Errorf("reading %s: %w", configPath, err)
+		return nil, fmt.Errorf("reading %s: %w", configPath, err)
 	}
 	var cfg any
 	if err := json.Unmarshal(raw, &cfg); err != nil {
-		return false, fmt.Errorf("parsing %s: %w", configPath, err)
+		return nil, fmt.Errorf("parsing %s: %w", configPath, err)
 	}
-	return declaresExperts(cfg), nil
+	return cfg, nil
+}
+
+// deriveSpec pulls the architecture summary the model cards show out of a decoded
+// config.json. A tree that is not an object (a missing config, or a malformed one) yields
+// the zero Spec, so the card falls back to name and MoE flag alone.
+func deriveSpec(cfg any) Spec {
+	m, ok := cfg.(map[string]any)
+	if !ok {
+		return Spec{}
+	}
+	return Spec{
+		Arch:      firstArch(m),
+		ModelType: pickString(m, "model_type"),
+		Context:   firstInt(m, "max_position_embeddings", "model_max_length"),
+		Layers:    pickInt(m, "num_hidden_layers"),
+		Hidden:    pickInt(m, "hidden_size"),
+		Heads:     pickInt(m, "num_attention_heads"),
+		KVHeads:   pickInt(m, "num_key_value_heads"),
+		Dtype:     pickString(m, "torch_dtype"),
+		Experts:   firstInt(m, "num_experts", "n_routed_experts", "num_local_experts"),
+		Active:    pickInt(m, "num_experts_per_tok"),
+		Vocab:     pickInt(m, "vocab_size"),
+	}
+}
+
+// pick looks a key up at the top level, then under text_config — the text tower of a
+// multimodal config, where a model like llama-4-scout keeps these fields. It reads the two
+// named locations rather than walking the whole tree, so the result never depends on Go's
+// randomized map order and never picks up the vision tower's numbers.
+func pick(m map[string]any, key string) (any, bool) {
+	if v, ok := m[key]; ok {
+		return v, true
+	}
+	if tc, ok := m["text_config"].(map[string]any); ok {
+		if v, ok := tc[key]; ok {
+			return v, true
+		}
+	}
+	return nil, false
+}
+
+// pickInt reads a key as an integer. JSON numbers decode to float64; a non-number or absent
+// key is 0, which Spec's omitempty then drops.
+func pickInt(m map[string]any, key string) int64 {
+	if v, ok := pick(m, key); ok {
+		if f, ok := v.(float64); ok {
+			return int64(f)
+		}
+	}
+	return 0
+}
+
+// pickString reads a key as a string, "" when absent or not a string.
+func pickString(m map[string]any, key string) string {
+	if v, ok := pick(m, key); ok {
+		if s, ok := v.(string); ok {
+			return s
+		}
+	}
+	return ""
+}
+
+// firstInt returns the first of keys that reads as a non-zero integer, so a value is found
+// under whichever key a given config uses: the expert count under num_experts /
+// n_routed_experts / num_local_experts, and the context window under
+// max_position_embeddings, falling back to model_max_length (which a config such as inkling
+// uses in its place).
+func firstInt(m map[string]any, keys ...string) int64 {
+	for _, k := range keys {
+		if n := pickInt(m, k); n != 0 {
+			return n
+		}
+	}
+	return 0
+}
+
+// firstArch returns architectures[0], always read at the top level (the outer model, e.g.
+// Llama4ForConditionalGeneration, not the text tower's inner architecture).
+func firstArch(m map[string]any) string {
+	if arr, ok := m["architectures"].([]any); ok && len(arr) > 0 {
+		if s, ok := arr[0].(string); ok {
+			return s
+		}
+	}
+	return ""
 }
 
 // declaresExperts walks a decoded config.json for an expert key at any nesting depth.

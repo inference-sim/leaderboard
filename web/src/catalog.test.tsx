@@ -32,39 +32,81 @@ describe('catalogTabFromHash', () => {
 })
 
 const models: ModelInfo[] = [
-  { name: 'meta-llama/llama-3.1-8b-instruct', moe: false },
-  { name: 'qwen/qwen3-14b', moe: false },
-  { name: 'qwen/qwen3-30b-a3b', moe: true },
-  { name: 'mistralai/mixtral-8x7b-v0.1', moe: true },
+  {
+    name: 'meta-llama/llama-3.1-8b-instruct',
+    moe: false,
+    spec: { arch: 'LlamaForCausalLM', context: 131072, layers: 32, hidden: 4096, heads: 32, kvHeads: 8, dtype: 'bfloat16' },
+  },
+  {
+    name: 'qwen/qwen3-14b',
+    moe: false,
+    spec: { arch: 'Qwen3ForCausalLM', context: 40960, layers: 40, hidden: 5120, heads: 40, kvHeads: 8, dtype: 'bfloat16' },
+  },
+  {
+    name: 'qwen/qwen3-30b-a3b',
+    moe: true,
+    spec: { arch: 'Qwen3MoeForCausalLM', context: 40960, layers: 48, hidden: 2048, heads: 32, kvHeads: 4, dtype: 'bfloat16', experts: 128, active: 8 },
+  },
+  {
+    // A Llama-family model that ships under a different org (redhatai), so grouping by family
+    // must collect it with meta-llama's Llamas rather than filing it under its org.
+    name: 'redhatai/llama-4-scout-17b-16e-instruct-fp8-dynamic',
+    moe: true,
+    spec: { arch: 'Llama4ForConditionalGeneration', context: 10485760, layers: 48, hidden: 5120, heads: 40, kvHeads: 8, dtype: 'bfloat16', experts: 16, active: 1 },
+  },
+  {
+    name: 'mistralai/mixtral-8x7b-v0.1',
+    moe: true,
+    spec: { arch: 'MixtralForCausalLM', context: 32768, layers: 32, hidden: 4096, heads: 32, kvHeads: 8, dtype: 'bfloat16', experts: 8, active: 2 },
+  },
 ]
 
 const noop = () => {}
 const none = () => undefined
 
 describe('ModelsList', () => {
-  it('groups models under their provider org', () => {
+  it('groups models by family, not by provider org', () => {
     const html = renderToStaticMarkup(
       <ModelsList models={models} expanded={null} onToggle={noop} configFor={none} />,
     )
-    for (const org of ['meta-llama', 'mistralai', 'qwen']) {
-      expect(html).toContain(`>${org}</h3>`)
+    // Family headings, not org headings.
+    for (const family of ['Llama', 'Qwen', 'Mixtral']) {
+      expect(html).toContain(`>${family}</h3>`)
     }
-    expect(html).toContain('qwen/qwen3-14b')
-    expect(html).toContain('qwen/qwen3-30b-a3b')
+    // The org is a per-card kicker, never a group heading — llama-4-scout's redhatai org must
+    // not become its own family.
+    expect(html).not.toContain('>redhatai</h3>')
+    expect(html).toContain('llama-4-scout-17b-16e-instruct-fp8-dynamic')
   })
 
-  it('badges only the MoE models', () => {
+  it('badges each model dense or MoE', () => {
     const html = renderToStaticMarkup(
       <ModelsList models={models} expanded={null} onToggle={noop} configFor={none} />,
     )
-    expect(html.match(/badge moe/g)).toHaveLength(2)
+    expect(html.match(/badge moe/g)).toHaveLength(3)
+    expect(html.match(/badge dense/g)).toHaveLength(2)
+  })
+
+  it('shows each model’s architecture spec on the card face', () => {
+    const html = renderToStaticMarkup(
+      <ModelsList models={models} expanded={null} onToggle={noop} configFor={none} />,
+    )
+    // The context window is formatted and metered; the widest model reaches 10M.
+    expect(html).toContain('Context window')
+    expect(html).toContain('10M')
+    expect(html).toContain('128K')
+    // MoE cards show the active/total expert split.
+    expect(html).toContain('128 total')
+    expect(html).toContain('8 active')
+    // The architecture is named.
+    expect(html).toContain('Qwen3MoeForCausalLM')
   })
 
   it('shows no config panel until a model is opened', () => {
     const html = renderToStaticMarkup(
       <ModelsList models={models} expanded={null} onToggle={noop} configFor={none} />,
     )
-    // Every row is collapsed.
+    // Every card is collapsed.
     expect(html).not.toContain('aria-expanded="true"')
     expect(html).not.toContain('config.json')
   })

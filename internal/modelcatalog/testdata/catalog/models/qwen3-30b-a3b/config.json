@@ -1,1 +1,1 @@
-{"architectures":["Qwen3MoeForCausalLM"],"num_experts":128,"hidden_size":2048}
+{"architectures":["Qwen3MoeForCausalLM"],"num_experts":128,"hidden_size":2048,"max_position_embeddings":40960}

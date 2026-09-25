@@ -77,9 +77,42 @@ func TestListReadsNamesAndMoE(t *testing.T) {
 		t.Fatalf("got %d models %v, want %d %v", len(got), got, len(want), want)
 	}
 	for i := range want {
-		if got[i] != want[i] {
-			t.Errorf("model %d: got %+v, want %+v", i, got[i], want[i])
+		// Compare name and MoE flag only; the derived Spec is covered by TestListDerivesSpec.
+		if got[i].Name != want[i].Name || got[i].MoE != want[i].MoE {
+			t.Errorf("model %d: got %+v, want name %q MoE %v", i, got[i], want[i].Name, want[i].MoE)
 		}
+	}
+}
+
+// List derives each model's architecture spec from the same config.json it reads for the
+// MoE flag. The two MoE fixtures cover the deterministic top-level-then-text_config lookup:
+// qwen3-30b-a3b keeps its fields at the top level, while scout-nested-moe (a stand-in for a
+// multimodal model like llama-4-scout) keeps hidden_size and its expert key under
+// text_config, and both must resolve.
+func TestListDerivesSpec(t *testing.T) {
+	got, err := List(filepath.Join("testdata", "catalog"))
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	specs := make(map[string]Spec, len(got))
+	for _, m := range got {
+		specs[m.Name] = m.Spec
+	}
+
+	// Context comes from max_position_embeddings when the config states it.
+	if s := specs["qwen/qwen3-30b-a3b"]; s.Arch != "Qwen3MoeForCausalLM" || s.Hidden != 2048 || s.Experts != 128 || s.Context != 40960 {
+		t.Errorf("qwen3-30b-a3b spec = %+v, want arch Qwen3MoeForCausalLM, hidden 2048, experts 128, context 40960", s)
+	}
+	// Nested under text_config: hidden_size 5120 and num_local_experts 16, with the outer
+	// architectures still read at the top level. Context falls back to model_max_length
+	// (also under text_config) since this config states no max_position_embeddings — the
+	// case that left inkling's card showing "not stated".
+	if s := specs["meta-llama/scout-nested-moe"]; s.Arch != "Llama4" || s.Hidden != 5120 || s.Experts != 16 || s.Context != 10485760 {
+		t.Errorf("scout-nested-moe spec = %+v, want arch Llama4, hidden 5120 (text_config), experts 16 (text_config), context 10485760 (model_max_length)", s)
+	}
+	// A model that ships no config.json has the zero spec, not a fabricated one.
+	if s := specs["someorg/dense-no-config"]; s != (Spec{}) {
+		t.Errorf("dense-no-config spec = %+v, want zero Spec", s)
 	}
 }
 
