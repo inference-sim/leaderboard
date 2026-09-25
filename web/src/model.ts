@@ -180,6 +180,20 @@ function structuredItems(field: string, value: unknown): string[] | null {
 }
 
 /**
+ * One run's value for a deployment field, as the Compare panel shows it. A structured field
+ * (routing_scorers, disaggregation) returns its per-item tokens with an empty `value`, exactly
+ * as the table renders them (see structuredItems); a scalar field returns its stringified
+ * value. Kept beside structuredItems so the panel and the table cannot render the same field
+ * two different ways.
+ */
+export function fieldDisplay(record: RunRecord, field: string): { value: string; items?: string[] } {
+  const deployment = record.deployment as unknown as Record<string, unknown>
+  const items = structuredItems(field, deployment[field])
+  if (items) return { value: '', items }
+  return { value: String(deployment[field]) }
+}
+
+/**
  * The knob chips for one row: every varying deployment field except the two with
  * their own slot, plus every extra_flags entry unconditionally.
  */

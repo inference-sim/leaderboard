@@ -14,6 +14,9 @@ import { EmptyFilterNote } from './components/EmptyFilterNote'
 import { SLO_METRICS, emptyTargets, parseTargets } from './slo'
 import type { RawTargets } from './slo'
 import { NewRun } from './components/NewRun'
+import { CompareBar } from './components/CompareBar'
+import { ComparePanel } from './components/ComparePanel'
+import { toggleSelection } from './compare'
 import { LiveRunBanner } from './components/LiveRunBanner'
 import { Catalog } from './components/Catalog'
 import { ErrorBoundary } from './components/ErrorBoundary'
@@ -498,6 +501,27 @@ function WorkloadSection({
   // and hardware selections, so a freshly run candidate can never be hidden behind a target
   // the reader left set. Parsed at the point they are handed to the table.
   const [sloTargets, setSloTargets] = useState<RawTargets>(emptyTargets)
+  // Compare mode and the highlighted run_ids live here, beside the filters, so they reset on
+  // the same remount boundaries (workload switch, reveal nonce). Selection is keyed by run_id
+  // over the whole workload's records, so narrowing a filter never drops a highlighted run.
+  const [compareMode, setCompareMode] = useState(false)
+  const [selectedIds, setSelectedIds] = useState<string[]>([])
+  const onToggleHighlight = useCallback(
+    (runId: string) => setSelectedIds((cur) => toggleSelection(cur, runId)),
+    [],
+  )
+  const highlighted = useMemo(
+    () =>
+      selectedIds
+        .map((id) => workload.records.find((r) => r.run_id === id))
+        .filter((r): r is RunRecord => r != null),
+    [selectedIds, workload.records],
+  )
+  // Select-all pulls in every run in this table (the comparability group), complete and
+  // disqualified, in declared order; Clear empties the comparison.
+  const allIds = useMemo(() => workload.records.map((r) => r.run_id), [workload.records])
+  const onSelectAll = useCallback(() => setSelectedIds(allIds), [allIds])
+  const onClearSelection = useCallback(() => setSelectedIds([]), [])
   // Show a filter whenever the workload has any option for it, not just two or more. The
   // table omits the model and hardware labels when there is only one of each (a single-
   // model table has no Model column, a single-accelerator one no hardware cell), so the
@@ -508,6 +532,13 @@ function WorkloadSection({
   const emptyNoun = emptyFilterNoun(showModels, models, showHardware, hardware)
   return (
     <section className="group">
+      {/* Compare mode draws an indigo frame around the whole viewport with a corner flag, so
+          it is unmistakable the board is in another mode without recolouring the content. */}
+      {compareMode && (
+        <div className="cmpframe" aria-hidden="true">
+          <span className="cmpframe-flag">Compare mode</span>
+        </div>
+      )}
       <WorkloadHeader workload={workload} />
       {(showModels || showHardware) && (
         <div className="filters">
@@ -532,8 +563,26 @@ function WorkloadSection({
           onRevealed={onRevealed}
           canDelete={canDelete}
           onDelete={onDelete}
+          compareMode={compareMode}
+          selectedIds={selectedIds}
+          onToggleHighlight={onToggleHighlight}
         />
       )}
+      {compareMode && <ComparePanel records={highlighted} onRemove={onToggleHighlight} />}
+      <CompareBar
+        active={compareMode}
+        count={selectedIds.length}
+        total={allIds.length}
+        onSelectAll={onSelectAll}
+        onClear={onClearSelection}
+        onToggle={() => {
+          // Leaving compare mode clears the highlight selection and hides the panel.
+          setCompareMode((on) => {
+            if (on) setSelectedIds([])
+            return !on
+          })
+        }}
+      />
     </section>
   )
 }

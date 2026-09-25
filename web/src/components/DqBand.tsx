@@ -50,11 +50,20 @@ function DqRepro({ record }: { record: RunRecord }) {
 export function DqBand({
   group,
   onDelete,
+  compareMode = false,
+  selectedIds = [],
+  onToggleHighlight,
 }: {
   group: RunGroup
   /** Opens the delete confirmation for a disqualified run, or undefined when deletion is not
    * offered (the static board, where the run server that removes the file is not reachable). */
   onDelete?: (record: RunRecord) => void
+  /** Whether the board is in compare mode: a card-click toggles the run's highlight. */
+  compareMode?: boolean
+  /** The run_ids currently highlighted for comparison. A highlighted card carries `cmphl`. */
+  selectedIds?: string[]
+  /** Toggle a disqualified run's highlight membership (compare mode only). */
+  onToggleHighlight?: (runId: string) => void
 }) {
   const entries = dqSummary(group)
   if (entries.length === 0) return null
@@ -77,7 +86,21 @@ export function DqBand({
       {entries.map((e) => {
         const record = group.disqualified.find((r) => r.run_id === e.runId)!
         return (
-          <article key={e.runId} id={rowId(record)} className="dqrow">
+          <article
+            key={e.runId}
+            id={rowId(record)}
+            className={`dqrow${compareMode && selectedIds.includes(e.runId) ? ' cmphl' : ''}`}
+            onClick={
+              compareMode && onToggleHighlight
+                ? (ev) => {
+                    // Let the reproduce toggle and the delete button do their own thing; a
+                    // click anywhere else on the card toggles the run's highlight.
+                    if ((ev.target as HTMLElement).closest('button, a')) return
+                    onToggleHighlight(e.runId)
+                  }
+                : undefined
+            }
+          >
             <div className="dqtop">
               {showModel && <span className="model">{e.model}</span>}
               <span className="nm">
