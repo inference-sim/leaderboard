@@ -17,80 +17,80 @@ function twoRuns(): RunRecord[] {
   return [a, b]
 }
 
-describe('ComparePanel', () => {
+describe('ComparePanel (cards)', () => {
   it('prompts to highlight more when fewer than two runs are selected', () => {
     const html = renderToStaticMarkup(<ComparePanel records={[twoRuns()[0]!]} onRemove={() => {}} />)
     expect(html).toMatch(/Highlight at least two runs/i)
   })
 
-  it('labels the leftmost run column Control and renders inside a horizontal scroller', () => {
+  it('renders one draggable card per run, the first tagged Control', () => {
     const html = renderToStaticMarkup(<ComparePanel records={twoRuns()} onRemove={() => {}} />)
-    expect(html).toMatch(/class="tscroll cmpscroll"/) // still the horizontal scroller, now bounded
+    expect((html.match(/<article/g) ?? []).length).toBe(2)
+    expect(html).toContain('cmptag ctrl')
     expect(html).toContain('Control')
-    // never reuse the global page container class as a panel class
+    expect(html).toMatch(/draggable="true"/)
     expect(html).not.toContain('class="wrap"')
   })
 
-  it('tints a varying config field and hides identical fields by default', () => {
+  it('groups each card into Configuration and Performance, and omits Simulation model', () => {
     const html = renderToStaticMarkup(<ComparePanel records={twoRuns()} onRemove={() => {}} />)
-    // max_num_seqs differs -> its row carries the varying class
-    expect(html).toMatch(/cfgvary/)
-    expect(html).toContain('max_num_seqs')
-    // scheduler is identical -> its row head is hidden by default (hide toggle on)
-    expect(html).not.toMatch(/<th[^>]*class="cmprowhead"[^>]*>scheduler</)
-    // the toggle is "Hide identical fields" and is checked by default
-    expect(html).toMatch(/Hide identical fields/i)
-    expect(html).toMatch(/type="checkbox"[^>]*checked/)
-  })
-
-  it('renders the panel in a bounded, scrollable container', () => {
-    const html = renderToStaticMarkup(<ComparePanel records={twoRuns()} onRemove={() => {}} />)
-    expect(html).toMatch(/cmpscroll/)
-  })
-
-  it('separates configuration from performance with labelled super-header bands', () => {
-    const html = renderToStaticMarkup(<ComparePanel records={twoRuns()} onRemove={() => {}} />)
-    expect(html).toMatch(/cmpsuper/)
     expect(html).toContain('Configuration')
     expect(html).toContain('Performance')
-  })
-
-  it('omits the Simulation model group', () => {
-    const html = renderToStaticMarkup(<ComparePanel records={twoRuns()} onRemove={() => {}} />)
     expect(html).not.toContain('Simulation model')
   })
 
-  it('shows a signed delta pill on the non-control metric cell', () => {
+  it('hides identical config fields by default and shows a varying one', () => {
     const html = renderToStaticMarkup(<ComparePanel records={twoRuns()} onRemove={() => {}} />)
+    expect(html).toMatch(/Hide identical fields/i)
+    expect(html).toMatch(/type="checkbox"[^>]*checked/)
+    // max_num_seqs differs -> shown, and the non-control card highlights its changed value;
+    // scheduler is identical everywhere -> hidden.
+    expect(html).toContain('max_num_seqs')
+    expect(html).toMatch(/class="chg"/)
+    expect(html).not.toContain('scheduler')
+  })
+
+  it('shows a green/red delta chip on a non-control latency metric', () => {
+    const html = renderToStaticMarkup(<ComparePanel records={twoRuns()} onRemove={() => {}} />)
+    // bbb's E2E p99 is 2x aaa's -> a "bad" chip with +100%.
+    expect(html).toMatch(/cmpchip bad/)
     expect(html).toMatch(/\+100(\.0)?%/)
-    expect(html).toMatch(/delta-bad/) // higher latency, worse
+    // the control card's latency metric shows a plain baseline chip, not a delta.
+    expect(html).toContain('baseline')
   })
 
-  it('marks the whole control column, not just its header', () => {
-    const html = renderToStaticMarkup(<ComparePanel records={twoRuns()} onRemove={() => {}} />)
-    // control column cells (config and metric) carry the control-column class
-    expect((html.match(/cmpcontrolcol/g) ?? []).length).toBeGreaterThan(1)
+  it('renders every card when many runs are selected at once (select-all)', () => {
+    // Regression: selecting all runs re-renders the panel with more records than its column
+    // order yet holds; the order must reconcile in-render so no metric cell is undefined.
+    const [a, b] = twoRuns()
+    const c = JSON.parse(JSON.stringify(a)) as RunRecord
+    c.run_id = 'ccc'
+    c.metrics = { ...c.metrics, tokens_per_sec: a!.metrics.tokens_per_sec * 1.5 }
+    const html = renderToStaticMarkup(<ComparePanel records={[a!, b!, c]} onRemove={() => {}} />)
+    expect((html.match(/<article/g) ?? []).length).toBe(3)
+    expect(html).toContain('ccc')
   })
 
-  it('gives every run column a remove control and draggable headers, with no move buttons', () => {
+  it('gives every card a remove control', () => {
     const html = renderToStaticMarkup(<ComparePanel records={twoRuns()} onRemove={() => {}} />)
     expect(html).toMatch(/aria-label="Remove aaa from the comparison"/)
-    expect(html).toMatch(/draggable="true"/)
-    // reordering is drag-only now: no left/right move buttons
-    expect(html).not.toMatch(/Move aaa (left|right)/)
+    expect(html).toMatch(/aria-label="Remove bbb from the comparison"/)
   })
 
-  it('names a disqualified control baseline as covering a subset', () => {
+  it('marks a disqualified run with a subset tag and neutral subset chips, never green/red', () => {
     const [a, b] = twoRuns()
-    const dq = JSON.parse(JSON.stringify(a)) as RunRecord
+    const dq = JSON.parse(JSON.stringify(b)) as RunRecord
     dq.run_id = 'dq'
+    dq.metrics = { ...dq.metrics, e2e_p99_ms: a!.metrics.e2e_p99_ms / 2 } // "faster"
     dq.status = {
       ...dq.status,
       complete: false,
       disqualifications: [{ code: 'requests_dropped', class: 'altered', detail: 'dropped' }],
     }
-    const html = renderToStaticMarkup(<ComparePanel records={[dq, b!]} onRemove={() => {}} />)
-    expect(html).toMatch(/subset/i)
-    expect(html).toMatch(/served/i)
+    const html = renderToStaticMarkup(<ComparePanel records={[a!, dq]} onRemove={() => {}} />)
+    expect(html).toMatch(/⚠ subset/)
+    expect(html).toMatch(/cmpchip sub/)
+    // its faster latency must not read as a clean win
+    expect(html).not.toMatch(/cmpchip good/)
   })
 })

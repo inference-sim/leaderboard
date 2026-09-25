@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useState, type DragEvent } from 'react'
+import { useState, type CSSProperties, type DragEvent } from 'react'
 import type { RunRecord } from '../load'
 import { buildConfigRows, buildMetricRows, reconcileOrder, removeColumn, reorder } from '../compare'
 
@@ -9,37 +9,35 @@ interface ComparePanelProps {
   onRemove: (runId: string) => void
 }
 
-/** A run's short header label: model, hardware and tp, the candidate's headline. */
-function runLabel(r: RunRecord): string {
-  return `${r.deployment.model} · ${r.deployment.hardware} tp${r.deployment.tp}`
+interface ConfigLine {
+  label: string
+  cells: { runId: string; display: string }[]
+}
+interface MetricLine {
+  label: string
+  group: string
+  cells: { runId: string; text: string; delta: string | null; cls: 'good' | 'bad' | 'neutral' }[]
+}
+
+/** A run's sub-headline: model and hardware. */
+function runSub(r: RunRecord): string {
+  return `${r.deployment.model} · ${r.deployment.hardware}`
 }
 
 /**
- * The docked comparison panel: the highlighted runs transposed into columns, arguments and
- * metrics into rows. Configuration (the inputs) and Performance (the outputs) sit under their
- * own labelled bands. The leftmost column is the control and is banded in accent throughout;
- * every other column shows a control-relative delta pill. Column order is panel-local, seeded
- * from selection order; the reader reorders (and picks the control) by dragging a column
- * header - the whole column dims as it is dragged and the drop-target column highlights. The
- * table sits in a bounded, scrollable container so many configurations never break the page.
- * Comparison is valid without any further check because the caller only ever passes runs from
- * one workload table (one group_id, same work offered).
+ * The docked comparison panel: one card per highlighted run, plus a single left label bar that
+ * names each parameter and metric once (no per-card repetition). Cards and the label bar share
+ * the same row tracks (subgrid), so a field sits on the same level in every card and reads
+ * straight across. The control is the first card, banded in accent; every other card shows a
+ * green/red delta chip per metric and softly highlights the config values that differ from the
+ * control. Reorder by dragging a card - drop it first to make it the control. Comparison is
+ * valid without further check because the caller only passes runs from one workload table.
  */
 export function ComparePanel({ records, onRemove }: ComparePanelProps) {
-  const [order, setOrder] = useState<string[]>(() => records.map((r) => r.run_id))
-  // Default: hide the fields every selected run agrees on, so a resting panel shows only what
-  // differs. The reader turns this off to see the full configuration.
+  const [order, setOrder] = useState<string[]>([])
   const [hideIdentical, setHideIdentical] = useState(true)
-  // The column being dragged and the column currently under the pointer, so the whole column
-  // (header and every body cell) can show it is the thing moving / the drop target.
   const [dragId, setDragId] = useState<string | null>(null)
   const [overId, setOverId] = useState<string | null>(null)
-
-  // Fold selection changes into the order, preserving any manual reordering.
-  const presentKey = records.map((r) => r.run_id).join(',')
-  useEffect(() => {
-    setOrder((cur) => reconcileOrder(cur, presentKey ? presentKey.split(',') : []))
-  }, [presentKey])
 
   if (records.length < 2) {
     return (
@@ -49,38 +47,43 @@ export function ComparePanel({ records, onRemove }: ComparePanelProps) {
     )
   }
 
+  const view = reconcileOrder(order, records.map((r) => r.run_id))
   const byId = new Map(records.map((r) => [r.run_id, r]))
-  const cols = order.map((id) => byId.get(id)).filter((r): r is RunRecord => r != null)
-  const control = cols[0]!
-  const controlDq = !control.status.complete
-  const configGroups = buildConfigRows(records, order, !hideIdentical)
-  const metricBlocks = buildMetricRows(records, order)
-  const span = cols.length + 1
+  const cols = view.map((id) => byId.get(id)).filter((r): r is RunRecord => r != null)
+  const anyDq = cols.some((r) => !r.status.complete)
+  const configGroups = buildConfigRows(records, view, !hideIdentical)
+  const metricBlocks = buildMetricRows(records, view)
+
+  const configLines: ConfigLine[] = configGroups.flatMap((g) =>
+    g.rows.map((row) => ({
+      label: row.label,
+      cells: row.cells.map((c) => ({ runId: c.runId, display: c.items ? c.items.join(', ') : c.value })),
+    })),
+  )
+  const metricLines: MetricLine[] = metricBlocks.flatMap((b) =>
+    b.rows.map((row) => ({
+      label: row.label,
+      group: b.title,
+      cells: row.cells.map((c) => ({ runId: c.runId, text: c.text, delta: c.delta, cls: c.cls })),
+    })),
+  )
+  const noConfig = configLines.length === 0
+
+  // Cards and the label bar are subgrids over these shared rows: header, optional status, the
+  // Configuration divider + its fields (or one "identical" row), the Performance divider + its
+  // metrics.
+  const configRows = noConfig ? 1 : configLines.length
+  const rowCount = 1 + (anyDq ? 1 : 0) + 1 + configRows + 1 + metricLines.length
 
   const endDrag = () => {
     setDragId(null)
     setOverId(null)
   }
-
-  /**
-   * Drag-and-drop wiring shared by every cell of a column (header and body), so the whole
-   * column - not just its header row - is the grab handle and the drop target. The default
-   * single-cell drag ghost is suppressed so nothing looks like one lone cell floating away;
-   * the source column fades (.cmpdragging) and the drop-target column is banded instead.
-   */
   const dragProps = (runId: string, index: number) => ({
     draggable: true,
     onDragStart: (e: DragEvent<HTMLElement>) => {
       e.dataTransfer.setData('text/plain', runId)
       e.dataTransfer.effectAllowed = 'move'
-      if (typeof document !== 'undefined') {
-        const ghost = document.createElement('span')
-        ghost.setAttribute('aria-hidden', 'true')
-        ghost.style.cssText = 'position:absolute;top:-9999px;opacity:0'
-        document.body.appendChild(ghost)
-        e.dataTransfer.setDragImage(ghost, 0, 0)
-        setTimeout(() => ghost.remove(), 0)
-      }
       setDragId(runId)
     },
     onDragEnter: () => setOverId(runId),
@@ -91,21 +94,18 @@ export function ComparePanel({ records, onRemove }: ComparePanelProps) {
     onDrop: (e: DragEvent<HTMLElement>) => {
       e.preventDefault()
       const id = e.dataTransfer.getData('text/plain')
-      if (id) setOrder((cur) => reorder(cur, id, index))
+      if (id) setOrder(reorder(view, id, index))
       endDrag()
     },
     onDragEnd: endDrag,
   })
 
-  /** The per-column state classes for a cell (control band, dragging, drop-over). `ci` is the
-   *  column index (0 is the control); `runId` is that column's run. */
-  const colState = (runId: string, ci: number): string => {
-    const parts: string[] = []
-    if (ci === 0) parts.push('cmpcontrolcol')
-    if (dragId === runId) parts.push('cmpdragging')
-    if (overId === runId && dragId != null && dragId !== runId) parts.push('cmpdropover')
-    return parts.join(' ')
-  }
+  const gridStyle = {
+    '--cmp-rows': rowCount,
+    // Fixed label column + fixed-width cards (no 1fr), so a card is the same size whether two
+    // or ten are selected and the rail left-aligns rather than stretching across the page.
+    gridTemplateColumns: `var(--cmp-gutter) repeat(${cols.length}, var(--cmp-card))`,
+  } as CSSProperties
 
   return (
     <section className="comparepanel" aria-label="Comparison">
@@ -124,123 +124,120 @@ export function ComparePanel({ records, onRemove }: ComparePanelProps) {
         </label>
       </div>
 
-      {controlDq && (
-        <p className="cmpsubsetnote" role="note">
-          The control is disqualified, so the baseline itself covers a subset of the offered work.
-        </p>
-      )}
+      <div className="cmpcards" style={gridStyle}>
+        {/* Left label bar: names each field and metric once, aligned to the card rows. */}
+        <div className="cmpgutter">
+          <div className="cmpg head" />
+          {anyDq && <div className="cmpg status" />}
+          <div className="cmpg sec">Configuration</div>
+          {noConfig ? (
+            <div className="cmpg label muted">All identical</div>
+          ) : (
+            configLines.map((l) => (
+              <div key={l.label} className="cmpg label">
+                {l.label}
+              </div>
+            ))
+          )}
+          <div className="cmpg sec perf">Performance</div>
+          {metricLines.map((l) => (
+            <div key={l.label} className="cmpg label">
+              {l.label}
+            </div>
+          ))}
+        </div>
 
-      <div className="tscroll cmpscroll">
-        <table className="cmptable">
-          <thead>
-            <tr>
-              <th scope="col" className="cmprowhead cmpcorner" />
-              {cols.map((r, i) => {
-                const dq = !r.status.complete
-                return (
-                  <th
-                    key={r.run_id}
-                    scope="col"
-                    className={`cmpcol ${colState(r.run_id, i)}`}
-                    {...dragProps(r.run_id, i)}
-                    title="Drag this column to reorder; drop it in the first slot to make it the control"
-                  >
-                    <div className="cmphead">
-                      <span className="cmpgrip" aria-hidden="true">
-                        ⠿
-                      </span>
-                      <span className="cmpname">{runLabel(r)}</span>
-                      {i === 0 && <span className="cmpbadge control">Control</span>}
-                      {dq && (
-                        <span
-                          className="cmpbadge subset"
-                          title={r.status.disqualifications.map((d) => d.detail).join(' · ')}
-                        >
-                          ⚠ subset
-                        </span>
-                      )}
-                      <button
-                        type="button"
-                        className="cmpremove"
-                        onClick={() => {
-                          setOrder((cur) => removeColumn(cur, r.run_id))
-                          onRemove(r.run_id)
-                        }}
-                        aria-label={`Remove ${r.run_id} from the comparison`}
-                      >
-                        ✕
-                      </button>
+        {/* One card per run. */}
+        {cols.map((r, ci) => {
+          const isControl = ci === 0
+          const isDq = !r.status.complete
+          const served = r.metrics.injected_requests
+            ? Math.round((r.metrics.completed_requests / r.metrics.injected_requests) * 100)
+            : 0
+          const cardCls = [
+            'cmpcard',
+            isControl ? 'ctrl' : '',
+            dragId === r.run_id ? 'dragging' : '',
+            overId === r.run_id && dragId != null && dragId !== r.run_id ? 'over' : '',
+          ]
+            .filter(Boolean)
+            .join(' ')
+          return (
+            <article key={r.run_id} className={cardCls} {...dragProps(r.run_id, ci)}>
+              <div className="cmpchead">
+                <span className="cmpgrip" aria-hidden="true" title="Drag to reorder; drop first to make it the control">
+                  ⠿
+                </span>
+                <span className="cmpcname" title={r.run_id}>
+                  {r.run_id}
+                  <span className="cmpcsub" title={runSub(r)}>
+                    {runSub(r)}
+                  </span>
+                </span>
+                {isControl && <span className="cmptag ctrl">Control</span>}
+                {isDq && (
+                  <span className="cmptag sub" title={r.status.disqualifications.map((d) => d.detail).join(' · ')}>
+                    ⚠ subset
+                  </span>
+                )}
+                <button
+                  type="button"
+                  className="cmpx"
+                  aria-label={`Remove ${r.run_id} from the comparison`}
+                  onClick={() => {
+                    setOrder(removeColumn(view, r.run_id))
+                    onRemove(r.run_id)
+                  }}
+                >
+                  ✕
+                </button>
+              </div>
+              {anyDq && (
+                <div className="cmpstatus">
+                  {isDq && (
+                    <span className="cmpreasons">
+                      served {served}% · {r.status.disqualifications.map((d) => d.code).join(', ')}
+                    </span>
+                  )}
+                </div>
+              )}
+
+              <div className="cmpcarddiv" />
+              {noConfig ? (
+                <div className="cmpv muted">—</div>
+              ) : (
+                configLines.map((l) => {
+                  const cell = l.cells[ci]!
+                  const changed = !isControl && cell.display !== l.cells[0]!.display
+                  return (
+                    <div key={l.label} className="cmpv">
+                      <span className={changed ? 'chg' : undefined}>{cell.display}</span>
                     </div>
-                    {dq && (
-                      <span className="cmpreasons">{r.status.disqualifications.map((d) => d.code).join(', ')}</span>
-                    )}
-                  </th>
+                  )
+                })
+              )}
+
+              <div className="cmpcarddiv perf" />
+              {metricLines.map((l) => {
+                const cell = l.cells[ci]!
+                const chip =
+                  l.group === 'health' ? null : isControl ? (
+                    <span className="cmpchip base">baseline</span>
+                  ) : isDq ? (
+                    <span className="cmpchip sub">subset</span>
+                  ) : cell.delta ? (
+                    <span className={`cmpchip ${cell.cls}`}>{cell.delta}</span>
+                  ) : null
+                return (
+                  <div key={l.label} className="cmpv metric">
+                    <span className="mv">{cell.text}</span>
+                    {chip}
+                  </div>
                 )
               })}
-            </tr>
-          </thead>
-
-          <tbody>
-            <tr className="cmpsuper cmpsuper-config">
-              <th scope="colgroup" colSpan={span}>
-                Configuration
-              </th>
-            </tr>
-            {configGroups.map((grp) => (
-              <Fragment key={`cfg-${grp.title}`}>
-                <tr className="cmpsection">
-                  <th scope="colgroup" colSpan={span}>
-                    {grp.title}
-                  </th>
-                </tr>
-                {grp.rows.map((row) => (
-                  <tr key={row.field} className={row.varies ? 'cfgvary' : 'cfgsame'}>
-                    <th scope="row" className="cmprowhead">
-                      {row.label}
-                    </th>
-                    {row.cells.map((cell, ci) => (
-                      <td key={cell.runId} className={`cmpval ${colState(cell.runId, ci)}`} {...dragProps(cell.runId, ci)}>
-                        {cell.items ? cell.items.join(', ') : cell.value}
-                      </td>
-                    ))}
-                  </tr>
-                ))}
-              </Fragment>
-            ))}
-
-            <tr className="cmpsuper cmpsuper-perf">
-              <th scope="colgroup" colSpan={span}>
-                Performance
-              </th>
-            </tr>
-            {metricBlocks.map((block) => (
-              <Fragment key={`m-${block.title}`}>
-                <tr className="cmpsection cmpmetrichead">
-                  <th scope="colgroup" colSpan={span}>
-                    {block.title}
-                  </th>
-                </tr>
-                {block.rows.map((row) => (
-                  <tr key={row.key}>
-                    <th scope="row" className="cmprowhead">
-                      {row.label}
-                    </th>
-                    {row.cells.map((cell, ci) => (
-                      <td
-                        key={cell.runId}
-                        className={`cmpval delta-${cell.cls} ${colState(cell.runId, ci)}`}
-                        {...dragProps(cell.runId, ci)}
-                      >
-                        <span className="cmpraw">{cell.text}</span>
-                        {cell.delta && <span className="cmpdelta">{cell.delta}</span>}
-                      </td>
-                    ))}
-                  </tr>
-                ))}
-              </Fragment>
-            ))}
-          </tbody>
-        </table>
+            </article>
+          )
+        })}
       </div>
     </section>
   )

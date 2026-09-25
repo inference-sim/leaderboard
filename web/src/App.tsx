@@ -517,14 +517,11 @@ function WorkloadSection({
         .filter((r): r is RunRecord => r != null),
     [selectedIds, workload.records],
   )
-  // Compare mode recolours the whole page, so the cue is unmissable and not tied to one
-  // section. The class lives on <body> and is cleared on exit and on unmount (a workload
-  // switch or reveal remounts this section with compareMode reset), so it never lingers.
-  useEffect(() => {
-    const cls = 'comparing-mode'
-    document.body.classList.toggle(cls, compareMode)
-    return () => document.body.classList.remove(cls)
-  }, [compareMode])
+  // Select-all pulls in every run in this table (the comparability group), complete and
+  // disqualified, in declared order; Clear empties the comparison.
+  const allIds = useMemo(() => workload.records.map((r) => r.run_id), [workload.records])
+  const onSelectAll = useCallback(() => setSelectedIds(allIds), [allIds])
+  const onClearSelection = useCallback(() => setSelectedIds([]), [])
   // Show a filter whenever the workload has any option for it, not just two or more. The
   // table omits the model and hardware labels when there is only one of each (a single-
   // model table has no Model column, a single-accelerator one no hardware cell), so the
@@ -535,12 +532,14 @@ function WorkloadSection({
   const emptyNoun = emptyFilterNoun(showModels, models, showHardware, hardware)
   return (
     <section className="group">
-      <WorkloadHeader workload={workload} />
+      {/* Compare mode draws an indigo frame around the whole viewport with a corner flag, so
+          it is unmistakable the board is in another mode without recolouring the content. */}
       {compareMode && (
-        <p className="cmphint" role="status">
-          Compare mode is on. Click rows to highlight them for comparison.
-        </p>
+        <div className="cmpframe" aria-hidden="true">
+          <span className="cmpframe-flag">Compare mode</span>
+        </div>
       )}
+      <WorkloadHeader workload={workload} />
       {(showModels || showHardware) && (
         <div className="filters">
           {showModels && (
@@ -573,6 +572,9 @@ function WorkloadSection({
       <CompareBar
         active={compareMode}
         count={selectedIds.length}
+        total={allIds.length}
+        onSelectAll={onSelectAll}
+        onClear={onClearSelection}
         onToggle={() => {
           // Leaving compare mode clears the highlight selection and hides the panel.
           setCompareMode((on) => {

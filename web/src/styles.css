@@ -30,6 +30,9 @@
   --alt-bg: #dcdcf0;
   --alt-line: #7679c4;
   --focus: #1f6e5c;
+  --mode: #b8770c;
+  --mode-ink: #6b4508;
+  --mode-soft: #f6e8ca;
   --shadow: none;
   --font-sans: 'IBM Plex Sans', -apple-system, 'Segoe UI', system-ui, sans-serif;
   --font-mono: 'IBM Plex Mono', 'SFMono-Regular', ui-monospace, Menlo, monospace;
@@ -4289,10 +4292,9 @@ button.danger {
   word-break: break-word;
 }
 
-/* Compare panel: docked beneath the table, transposed (runs are columns). The table sits in
- * a bounded, scrollable box (.cmpscroll) with a sticky header row and sticky field-label
- * column, so many configurations scroll within the panel rather than growing the page. The
- * control column is banded in accent; deltas are prominent green/red pills. */
+/* Compare panel: docked beneath the table as a rail of cards, one per highlighted run. The
+ * control is the leftmost card and stays pinned while the others scroll, so every delta keeps
+ * its baseline in view. Green = better than the control, red = worse, versus the control only. */
 .comparepanel {
   margin-top: 1.5rem;
   border-top: 2px solid var(--line-strong);
@@ -4305,7 +4307,7 @@ button.danger {
 .cmptools {
   display: flex;
   justify-content: flex-end;
-  margin-bottom: 0.6rem;
+  margin-bottom: 0.75rem;
 }
 
 /* The hide-identical control, as a switch rather than a bare checkbox. */
@@ -4355,200 +4357,222 @@ button.danger {
   outline-offset: 2px;
 }
 
-.cmpsubsetnote {
-  color: var(--warn-ink);
-  background: var(--warn-bg);
-  border: 1px solid var(--warn-line);
-  border-radius: 6px;
-  padding: 0.4rem 0.6rem;
-  font-size: 0.85rem;
-  margin-bottom: 0.6rem;
+/* The card rail: horizontal scroll so many runs never break the page layout. */
+.cmpcards {
+  --cmp-gutter: 9rem;
+  --cmp-card: 15rem;
+  display: grid;
+  grid-template-rows: repeat(var(--cmp-rows, 6), auto);
+  column-gap: 0.9rem;
+  row-gap: 0;
+  /* Horizontal scroll only (for many columns); the panel grows to its full height so every
+     card shows in full and the page scrolls, rather than a nested vertical scrollbar. */
+  overflow-x: auto;
+  padding: 0.25rem 0.15rem 0.75rem;
 }
 
-.cmpscroll {
-  /* Scrollable, but not a heavy box: it only bounds the height and clips overflow. The
-   * panel's own top border and the compare-mode page colour do the framing. */
-  max-height: 70vh;
-  overflow: auto;
-  background: var(--panel);
+/* The left label bar and each card are subgrids over the same rows, so a field sits on the
+   same level in every card. The bar names each parameter/metric once; it is sticky so the
+   names stay in view while the cards scroll. */
+.cmpgutter,
+.cmpcard {
+  grid-row: 1 / -1;
+  display: grid;
+  grid-template-rows: subgrid;
 }
-table.cmptable {
-  border-collapse: separate;
-  border-spacing: 0;
-  font-family: var(--font-mono);
-  font-size: 0.85rem;
-  width: 100%;
-}
-table.cmptable th,
-table.cmptable td {
-  border-bottom: 1px solid var(--line);
-  border-right: 1px solid var(--line);
-  padding: 0.4rem 0.65rem;
-  text-align: left;
-  vertical-align: top;
-}
-/* Sticky column headers stay visible while the body scrolls vertically. */
-table.cmptable thead th {
-  position: sticky;
-  top: 0;
-  z-index: 2;
-  background: var(--panel);
-  border-bottom: 2px solid var(--line-strong);
-}
-.cmprowhead {
-  color: var(--muted);
-  font-weight: 500;
-  white-space: nowrap;
+.cmpgutter {
   position: sticky;
   left: 0;
-  z-index: 1;
-  background: var(--panel);
+  z-index: 5;
+  background: var(--paper);
+  border-right: 1px solid var(--line);
+  box-shadow: 6px 0 8px -6px rgba(0, 0, 0, 0.12);
 }
-.cmpcorner {
-  z-index: 3;
-}
-.cmpcol {
-  min-width: 12rem;
-}
-/* The whole column is the grab handle, so every cell shows the grab affordance. */
-table.cmptable th.cmpcol,
-table.cmptable td.cmpval {
-  cursor: grab;
-}
-table.cmptable th.cmpcol:active,
-table.cmptable td.cmpval:active {
-  cursor: grabbing;
-}
-.cmphead {
+.cmpg {
+  font-family: var(--font-sans);
   display: flex;
-  flex-wrap: wrap;
   align-items: center;
-  gap: 0.35rem;
+}
+.cmpg.label {
+  color: var(--muted);
+  padding: 0.4rem 0.7rem 0.4rem 0.1rem;
+  border-bottom: 1px solid var(--line);
+  overflow-wrap: anywhere;
+  line-height: 1.25;
+}
+.cmpg.label.muted {
+  font-style: italic;
+}
+.cmpg.sec {
+  font-size: 0.68rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted);
+  padding: 0.55rem 0.7rem 0.4rem 0.1rem;
+}
+.cmpg.sec.perf {
+  color: var(--accent-ink);
+}
+
+/* Card box: framed with an inset shadow (not a border) so its content stays on the shared
+   row lines and never drifts a pixel from the label bar. */
+.cmpcard {
+  background: var(--panel);
+  border-radius: 14px;
+  box-shadow: inset 0 0 0 1px var(--line);
+  overflow: hidden;
+  font-family: var(--font-mono);
+  font-size: 0.83rem;
+}
+.cmpcard.ctrl {
+  position: sticky;
+  left: var(--cmp-gutter);
+  z-index: 4;
+  box-shadow: inset 0 0 0 2px var(--accent), 8px 0 10px -8px rgba(0, 0, 0, 0.18);
+}
+.cmpcard.dragging {
+  opacity: 0.4;
+}
+.cmpcard.over {
+  box-shadow: inset 0 0 0 2px var(--accent), 0 0 0 2px var(--accent);
+}
+.cmpchead {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.65rem 0.8rem;
+  border-bottom: 1px solid var(--line);
+}
+.cmpcard.ctrl .cmpchead {
+  background: var(--accent-soft);
 }
 .cmpgrip {
   color: var(--line-strong);
+  cursor: grab;
+  font-size: 0.95rem;
 }
-.cmpname {
+.cmpcname {
+  font-family: var(--font-sans);
   font-weight: 600;
-  color: var(--ink);
+  font-size: 0.9rem;
+  line-height: 1.15;
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
-.cmpbadge {
-  font-size: 0.7rem;
-  padding: 0.05rem 0.35rem;
-  border-radius: 4px;
+.cmpcsub {
+  display: block;
+  font-size: 0.72rem;
+  color: var(--muted);
+  font-weight: 400;
+  margin-top: 1px;
+  overflow-wrap: anywhere;
 }
-.cmpbadge.control {
-  color: #fff;
+.cmptag {
+  font-family: var(--font-sans);
+  font-size: 0.64rem;
+  font-weight: 600;
+  padding: 0.05rem 0.4rem;
+  border-radius: 999px;
+  white-space: nowrap;
+}
+.cmptag.ctrl {
   background: var(--accent);
-  border: 1px solid var(--accent-ink);
-  font-weight: 600;
+  color: #fff;
 }
-.cmpbadge.subset {
-  color: var(--warn-ink);
+.cmptag.sub {
   background: var(--warn-bg);
+  color: var(--warn-ink);
   border: 1px solid var(--warn-line);
 }
-.cmpremove {
+.cmpx {
   margin-left: auto;
-  border: 1px solid var(--line-strong);
-  background: var(--panel);
-  border-radius: 4px;
+  border: 0;
+  background: transparent;
+  color: var(--muted);
   cursor: pointer;
+  font-size: 0.85rem;
   line-height: 1;
-  padding: 0.15rem 0.4rem;
-  color: var(--muted);
+  padding: 0.1rem 0.3rem;
+  border-radius: 5px;
 }
-.cmpremove:hover {
-  color: var(--crit-ink);
-  border-color: var(--crit-line);
-}
-.cmpreasons {
-  display: block;
-  font-size: 0.7rem;
-  color: var(--crit-ink);
-  margin-top: 0.2rem;
-}
-.cmpsection th {
-  background: var(--paper);
-  font-weight: 600;
-  color: var(--ink);
-  text-transform: capitalize;
-}
-/* The two halves of the panel: inputs (Configuration) and outputs (Performance), each on a
- * strong full-width band so the eye never confuses a knob for a measured result. Performance
- * additionally carries a heavy accent rule above it. */
-.cmpsuper th {
-  font-weight: 700;
-  font-size: 0.78rem;
-  letter-spacing: 0.09em;
-  text-transform: uppercase;
-  padding: 0.5rem 0.65rem;
-}
-.cmpsuper-config th {
-  background: var(--ink);
-  color: var(--paper);
-}
-.cmpsuper-perf th {
-  background: var(--accent-ink);
-  color: #fff;
-  border-top: 3px solid var(--accent);
-}
-/* Whole-column drag feedback: the dragged column dims and the drop-target column is banded,
- * so it is unmistakable an entire column is moving, not a single cell. */
-.cmpdragging {
-  opacity: 0.35;
-}
-td.cmpdropover,
-th.cmpdropover {
-  background: var(--accent-soft);
-  /* A firm accent band down the whole target column marks where the dragged column lands. */
-  box-shadow: inset 3px 0 0 var(--accent), inset -3px 0 0 var(--accent);
-}
-.cfgvary > td,
-.cfgvary > .cmprowhead {
-  background: var(--alt-bg);
-}
-.cfgsame {
-  color: var(--muted);
-}
-
-/* The control column, banded in accent throughout so it reads unmistakably as the baseline.
- * Placed after the vary/section rules so the band wins on the control cell of a varying row. */
-.cmpcontrolcol {
-  border-left: 2px solid var(--accent);
-  border-right: 2px solid var(--accent);
-  background: var(--accent-soft);
-}
-thead th.cmpcontrolcol {
-  background: var(--accent-soft);
-}
-
-.cmpval .cmpraw {
-  display: block;
-  color: var(--ink);
-}
-.cmpval .cmpdelta {
-  display: inline-block;
-  margin-top: 0.3rem;
-  padding: 0.12rem 0.5rem;
-  border-radius: 999px;
-  font-weight: 700;
-  font-size: 0.8rem;
-  border: 1px solid transparent;
-}
-.delta-good .cmpdelta {
-  color: var(--accent-ink);
-  background: var(--accent-soft);
-  border-color: var(--accent);
-}
-.delta-bad .cmpdelta {
+.cmpx:hover {
   color: var(--crit-ink);
   background: var(--crit-bg);
-  border-color: var(--crit-line);
 }
-.delta-neutral .cmpdelta {
+.cmpstatus {
+  padding: 0 0.8rem;
+  min-height: 1.4rem;
+  display: flex;
+  align-items: center;
+}
+.cmpreasons {
+  font-family: var(--font-sans);
+  font-size: 0.72rem;
+  color: var(--warn-ink);
+}
+/* The Configuration / Performance dividers inside a card, aligned with the bar's section
+   labels so the two sections read as one across the panel. */
+.cmpcarddiv {
+  background: var(--paper);
+  border-bottom: 1px solid var(--line);
+  border-top: 1px solid var(--line);
+}
+.cmpcarddiv.perf {
+  border-top: 2px solid var(--accent);
+}
+.cmpv {
+  padding: 0.4rem 0.8rem;
+  border-bottom: 1px solid var(--line);
+  color: var(--ink);
+}
+.cmpv.muted {
   color: var(--muted);
+}
+.cmpv.metric {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.25rem;
+}
+.cmpv .mv {
+  color: var(--ink);
+}
+/* A config value that differs from the control: a soft rose highlight (the compare-mode
+   family, clear of the green/red reserved for metric deltas). */
+.cmpv .chg {
+  color: var(--mode-ink);
+  font-weight: 600;
+  background: var(--mode-soft);
+  border-radius: 6px;
+  padding: 0.05rem 0.4rem;
+  margin: 0 -0.15rem;
+}
+.cmpchip {
+  font-family: var(--font-mono);
+  font-size: 0.74rem;
+  font-weight: 600;
+  padding: 0.1rem 0.45rem;
+  border-radius: 6px;
+}
+.cmpchip.good {
+  background: var(--accent-soft);
+  color: var(--accent-ink);
+}
+.cmpchip.bad {
+  background: var(--crit-bg);
+  color: var(--crit-ink);
+}
+.cmpchip.sub {
   background: var(--line);
+  color: var(--muted);
+}
+.cmpchip.base {
+  background: transparent;
+  color: var(--muted);
+  font-family: var(--font-sans);
+  font-weight: 500;
+  padding-left: 0;
 }
 
 /* The Compare toggle: fixed to the viewport's bottom-right, above the board. Board-only is
@@ -4571,9 +4595,81 @@ thead th.cmpcontrolcol {
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.12);
 }
 .cmpbtn.on {
-  background: var(--accent);
+  background: var(--mode);
   color: #fff;
-  border-color: var(--accent-ink);
+  border-color: var(--mode-ink);
+}
+
+/* When compare mode is on, the corner control expands into a small always-visible panel that
+ * holds the count, the instruction, and the Select all / Clear actions - so every compare
+ * control sits in the one spot the reader turned the mode on from, not scattered up the page. */
+.comparebar.on {
+  width: 16rem;
+  background: var(--panel);
+  border: 1px solid var(--line-strong);
+  border-top: 3px solid var(--mode);
+  border-radius: 12px;
+  padding: 0.75rem 0.85rem;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.22);
+}
+.cbrow {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+.cbtitle {
+  font-family: var(--font-sans);
+  font-weight: 700;
+  font-size: 0.9rem;
+  color: var(--mode-ink);
+}
+.cbexit {
+  margin-left: auto;
+  font-family: var(--font-sans);
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--muted);
+  background: transparent;
+  border: 1px solid var(--line-strong);
+  border-radius: 999px;
+  padding: 0.2rem 0.65rem;
+  cursor: pointer;
+}
+.cbexit:hover {
+  color: var(--ink);
+  border-color: var(--muted);
+}
+.cbnote {
+  font-family: var(--font-sans);
+  font-size: 0.78rem;
+  color: var(--muted);
+  margin: 0.45rem 0 0.65rem;
+  line-height: 1.35;
+}
+.cbactions {
+  display: flex;
+  gap: 0.5rem;
+}
+.cbbtn {
+  flex: 1;
+  font-family: var(--font-sans);
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: #fff;
+  background: var(--mode);
+  border: 1px solid var(--mode-ink);
+  border-radius: 8px;
+  padding: 0.4rem 0.5rem;
+  cursor: pointer;
+}
+.cbbtn.ghost {
+  color: var(--mode-ink);
+  background: var(--panel);
+  border-color: var(--line-strong);
+}
+.cbbtn:disabled {
+  opacity: 0.45;
+  cursor: default;
 }
 
 /* A row or DQ card highlighted for comparison. */
@@ -4586,20 +4682,29 @@ tr.cmphl > td.lft {
   outline-offset: 2px;
 }
 
-/* Compare mode recolours the whole page (a class on <body>) to a distinct purple, so it is
- * unmistakable the board is in another mode - no per-section boxing needed. The ranked table
- * and the compare panel keep their own solid backgrounds, so only the page around them turns
- * purple. */
-body.comparing-mode {
-  background: #e6ddf5;
+/* Compare mode draws an indigo frame around the whole viewport with a corner flag - an
+ * unmissable cue that never recolours the content. Indigo is reserved for mode chrome,
+ * deliberately distinct from green (control / better) and red (worse). */
+.cmpframe {
+  position: fixed;
+  inset: 0;
+  z-index: 45;
+  pointer-events: none;
+  box-shadow: inset 0 0 0 7px var(--mode);
 }
-.cmphint {
-  color: var(--alt-ink);
-  background: var(--alt-bg);
-  border: 1px solid var(--alt-line);
-  border-radius: 6px;
-  padding: 0.4rem 0.7rem;
-  font-size: 0.85rem;
-  font-weight: 500;
-  margin: 0.5rem 0 0.75rem;
+.cmpframe-flag {
+  position: fixed;
+  top: 0;
+  left: 50%;
+  transform: translateX(-50%);
+  background: var(--mode);
+  color: #fff;
+  font-family: var(--font-sans);
+  font-size: 0.8rem;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  padding: 0.3rem 1.1rem;
+  border-radius: 0 0 10px 10px;
+  box-shadow: 0 3px 10px rgba(0, 0, 0, 0.25);
 }
+
