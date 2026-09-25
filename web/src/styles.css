@@ -3770,49 +3770,180 @@ button.danger {
   outline-offset: -2px;
 }
 
-/* Models grouped under their provider org. The orgs stack; each carries a quiet heading
- * and the models beneath it as an accordion list. */
-.model-orgs {
-  margin-top: 18px;
-  display: grid;
-  gap: 22px;
+/* The Models toolbar: a name/family search, a dense/MoE filter, and a live count, filling
+ * the strip above the grid. */
+.model-toolbar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px 16px;
+  margin: 18px 0 20px;
 }
 
-.model-org-name {
-  margin: 0 0 8px;
-  font-size: 13.5px;
-  font-weight: 600;
+.model-search {
+  flex: 1 1 260px;
+  min-width: 200px;
+  max-width: 380px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 11px;
+  border: 1px solid var(--line-strong);
+  border-radius: 3px;
+  background: var(--panel);
+}
+
+.model-search:focus-within {
+  outline: 2px solid var(--focus);
+  outline-offset: -1px;
+}
+
+.model-search svg {
+  flex: none;
+  color: var(--muted);
+}
+
+.model-search input {
+  width: 100%;
+  border: none;
+  background: none;
+  font: inherit;
+  font-size: 14px;
+  color: var(--ink);
+  outline: none;
+}
+
+/* A segmented dense/MoE control, in the reserved-teal vocabulary of the rest of the board. */
+.model-seg {
+  display: inline-flex;
+  border: 1px solid var(--line-strong);
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.model-seg button {
+  padding: 6px 13px;
+  border: none;
+  background: var(--panel);
+  font: inherit;
+  font-size: 13px;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.model-seg button + button {
+  border-left: 1px solid var(--line);
+}
+
+.model-seg button:hover {
   color: var(--ink);
 }
 
-/* The models under an org: full-width rows in one hairline container, like the Workloads
- * list, so a row can open in place to reveal its config. */
-.model-list {
-  list-style: none;
+.model-seg button.on {
+  background: var(--accent-soft);
+  color: var(--accent-ink);
+  font-weight: 600;
+}
+
+.model-seg button:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: -2px;
+}
+
+.model-count {
+  margin-left: auto;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+/* Families stacked down the page. Each is a rail naming the family beside a grid of its
+ * cards, so a one-model family costs only the rail width, never a whole empty row. */
+.model-fams {
+  display: flex;
+  flex-direction: column;
+  gap: 34px;
+}
+
+.mfam {
+  display: grid;
+  grid-template-columns: 156px minmax(0, 1fr);
+  gap: 22px;
+  align-items: start;
+}
+
+/* The rail sticks so a tall family keeps its name in view as its cards scroll past. */
+.mfam-rail {
+  position: sticky;
+  top: 12px;
+}
+
+.mfam-name {
   margin: 0;
-  padding: 0;
+  font-size: 17px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+.mfam-meta {
+  margin: 4px 0 0;
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  color: var(--muted);
+}
+
+.mfam-rule {
+  margin-top: 8px;
+  width: 34px;
+  height: 2px;
+  border-radius: 2px;
+  background: var(--accent);
+}
+
+@media (max-width: 720px) {
+  .mfam {
+    grid-template-columns: 1fr;
+    gap: 12px;
+  }
+  .mfam-rail {
+    position: static;
+  }
+  .mfam-rule {
+    display: none;
+  }
+}
+
+/* The card grid within a family: cards fill the width instead of one narrow column. */
+.mgrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(290px, 1fr));
+  gap: 14px;
+  align-items: start;
+}
+
+/* One model card, opening in place to full width to reveal its config beneath the face. */
+.mcard {
+  display: flex;
+  flex-direction: column;
   border: 1px solid var(--line-strong);
   border-radius: 3px;
   background: var(--panel);
   overflow: hidden;
 }
 
-.model-item + .model-item {
-  border-top: 1px solid var(--line);
+.mcard:hover {
+  border-color: var(--accent);
 }
 
-.model-item.open {
-  background: var(--paper);
+.mcard.open {
+  grid-column: 1 / -1;
+  border-color: var(--accent);
 }
 
-/* The row face is the toggle: a full-width button so the keyboard reaches it, the caret and
- * name on the left and the MoE badge pushed to the right. */
-.model-face {
+/* The clickable face carries the whole at-a-glance readout. */
+.mcard-face {
+  display: block;
   width: 100%;
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 9px 12px;
+  padding: 13px 15px 15px;
   border: none;
   background: none;
   text-align: left;
@@ -3821,41 +3952,139 @@ button.danger {
   cursor: pointer;
 }
 
-.model-face:hover {
-  background: var(--accent-soft);
-}
-
-.model-face:focus-visible {
+.mcard-face:focus-visible {
   outline: 2px solid var(--focus);
   outline-offset: -2px;
 }
 
-.model-name {
-  flex: 1;
+.mcard-top {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.mcard-id {
   min-width: 0;
-  overflow-wrap: anywhere;
-  font-size: 13px;
 }
 
-/* The disclosure caret: points right when closed, a quarter-turn down when open. */
-.model-caret {
-  flex: none;
+.mcard-org {
+  font-size: 11px;
+  letter-spacing: 0.02em;
   color: var(--muted);
-  fill: none;
-  stroke: currentColor;
-  stroke-width: 2.5;
-  stroke-linecap: round;
-  stroke-linejoin: round;
-  transition: transform 120ms ease;
 }
 
-.model-caret.open {
-  transform: rotate(90deg);
+.mcard-name {
+  margin-top: 1px;
+  font-size: 14.5px;
+  font-weight: 600;
+  overflow-wrap: anywhere;
 }
 
-/* The config panel that opens beneath a model, indented to line up past the caret. */
-.model-config {
-  padding: 2px 12px 14px 34px;
+.mcard-arch {
+  margin-top: 3px;
+  font-size: 11.5px;
+  color: var(--muted);
+}
+
+/* The context-window meter: the one accent-carrying element on the card, log-scaled across
+ * the catalog's 4K–10M span so the axis that decides what a deployment can be offered is
+ * scannable without opening the model. */
+.mcard-ctx {
+  margin-top: 14px;
+}
+
+.mcard-ctx-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.mcard-ctx-label {
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.mcard-ctx-val {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--accent-ink);
+}
+
+.mcard-ctx-val.na {
+  font-size: 12.5px;
+  font-weight: 400;
+  color: var(--muted);
+}
+
+.mcard-meter {
+  position: relative;
+  height: 5px;
+  margin-top: 6px;
+  border-radius: 3px;
+  background: var(--line);
+  overflow: hidden;
+}
+
+.mcard-meter-fill {
+  position: absolute;
+  inset: 0 auto 0 0;
+  border-radius: 3px;
+  background: var(--accent);
+}
+
+.mcard-meter-scale {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 3px;
+  font-size: 9.5px;
+  color: var(--muted);
+}
+
+/* The spec grid: label/value pairs, two to a row, the values mono and tabular. */
+.mcard-specs {
+  margin: 14px 0 0;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 7px 16px;
+}
+
+.mcard-spec {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.mcard-spec.wide {
+  grid-column: 1 / -1;
+}
+
+.mcard-spec dt {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.mcard-spec dd {
+  margin: 0;
+  font-size: 12.5px;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+/* A quiet marker beside a value: the GQA ratio, or the asterisk on a name-derived precision. */
+.mcard-note {
+  color: var(--muted);
+  cursor: help;
+}
+
+/* The detail that opens beneath a card face: the model.yaml + config.json view on the
+ * graph-paper ground, set off from the face by a hairline. */
+.mcard-detail {
+  padding: 16px 15px 18px;
+  border-top: 1px solid var(--line);
+  background: var(--paper);
 }
 
 /* The opened model's detail: model.yaml tags beside the config.json block. The tag column is
@@ -3958,6 +4187,23 @@ button.danger {
   border: 1px solid var(--alt-line);
   background: var(--alt-bg);
   color: var(--alt-ink);
+  vertical-align: middle;
+  white-space: nowrap;
+}
+
+/* The dense counterpart on a model card: the same chip box as the MoE badge, but a quiet
+ * neutral tone, since "dense" is the default and should not compete with the MoE marker. */
+.badge.dense {
+  display: inline-block;
+  padding: 1px 7px;
+  border-radius: 10px;
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  border: 1px solid var(--line-strong);
+  background: var(--paper);
+  color: var(--muted);
   vertical-align: middle;
   white-space: nowrap;
 }
@@ -4178,4 +4424,29 @@ table.cmptable td {
 }
 .delta-neutral .cmpdelta {
   color: var(--muted);
+}
+
+/* The Compare toggle: fixed to the viewport's bottom-right, above the board. Board-only is
+ * enforced by where it is rendered (WorkloadSection), not by CSS. */
+.comparebar {
+  position: fixed;
+  right: 1.25rem;
+  bottom: 1.25rem;
+  z-index: 40;
+}
+.cmpbtn {
+  font-family: var(--font-sans);
+  font-size: 0.9rem;
+  padding: 0.55rem 1rem;
+  border-radius: 999px;
+  border: 1px solid var(--line-strong);
+  background: var(--panel);
+  color: var(--ink);
+  cursor: pointer;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.12);
+}
+.cmpbtn.on {
+  background: var(--accent);
+  color: #fff;
+  border-color: var(--accent-ink);
 }
