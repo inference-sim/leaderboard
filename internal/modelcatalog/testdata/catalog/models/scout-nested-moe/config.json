@@ -1,1 +1,1 @@
-{"architectures":["Llama4"],"text_config":{"hidden_size":5120,"num_local_experts":16}}
+{"architectures":["Llama4"],"text_config":{"hidden_size":5120,"num_local_experts":16,"model_max_length":10485760}}

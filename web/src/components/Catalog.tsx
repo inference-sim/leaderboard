@@ -1,5 +1,19 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { getModelConfig, listModels, type ModelDetail, type ModelInfo } from '../models'
+import type { ReactNode } from 'react'
+import {
+  contextMeterFraction,
+  filterModels,
+  formatContext,
+  getModelConfig,
+  groupByFamily,
+  listModels,
+  modelOf,
+  orgOf,
+  precision,
+  type ModelDetail,
+  type ModelInfo,
+  type ModelKind,
+} from '../models'
 import { collapseHardwareAliases, listHardware, type HardwareInfo } from '../hardware'
 import type { WorkloadGroup } from '../load'
 import { CopyBlock } from './CopyBlock'
@@ -118,6 +132,9 @@ function ModelsPanel() {
   const [expanded, setExpanded] = useState<string | null>(null)
   const [configs, setConfigs] = useState<Record<string, ConfigState>>({})
   const requested = useRef<Set<string>>(new Set())
+  // The toolbar's controls: a free-text query and the dense/MoE filter.
+  const [query, setQuery] = useState('')
+  const [kind, setKind] = useState<ModelKind>('all')
 
   useEffect(() => {
     let live = true
@@ -160,22 +177,100 @@ function ModelsPanel() {
 
   if (error) return <CatalogError message={error} />
   if (models === null) return <p className="dek">Reading the model catalog.</p>
+  // An empty catalog is a misconfiguration, distinct from a filter that matched nothing:
+  // ModelsList carries the BLIS_CATALOG pointer for the former.
+  if (models.length === 0) {
+    return <ModelsList models={[]} expanded={expanded} onToggle={toggle} configFor={(n) => configs[n]} />
+  }
+  const shown = filterModels(models, query, kind)
   return (
-    <ModelsList
-      models={models}
-      expanded={expanded}
-      onToggle={toggle}
-      configFor={(name) => configs[name]}
-    />
+    <>
+      <ModelsToolbar
+        query={query}
+        onQuery={setQuery}
+        kind={kind}
+        onKind={setKind}
+        shown={shown.length}
+        total={models.length}
+      />
+      {shown.length === 0 ? (
+        <p className="dek empty">No models match that filter.</p>
+      ) : (
+        <ModelsList
+          models={shown}
+          expanded={expanded}
+          onToggle={toggle}
+          configFor={(name) => configs[name]}
+        />
+      )}
+    </>
+  )
+}
+
+/** The Models toolbar: a name/family search, a dense/MoE filter, and a live count of how
+ * many of the catalog's models the current controls show. */
+function ModelsToolbar({
+  query,
+  onQuery,
+  kind,
+  onKind,
+  shown,
+  total,
+}: {
+  query: string
+  onQuery: (q: string) => void
+  kind: ModelKind
+  onKind: (k: ModelKind) => void
+  shown: number
+  total: number
+}) {
+  const kinds: { id: ModelKind; label: string }[] = [
+    { id: 'all', label: 'All' },
+    { id: 'dense', label: 'Dense' },
+    { id: 'moe', label: 'MoE' },
+  ]
+  return (
+    <div className="model-toolbar">
+      <label className="model-search">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" aria-hidden="true">
+          <circle cx="11" cy="11" r="7" />
+          <path d="M21 21l-4.3-4.3" />
+        </svg>
+        <input
+          type="text"
+          value={query}
+          onChange={(e) => onQuery(e.target.value)}
+          placeholder="Filter by name, family, or provider"
+          aria-label="Filter models"
+        />
+      </label>
+      <div className="model-seg" role="group" aria-label="Architecture">
+        {kinds.map((k) => (
+          <button
+            key={k.id}
+            type="button"
+            className={kind === k.id ? 'on' : ''}
+            aria-pressed={kind === k.id}
+            onClick={() => onKind(k.id)}
+          >
+            {k.label}
+          </button>
+        ))}
+      </div>
+      <span className="model-count mono">
+        {shown === total ? `${total} models` : `${shown} of ${total}`}
+      </span>
+    </div>
   )
 }
 
 /**
- * The models, grouped by provider. A model's canonical name is `<org>/<model>`, so the org is
- * a real dimension worth grouping on: the reader scans by provider (qwen, mistralai,
- * meta-llama) rather than one long flat list. A mixture-of-experts model wears a badge, since
- * that is what turns the MoE serving knobs on in the Declare form; dense models wear none.
- * Each model is a button that opens its config beneath it in place.
+ * The models the Catalog offers, grouped by family. Family (Llama, Qwen, GLM, …) is derived
+ * from the model name rather than the provider org, since the org splits a family across
+ * vendors (Llama-4-Scout ships under redhatai, not meta-llama). Each family's cards sit in a
+ * grid beside a rail naming it; a card shows the architecture at a glance and opens in place
+ * to reveal its config.json. A mixture-of-experts model is badged MoE — the flag that turns
+ * the MoE serving knobs on in the Declare form — and a dense one Dense.
  */
 export function ModelsList({
   models,
@@ -194,40 +289,166 @@ export function ModelsList({
       <p className="dek empty">No models in the catalog. Check that BLIS_CATALOG points at a clone.</p>
     )
   }
-  const orgs = groupByOrg(models)
   return (
-    <div className="model-orgs">
-      {orgs.map(({ org, entries }) => (
-        <div className="model-org" key={org}>
-          <h3 className="model-org-name">{org}</h3>
-          <ul className="model-list">
-            {entries.map((m) => {
-              const open = m.name === expanded
-              return (
-                <li className={`model-item${open ? ' open' : ''}`} key={m.name}>
-                  <button
-                    type="button"
-                    className="model-face"
-                    aria-expanded={open}
-                    onClick={() => onToggle(m.name)}
-                  >
-                    <Caret open={open} />
-                    <span className="mono model-name">{m.name}</span>
-                    {m.moe && (
-                      <span className="badge moe" title="Mixture of experts">
-                        MoE
-                      </span>
-                    )}
-                  </button>
-                  {open && <div className="model-config">{renderConfig(configFor(m.name))}</div>}
-                </li>
-              )
-            })}
-          </ul>
-        </div>
+    <div className="model-fams">
+      {groupByFamily(models).map((fam) => (
+        <section className="mfam" key={fam.key}>
+          <div className="mfam-rail">
+            <h3 className="mfam-name">{fam.label}</h3>
+            <p className="mfam-meta">
+              {fam.models.length} model{fam.models.length > 1 ? 's' : ''}
+            </p>
+            <div className="mfam-rule" aria-hidden="true" />
+          </div>
+          <div className="mgrid">
+            {fam.models.map((m) => (
+              <ModelCard
+                key={m.name}
+                model={m}
+                open={m.name === expanded}
+                onToggle={onToggle}
+                config={configFor(m.name)}
+              />
+            ))}
+          </div>
+        </section>
       ))}
     </div>
   )
+}
+
+/**
+ * One model as a spec card: the org kicker, model name, and architecture over a log-scale
+ * context-window meter and the numbers that decide how it runs (layers, hidden size,
+ * attention shape, precision, and — for MoE — the active/total expert split). The card face
+ * is a button; opening it reveals the model.yaml provenance and full config.json beneath.
+ */
+function ModelCard({
+  model,
+  open,
+  onToggle,
+  config,
+}: {
+  model: ModelInfo
+  open: boolean
+  onToggle: (name: string) => void
+  config: ConfigState | undefined
+}) {
+  const spec = model.spec ?? {}
+  const org = orgOf(model.name)
+  const context = formatContext(spec.context)
+  const meterPct = spec.context ? Math.max(2, contextMeterFraction(spec.context) * 100) : 0
+  return (
+    <div className={`mcard${open ? ' open' : ''}`}>
+      <button
+        type="button"
+        className="mcard-face"
+        aria-expanded={open}
+        onClick={() => onToggle(model.name)}
+      >
+        <div className="mcard-top">
+          <div className="mcard-id">
+            {org && <div className="mcard-org mono">{org}</div>}
+            <div className="mcard-name mono">{modelOf(model.name)}</div>
+            {spec.arch && <div className="mcard-arch">{spec.arch}</div>}
+          </div>
+          <span className={`badge ${model.moe ? 'moe' : 'dense'}`}>
+            {model.moe ? 'MoE' : 'Dense'}
+          </span>
+        </div>
+        <div className="mcard-ctx">
+          <div className="mcard-ctx-row">
+            <span className="mcard-ctx-label">Context window</span>
+            <span className={`mcard-ctx-val mono${context ? '' : ' na'}`}>
+              {context ?? 'not stated'}
+            </span>
+          </div>
+          <div className="mcard-meter">
+            <div className="mcard-meter-fill" style={{ width: `${meterPct}%` }} />
+          </div>
+          <div className="mcard-meter-scale mono">
+            <span>4K</span>
+            <span>10M</span>
+          </div>
+        </div>
+        <ModelSpecs model={model} />
+      </button>
+      {open && <div className="mcard-detail">{renderConfig(config)}</div>}
+    </div>
+  )
+}
+
+/** The at-a-glance spec rows on a card face. Each row appears only when config.json carried
+ * its number, so a card never shows a fabricated zero; the Experts row is MoE-only. */
+function ModelSpecs({ model }: { model: ModelInfo }) {
+  const spec = model.spec ?? {}
+  const prec = precision(model)
+  const rows: ReactNode[] = []
+  if (spec.layers) rows.push(<SpecRow key="layers" label="Layers" value={fmtInt(spec.layers)} />)
+  if (spec.hidden) rows.push(<SpecRow key="hidden" label="Hidden" value={fmtInt(spec.hidden)} />)
+  if (spec.heads)
+    rows.push(<SpecRow key="attn" label="Attention" value={attention(spec.heads, spec.kvHeads)} />)
+  if (prec)
+    rows.push(
+      <SpecRow
+        key="prec"
+        label="Precision"
+        value={
+          <>
+            {prec.label}
+            {prec.derived && (
+              <span className="mcard-note" title="from the model name; not in config.json">
+                *
+              </span>
+            )}
+          </>
+        }
+      />,
+    )
+  if (model.moe && spec.experts)
+    rows.push(
+      <SpecRow
+        key="experts"
+        label="Experts"
+        wide
+        value={`${spec.active ? `${spec.active} active` : '—'} / ${fmtInt(spec.experts)} total`}
+      />,
+    )
+  if (rows.length === 0) return null
+  return <dl className="mcard-specs">{rows}</dl>
+}
+
+/** One label/value spec row, the value in mono like the numbers elsewhere on the board. */
+function SpecRow({ label, value, wide }: { label: string; value: ReactNode; wide?: boolean }) {
+  return (
+    <div className={`mcard-spec${wide ? ' wide' : ''}`}>
+      <dt>{label}</dt>
+      <dd className="mono">{value}</dd>
+    </div>
+  )
+}
+
+/** The attention shape: query heads over KV heads, with the grouped-query ratio noted when
+ * they differ (32 / 8 ·4×). KV heads absent leaves just the query head count. */
+function attention(heads: number, kv: number | undefined): ReactNode {
+  if (!kv) return String(heads)
+  const gqa = heads !== kv ? Math.round(heads / kv) : 0
+  return (
+    <>
+      {heads} / {kv}
+      {gqa > 1 && (
+        <span className="mcard-note" title="grouped-query attention: query heads per KV group">
+          {' '}
+          ·{gqa}×
+        </span>
+      )}
+    </>
+  )
+}
+
+/** fmtInt renders a count with thousands separators, tabular in the card grid. */
+function fmtInt(n: number): string {
+  return n.toLocaleString('en-US')
 }
 
 /** The body under an open model: a spinner-free load note, an error pointing at the server, or
@@ -236,22 +457,6 @@ function renderConfig(state: ConfigState | undefined) {
   if (!state || state.status === 'loading') return <p className="dek">Reading the config.</p>
   if (state.status === 'error') return <CatalogError message={state.message} />
   return <ModelConfigView detail={state.detail} />
-}
-
-/** A caret that points right when closed and down when open, in the stroke vocabulary of the
- * app's other line icons. */
-function Caret({ open }: { open: boolean }) {
-  return (
-    <svg
-      className={`model-caret${open ? ' open' : ''}`}
-      viewBox="0 0 24 24"
-      width="12"
-      height="12"
-      aria-hidden="true"
-    >
-      <path d="M9 6l6 6-6 6" />
-    </svg>
-  )
 }
 
 /**
@@ -332,19 +537,6 @@ function Tag({
       </dd>
     </div>
   )
-}
-
-/** Models bucketed by their org prefix, orgs sorted, each org's models kept in incoming
- * (already name-sorted) order. */
-function groupByOrg(models: ModelInfo[]): { org: string; entries: ModelInfo[] }[] {
-  const byOrg = new Map<string, ModelInfo[]>()
-  for (const m of models) {
-    const org = m.name.includes('/') ? m.name.slice(0, m.name.indexOf('/')) : m.name
-    const bucket = byOrg.get(org)
-    if (bucket) bucket.push(m)
-    else byOrg.set(org, [m])
-  }
-  return [...byOrg.keys()].sort().map((org) => ({ org, entries: byOrg.get(org)! }))
 }
 
 // ---------- Hardware ----------
