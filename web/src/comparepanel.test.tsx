@@ -25,7 +25,7 @@ describe('ComparePanel', () => {
 
   it('labels the leftmost run column Control and renders inside a horizontal scroller', () => {
     const html = renderToStaticMarkup(<ComparePanel records={twoRuns()} onRemove={() => {}} />)
-    expect(html).toContain('class="tscroll"')
+    expect(html).toMatch(/class="tscroll cmpscroll"/) // still the horizontal scroller, now bounded
     expect(html).toContain('Control')
     // never reuse the global page container class as a panel class
     expect(html).not.toContain('class="wrap"')
@@ -36,24 +36,36 @@ describe('ComparePanel', () => {
     // max_num_seqs differs -> its row carries the varying class
     expect(html).toMatch(/cfgvary/)
     expect(html).toContain('max_num_seqs')
-    // scheduler is identical -> its row head is hidden by default (identical toggle off)
+    // scheduler is identical -> its row head is hidden by default (hide toggle on)
     expect(html).not.toMatch(/<th[^>]*class="cmprowhead"[^>]*>scheduler</)
-    // the toggle to reveal identical fields is present
-    expect(html).toMatch(/Show identical fields/i)
+    // the toggle is "Hide identical fields" and is checked by default
+    expect(html).toMatch(/Hide identical fields/i)
+    expect(html).toMatch(/type="checkbox"[^>]*checked/)
   })
 
-  it('shows a signed delta on the non-control metric cell', () => {
+  it('renders the panel in a bounded, scrollable container', () => {
+    const html = renderToStaticMarkup(<ComparePanel records={twoRuns()} onRemove={() => {}} />)
+    expect(html).toMatch(/cmpscroll/)
+  })
+
+  it('shows a signed delta pill on the non-control metric cell', () => {
     const html = renderToStaticMarkup(<ComparePanel records={twoRuns()} onRemove={() => {}} />)
     expect(html).toMatch(/\+100(\.0)?%/)
     expect(html).toMatch(/delta-bad/) // higher latency, worse
   })
 
-  it('gives every run column a remove control and keyboard move controls', () => {
+  it('marks the whole control column, not just its header', () => {
+    const html = renderToStaticMarkup(<ComparePanel records={twoRuns()} onRemove={() => {}} />)
+    // control column cells (config and metric) carry the control-column class
+    expect((html.match(/cmpcontrolcol/g) ?? []).length).toBeGreaterThan(1)
+  })
+
+  it('gives every run column a remove control and draggable headers, with no move buttons', () => {
     const html = renderToStaticMarkup(<ComparePanel records={twoRuns()} onRemove={() => {}} />)
     expect(html).toMatch(/aria-label="Remove aaa from the comparison"/)
-    expect(html).toMatch(/aria-label="Move aaa left"/)
-    expect(html).toMatch(/aria-label="Move aaa right"/)
     expect(html).toMatch(/draggable="true"/)
+    // reordering is drag-only now: no left/right move buttons
+    expect(html).not.toMatch(/Move aaa (left|right)/)
   })
 
   it('names a disqualified control baseline as covering a subset', () => {

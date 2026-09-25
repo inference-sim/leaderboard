@@ -1,13 +1,6 @@
 import { Fragment, useEffect, useState, type DragEvent } from 'react'
 import type { RunRecord } from '../load'
-import {
-  buildConfigRows,
-  buildMetricRows,
-  moveColumn,
-  reconcileOrder,
-  removeColumn,
-  reorder,
-} from '../compare'
+import { buildConfigRows, buildMetricRows, reconcileOrder, removeColumn, reorder } from '../compare'
 
 interface ComparePanelProps {
   /** The highlighted records, in selection order. Fewer than two shows the prompt. */
@@ -23,16 +16,19 @@ function runLabel(r: RunRecord): string {
 
 /**
  * The docked comparison panel: the highlighted runs transposed into columns, arguments and
- * metrics into rows. The leftmost column is the control and shows raw values; every other
- * column shows a control-relative delta. Column order and the identical-fields toggle are
- * panel-local; order is seeded from selection order and reconciled as the reader highlights or
- * unhighlights rows, so a manual reordering survives a selection change. Comparison is valid
+ * metrics into rows. The leftmost column is the control and is tinted throughout; every other
+ * column shows a control-relative delta pill. Column order is panel-local, seeded from
+ * selection order and reconciled as the reader highlights or unhighlights rows; the reader
+ * reorders (and picks the control) by dragging a column header. The table sits in a bounded,
+ * scrollable container so many configurations never break the page. Comparison is valid
  * without any further check because the caller only ever passes runs from one workload table
  * (one group_id, same work offered).
  */
 export function ComparePanel({ records, onRemove }: ComparePanelProps) {
   const [order, setOrder] = useState<string[]>(() => records.map((r) => r.run_id))
-  const [showIdentical, setShowIdentical] = useState(false)
+  // Default: hide the fields every selected run agrees on, so a resting panel shows only what
+  // differs. The reader turns this off to see the full configuration.
+  const [hideIdentical, setHideIdentical] = useState(true)
 
   // Fold selection changes into the order, preserving any manual reordering.
   const presentKey = records.map((r) => r.run_id).join(',')
@@ -52,7 +48,7 @@ export function ComparePanel({ records, onRemove }: ComparePanelProps) {
   const cols = order.map((id) => byId.get(id)).filter((r): r is RunRecord => r != null)
   const control = cols[0]!
   const controlDq = !control.status.complete
-  const configGroups = buildConfigRows(records, order, showIdentical)
+  const configGroups = buildConfigRows(records, order, !hideIdentical)
   const metricBlocks = buildMetricRows(records, order)
 
   const onDrop = (e: DragEvent<HTMLTableCellElement>, toIndex: number) => {
@@ -61,12 +57,23 @@ export function ComparePanel({ records, onRemove }: ComparePanelProps) {
     if (id) setOrder((cur) => reorder(cur, id, toIndex))
   }
 
+  /** The class for a body cell in column index `ci` (0 is the control column). */
+  const cellClass = (ci: number, base: string) => (ci === 0 ? `${base} cmpcontrolcol` : base)
+
   return (
     <section className="comparepanel" aria-label="Comparison">
       <div className="cmptools">
-        <label className="cmptoggle">
-          <input type="checkbox" checked={showIdentical} onChange={(e) => setShowIdentical(e.target.checked)} />
-          Show identical fields
+        <label className="cmpswitch">
+          <input
+            type="checkbox"
+            className="cmpswitch-input"
+            checked={hideIdentical}
+            onChange={(e) => setHideIdentical(e.target.checked)}
+          />
+          <span className="cmpswitch-track" aria-hidden="true">
+            <span className="cmpswitch-thumb" />
+          </span>
+          <span className="cmpswitch-label">Hide identical fields</span>
         </label>
       </div>
 
@@ -76,24 +83,28 @@ export function ComparePanel({ records, onRemove }: ComparePanelProps) {
         </p>
       )}
 
-      <div className="tscroll">
+      <div className="tscroll cmpscroll">
         <table className="cmptable">
           <thead>
             <tr>
-              <th scope="col" className="cmprowhead" />
+              <th scope="col" className="cmprowhead cmpcorner" />
               {cols.map((r, i) => {
                 const dq = !r.status.complete
                 return (
                   <th
                     key={r.run_id}
                     scope="col"
-                    className={i === 0 ? 'cmpcol cmpcontrol' : 'cmpcol'}
+                    className={i === 0 ? 'cmpcol cmpcontrolcol' : 'cmpcol'}
                     draggable
                     onDragStart={(e) => e.dataTransfer.setData('text/plain', r.run_id)}
                     onDragOver={(e) => e.preventDefault()}
                     onDrop={(e) => onDrop(e, i)}
+                    title="Drag to reorder; drop in the first slot to make it the control"
                   >
                     <div className="cmphead">
+                      <span className="cmpgrip" aria-hidden="true">
+                        ⠿
+                      </span>
                       <span className="cmpname">{runLabel(r)}</span>
                       {i === 0 && <span className="cmpbadge control">Control</span>}
                       {dq && (
@@ -104,35 +115,17 @@ export function ComparePanel({ records, onRemove }: ComparePanelProps) {
                           ⚠ subset
                         </span>
                       )}
-                      <span className="cmpmove">
-                        <button
-                          type="button"
-                          onClick={() => setOrder((cur) => moveColumn(cur, r.run_id, -1))}
-                          disabled={i === 0}
-                          aria-label={`Move ${r.run_id} left`}
-                        >
-                          ◂
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => setOrder((cur) => moveColumn(cur, r.run_id, 1))}
-                          disabled={i === cols.length - 1}
-                          aria-label={`Move ${r.run_id} right`}
-                        >
-                          ▸
-                        </button>
-                        <button
-                          type="button"
-                          className="cmpremove"
-                          onClick={() => {
-                            setOrder((cur) => removeColumn(cur, r.run_id))
-                            onRemove(r.run_id)
-                          }}
-                          aria-label={`Remove ${r.run_id} from the comparison`}
-                        >
-                          ✕
-                        </button>
-                      </span>
+                      <button
+                        type="button"
+                        className="cmpremove"
+                        onClick={() => {
+                          setOrder((cur) => removeColumn(cur, r.run_id))
+                          onRemove(r.run_id)
+                        }}
+                        aria-label={`Remove ${r.run_id} from the comparison`}
+                      >
+                        ✕
+                      </button>
                     </div>
                     {dq && (
                       <span className="cmpreasons">{r.status.disqualifications.map((d) => d.code).join(', ')}</span>
@@ -156,8 +149,8 @@ export function ComparePanel({ records, onRemove }: ComparePanelProps) {
                     <th scope="row" className="cmprowhead">
                       {row.label}
                     </th>
-                    {row.cells.map((cell) => (
-                      <td key={cell.runId} className="cmpval">
+                    {row.cells.map((cell, ci) => (
+                      <td key={cell.runId} className={cellClass(ci, 'cmpval')}>
                         {cell.items ? cell.items.join(', ') : cell.value}
                       </td>
                     ))}
@@ -178,8 +171,8 @@ export function ComparePanel({ records, onRemove }: ComparePanelProps) {
                     <th scope="row" className="cmprowhead">
                       {row.label}
                     </th>
-                    {row.cells.map((cell) => (
-                      <td key={cell.runId} className={`cmpval delta-${cell.cls}`}>
+                    {row.cells.map((cell, ci) => (
+                      <td key={cell.runId} className={cellClass(ci, `cmpval delta-${cell.cls}`)}>
                         <span className="cmpraw">{cell.text}</span>
                         {cell.delta && <span className="cmpdelta">{cell.delta}</span>}
                       </td>

@@ -526,8 +526,13 @@ function WorkloadSection({
   const showHardware = hardwareTypes.length > 0
   const emptyNoun = emptyFilterNoun(showModels, models, showHardware, hardware)
   return (
-    <section className="group">
+    <section className={compareMode ? 'group comparing' : 'group'}>
       <WorkloadHeader workload={workload} />
+      {compareMode && (
+        <p className="cmphint" role="status">
+          Compare mode is on. Click rows to highlight them for comparison.
+        </p>
+      )}
       {(showModels || showHardware) && (
         <div className="filters">
           {showModels && (
