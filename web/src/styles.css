@@ -4370,6 +4370,9 @@ button.danger {
   overflow: auto;
   border: 1px solid var(--line);
   border-radius: 8px;
+  /* A solid backdrop so the compare-mode section tint never bleeds through the cells and
+   * the accent-banded control column reads against white. */
+  background: var(--panel);
 }
 table.cmptable {
   border-collapse: separate;
@@ -4465,6 +4468,35 @@ table.cmptable thead th {
   color: var(--ink);
   text-transform: capitalize;
 }
+/* The two halves of the panel: inputs (Configuration) and outputs (Performance), each on a
+ * strong full-width band so the eye never confuses a knob for a measured result. Performance
+ * additionally carries a heavy accent rule above it. */
+.cmpsuper th {
+  font-weight: 700;
+  font-size: 0.78rem;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  padding: 0.5rem 0.65rem;
+}
+.cmpsuper-config th {
+  background: var(--ink);
+  color: var(--paper);
+}
+.cmpsuper-perf th {
+  background: var(--accent-ink);
+  color: #fff;
+  border-top: 3px solid var(--accent);
+}
+/* Whole-column drag feedback: the dragged column dims and the drop-target column is banded,
+ * so it is unmistakable an entire column is moving, not a single cell. */
+.cmpdragging {
+  opacity: 0.4;
+}
+td.cmpdropover,
+th.cmpdropover {
+  background: var(--accent-soft);
+  box-shadow: inset 2px 0 0 var(--accent), inset -2px 0 0 var(--accent);
+}
 .cfgvary > td,
 .cfgvary > .cmprowhead {
   background: var(--alt-bg);
@@ -4551,10 +4583,10 @@ tr.cmphl > td.lft {
  * so it is unmistakable the board is in another mode. Distinct from the control column's
  * solid accent-soft band, which sits on top of this wash. */
 .group.comparing {
-  background: rgba(31, 110, 92, 0.06);
+  background: var(--accent-soft);
   border-radius: 12px;
   padding: 1rem 1.25rem 1.5rem;
-  box-shadow: inset 0 0 0 1px var(--accent);
+  box-shadow: inset 0 0 0 3px var(--accent);
 }
 .cmphint {
   color: var(--accent-ink);

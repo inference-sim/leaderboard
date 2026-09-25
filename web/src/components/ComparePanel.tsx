@@ -16,19 +16,24 @@ function runLabel(r: RunRecord): string {
 
 /**
  * The docked comparison panel: the highlighted runs transposed into columns, arguments and
- * metrics into rows. The leftmost column is the control and is tinted throughout; every other
- * column shows a control-relative delta pill. Column order is panel-local, seeded from
- * selection order and reconciled as the reader highlights or unhighlights rows; the reader
- * reorders (and picks the control) by dragging a column header. The table sits in a bounded,
- * scrollable container so many configurations never break the page. Comparison is valid
- * without any further check because the caller only ever passes runs from one workload table
- * (one group_id, same work offered).
+ * metrics into rows. Configuration (the inputs) and Performance (the outputs) sit under their
+ * own labelled bands. The leftmost column is the control and is banded in accent throughout;
+ * every other column shows a control-relative delta pill. Column order is panel-local, seeded
+ * from selection order; the reader reorders (and picks the control) by dragging a column
+ * header - the whole column dims as it is dragged and the drop-target column highlights. The
+ * table sits in a bounded, scrollable container so many configurations never break the page.
+ * Comparison is valid without any further check because the caller only ever passes runs from
+ * one workload table (one group_id, same work offered).
  */
 export function ComparePanel({ records, onRemove }: ComparePanelProps) {
   const [order, setOrder] = useState<string[]>(() => records.map((r) => r.run_id))
   // Default: hide the fields every selected run agrees on, so a resting panel shows only what
   // differs. The reader turns this off to see the full configuration.
   const [hideIdentical, setHideIdentical] = useState(true)
+  // The column being dragged and the column currently under the pointer, so the whole column
+  // (header and every body cell) can show it is the thing moving / the drop target.
+  const [dragId, setDragId] = useState<string | null>(null)
+  const [overId, setOverId] = useState<string | null>(null)
 
   // Fold selection changes into the order, preserving any manual reordering.
   const presentKey = records.map((r) => r.run_id).join(',')
@@ -50,15 +55,28 @@ export function ComparePanel({ records, onRemove }: ComparePanelProps) {
   const controlDq = !control.status.complete
   const configGroups = buildConfigRows(records, order, !hideIdentical)
   const metricBlocks = buildMetricRows(records, order)
+  const span = cols.length + 1
 
+  const endDrag = () => {
+    setDragId(null)
+    setOverId(null)
+  }
   const onDrop = (e: DragEvent<HTMLTableCellElement>, toIndex: number) => {
     e.preventDefault()
     const id = e.dataTransfer.getData('text/plain')
     if (id) setOrder((cur) => reorder(cur, id, toIndex))
+    endDrag()
   }
 
-  /** The class for a body cell in column index `ci` (0 is the control column). */
-  const cellClass = (ci: number, base: string) => (ci === 0 ? `${base} cmpcontrolcol` : base)
+  /** The per-column state classes for a cell (control band, dragging, drop-over). `ci` is the
+   *  column index (0 is the control); `runId` is that column's run. */
+  const colState = (runId: string, ci: number): string => {
+    const parts: string[] = []
+    if (ci === 0) parts.push('cmpcontrolcol')
+    if (dragId === runId) parts.push('cmpdragging')
+    if (overId === runId && dragId != null && dragId !== runId) parts.push('cmpdropover')
+    return parts.join(' ')
+  }
 
   return (
     <section className="comparepanel" aria-label="Comparison">
@@ -94,12 +112,21 @@ export function ComparePanel({ records, onRemove }: ComparePanelProps) {
                   <th
                     key={r.run_id}
                     scope="col"
-                    className={i === 0 ? 'cmpcol cmpcontrolcol' : 'cmpcol'}
+                    className={`cmpcol ${colState(r.run_id, i)}`}
                     draggable
-                    onDragStart={(e) => e.dataTransfer.setData('text/plain', r.run_id)}
-                    onDragOver={(e) => e.preventDefault()}
+                    onDragStart={(e) => {
+                      e.dataTransfer.setData('text/plain', r.run_id)
+                      e.dataTransfer.effectAllowed = 'move'
+                      setDragId(r.run_id)
+                    }}
+                    onDragEnter={() => setOverId(r.run_id)}
+                    onDragOver={(e) => {
+                      e.preventDefault()
+                      setOverId(r.run_id)
+                    }}
                     onDrop={(e) => onDrop(e, i)}
-                    title="Drag to reorder; drop in the first slot to make it the control"
+                    onDragEnd={endDrag}
+                    title="Drag this column to reorder; drop it in the first slot to make it the control"
                   >
                     <div className="cmphead">
                       <span className="cmpgrip" aria-hidden="true">
@@ -137,10 +164,15 @@ export function ComparePanel({ records, onRemove }: ComparePanelProps) {
           </thead>
 
           <tbody>
+            <tr className="cmpsuper cmpsuper-config">
+              <th scope="colgroup" colSpan={span}>
+                Configuration
+              </th>
+            </tr>
             {configGroups.map((grp) => (
               <Fragment key={`cfg-${grp.title}`}>
                 <tr className="cmpsection">
-                  <th scope="colgroup" colSpan={cols.length + 1}>
+                  <th scope="colgroup" colSpan={span}>
                     {grp.title}
                   </th>
                 </tr>
@@ -150,7 +182,7 @@ export function ComparePanel({ records, onRemove }: ComparePanelProps) {
                       {row.label}
                     </th>
                     {row.cells.map((cell, ci) => (
-                      <td key={cell.runId} className={cellClass(ci, 'cmpval')}>
+                      <td key={cell.runId} className={`cmpval ${colState(cell.runId, ci)}`}>
                         {cell.items ? cell.items.join(', ') : cell.value}
                       </td>
                     ))}
@@ -159,10 +191,15 @@ export function ComparePanel({ records, onRemove }: ComparePanelProps) {
               </Fragment>
             ))}
 
+            <tr className="cmpsuper cmpsuper-perf">
+              <th scope="colgroup" colSpan={span}>
+                Performance
+              </th>
+            </tr>
             {metricBlocks.map((block) => (
               <Fragment key={`m-${block.title}`}>
                 <tr className="cmpsection cmpmetrichead">
-                  <th scope="colgroup" colSpan={cols.length + 1}>
+                  <th scope="colgroup" colSpan={span}>
                     {block.title}
                   </th>
                 </tr>
@@ -172,7 +209,7 @@ export function ComparePanel({ records, onRemove }: ComparePanelProps) {
                       {row.label}
                     </th>
                     {row.cells.map((cell, ci) => (
-                      <td key={cell.runId} className={cellClass(ci, `cmpval delta-${cell.cls}`)}>
+                      <td key={cell.runId} className={`cmpval delta-${cell.cls} ${colState(cell.runId, ci)}`}>
                         <span className="cmpraw">{cell.text}</span>
                         {cell.delta && <span className="cmpdelta">{cell.delta}</span>}
                       </td>

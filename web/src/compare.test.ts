@@ -164,6 +164,12 @@ describe('buildConfigRows', () => {
     // The varying field survives the collapse.
     expect(hidden.some((g) => g.rows.some((r) => r.field === 'max_num_seqs'))).toBe(true)
   })
+  it('never renders the Simulation model group (latency_model is a sim setting, not under test)', () => {
+    const { a, b } = trio()
+    // Even with showIdentical on, the simulator group is excluded from the comparison.
+    const groups = buildConfigRows([a, b], ['A', 'B'], true)
+    expect(groups.some((g) => g.title === 'Simulation model')).toBe(false)
+  })
   it('renders every extra_flags entry unconditionally, even when identical', () => {
     const { a, b } = trio()
     a.deployment.extra_flags = { 'my-flag': '1' }

@@ -48,6 +48,18 @@ describe('ComparePanel', () => {
     expect(html).toMatch(/cmpscroll/)
   })
 
+  it('separates configuration from performance with labelled super-header bands', () => {
+    const html = renderToStaticMarkup(<ComparePanel records={twoRuns()} onRemove={() => {}} />)
+    expect(html).toMatch(/cmpsuper/)
+    expect(html).toContain('Configuration')
+    expect(html).toContain('Performance')
+  })
+
+  it('omits the Simulation model group', () => {
+    const html = renderToStaticMarkup(<ComparePanel records={twoRuns()} onRemove={() => {}} />)
+    expect(html).not.toContain('Simulation model')
+  })
+
   it('shows a signed delta pill on the non-control metric cell', () => {
     const html = renderToStaticMarkup(<ComparePanel records={twoRuns()} onRemove={() => {}} />)
     expect(html).toMatch(/\+100(\.0)?%/)

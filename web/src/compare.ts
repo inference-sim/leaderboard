@@ -111,6 +111,15 @@ export interface ConfigGroup {
   rows: ConfigRow[]
 }
 
+/**
+ * Declare groups the Compare panel does not show. Simulation model (latency_model) is a blis
+ * simulator setting, not a deployment property under test - it rides on the record so a run
+ * reproduces, but it is not something a candidate competes on, so it has no place in a
+ * performance comparison. It stays in FIELD_GROUPS (which mirrors the Declare form) so the
+ * coverage test and any future NewRun reuse are unaffected.
+ */
+const COMPARE_HIDDEN_GROUPS = new Set<string>(['Simulation model'])
+
 /** Look records up by run id, in column order; ids with no record are skipped. */
 function inOrder(records: RunRecord[], order: string[]): RunRecord[] {
   const byId = new Map(records.map((r) => [r.run_id, r]))
@@ -130,6 +139,7 @@ export function buildConfigRows(records: RunRecord[], order: string[], showIdent
   const groups: ConfigGroup[] = []
 
   for (const grp of FIELD_GROUPS) {
+    if (COMPARE_HIDDEN_GROUPS.has(grp.title)) continue
     const rows: ConfigRow[] = []
     for (const field of grp.fields) {
       const varies = varying.has(field)
