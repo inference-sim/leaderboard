@@ -67,6 +67,15 @@ interface Props {
    * tests are unaffected. Applied only to the ranked table, never to the disqualified band.
    */
   sloTargets?: SloTargets
+  /**
+   * Whether the table is in compare mode: a row-click highlights the run for comparison
+   * instead of opening its reproduce panel. Defaults to false (repro-on-click, as before).
+   */
+  compareMode?: boolean
+  /** The run_ids currently highlighted for comparison. A highlighted row carries `cmphl`. */
+  selectedIds?: string[]
+  /** Toggle a run's highlight membership. Required for compare mode to do anything. */
+  onToggleHighlight?: (runId: string) => void
 }
 
 /** True when `hardware` is empty (all) or lists this record's accelerator. */
@@ -91,6 +100,9 @@ export function ReadoutTable({
   canDelete = false,
   onDelete,
   sloTargets = {},
+  compareMode = false,
+  selectedIds = [],
+  onToggleHighlight,
 }: Props) {
   const showDelete = canDelete && onDelete != null
   const group = workload.groups[0]! // one comparability group per workload since E1
@@ -203,6 +215,9 @@ export function ReadoutTable({
                     onToggleRepro={() => repro.toggle(record)}
                     revealed={revealedKey === record.run_id}
                     onDelete={showDelete ? onDelete : undefined}
+                    compareMode={compareMode}
+                    highlighted={selectedIds.includes(record.run_id)}
+                    onToggleHighlight={onToggleHighlight}
                   />
                 ))}
               </tbody>
@@ -213,7 +228,13 @@ export function ReadoutTable({
 
       <SloBand hidden={hidden} targets={sloTargets} />
 
-      <DqBand group={filtered} onDelete={showDelete ? onDelete : undefined} />
+      <DqBand
+        group={filtered}
+        onDelete={showDelete ? onDelete : undefined}
+        compareMode={compareMode}
+        selectedIds={selectedIds}
+        onToggleHighlight={onToggleHighlight}
+      />
     </>
   )
 }
@@ -429,6 +450,9 @@ function DataRow({
   onToggleRepro,
   revealed,
   onDelete,
+  compareMode,
+  highlighted,
+  onToggleHighlight,
 }: {
   record: RunRecord
   varying: string[]
@@ -442,6 +466,13 @@ function DataRow({
   revealed: boolean
   /** Opens the delete confirmation for this run, or undefined when deletion is not offered. */
   onDelete?: (record: RunRecord) => void
+  /** Whether the table is in compare mode: a row-click highlights the run instead of opening
+   *  its reproduce panel. */
+  compareMode: boolean
+  /** Whether this row is highlighted for comparison. */
+  highlighted: boolean
+  /** Toggle this run's highlight membership (compare mode only). */
+  onToggleHighlight?: (runId: string) => void
 }) {
   const panelId = `repro-${record.group_id}-${record.run_id}`
 
@@ -449,12 +480,21 @@ function DataRow({
     if ((e.target as HTMLElement).closest('button, a, [role="note"]')) return
     const sel = typeof window !== 'undefined' ? window.getSelection() : null
     if (sel && !sel.isCollapsed) return
+    // In compare mode the row is the selection target: click highlights it for the panel
+    // rather than opening the blis command. The reproduce caret is a <button>, so it is
+    // excluded above and still opens repro.
+    if (compareMode && onToggleHighlight) {
+      onToggleHighlight(record.run_id)
+      return
+    }
     onToggleRepro()
   }
 
+  const rowClass = [revealed ? 'revealed' : '', highlighted ? 'cmphl' : ''].filter(Boolean).join(' ')
+
   return (
     <>
-      <tr id={rowId(record)} className={revealed ? 'revealed' : undefined} onClick={onRowClick}>
+      <tr id={rowId(record)} className={rowClass || undefined} onClick={onRowClick}>
         <DeploymentCell
           record={record}
           varying={varying}
