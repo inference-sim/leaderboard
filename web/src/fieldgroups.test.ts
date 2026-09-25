@@ -28,8 +28,10 @@ describe('FIELD_GROUPS', () => {
     // The schema is the source of truth for the Deployment shape (types.ts is generated
     // from it). Reaching into $defs.deployment.properties catches a field added to the
     // schema but forgotten in a group.
-    const defs = (schema as { $defs: Record<string, { properties: Record<string, unknown> }> }).$defs
-    const schemaKeys = new Set(Object.keys(defs.deployment.properties))
+    const defs = (schema as unknown as { $defs: Record<string, { properties: Record<string, unknown> }> }).$defs
+    const deployment = defs.deployment
+    if (!deployment) throw new Error('schema has no $defs.deployment')
+    const schemaKeys = new Set(Object.keys(deployment.properties))
 
     const grouped = FIELD_GROUPS.flatMap((g) => g.fields)
     // No field appears in two groups.

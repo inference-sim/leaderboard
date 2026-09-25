@@ -3,6 +3,8 @@ import fixture from '../../prototypes/results.json'
 import type { RunRecord } from './load'
 import { COLUMNS } from './model'
 import {
+  buildConfigRows,
+  buildMetricRows,
   compareDelta,
   deltaClass,
   moveColumn,
@@ -96,7 +98,7 @@ describe('compareDelta', () => {
     const control = withMetric(base, { tokens_per_sec: 100 })
     const missing = JSON.parse(JSON.stringify(control)) as RunRecord
     // preemption_count is a real column; null it to simulate a missing metric.
-    ;(missing.metrics as Record<string, unknown>).preemption_count = null
+    ;(missing.metrics as unknown as Record<string, unknown>).preemption_count = null
     const d = compareDelta(missing, control, col('preemption_count'))
     expect(d.pct).toBeNull()
     expect(d.neutral).toBe(true)
@@ -119,5 +121,106 @@ describe('deltaClass', () => {
     // Its raw delta says "better", but a DQ run never reads as a clean win.
     expect(compareDelta(dqFaster, control, col('e2e_p99_ms')).better).toBe(true)
     expect(deltaClass(dqFaster, compareDelta(dqFaster, control, col('e2e_p99_ms')))).toBe('neutral')
+  })
+})
+
+/** Two complete records differing only in max_num_seqs, plus one DQ record. */
+function trio() {
+  const complete = records.filter((r) => r.status.complete)
+  const a = JSON.parse(JSON.stringify(complete[0])) as RunRecord
+  const b = JSON.parse(JSON.stringify(complete[0])) as RunRecord
+  a.run_id = 'A'
+  b.run_id = 'B'
+  b.deployment.max_num_seqs = a.deployment.max_num_seqs + 8
+  b.metrics = { ...b.metrics, e2e_p99_ms: a.metrics.e2e_p99_ms * 2, tokens_per_sec: a.metrics.tokens_per_sec / 2 }
+  const dq = JSON.parse(JSON.stringify(complete[0])) as RunRecord
+  dq.run_id = 'D'
+  dq.status = {
+    ...dq.status,
+    complete: false,
+    disqualifications: [{ code: 'requests_dropped', class: 'altered', detail: 'dropped work' }],
+  }
+  dq.metrics = { ...dq.metrics, e2e_p99_ms: a.metrics.e2e_p99_ms / 2 } // "faster", but must stay neutral
+  return { a, b, dq }
+}
+
+describe('buildConfigRows', () => {
+  it('groups fields under the Declare titles and marks a differing field as varying', () => {
+    const { a, b } = trio()
+    const groups = buildConfigRows([a, b], ['A', 'B'], true)
+    const sched = groups.find((g) => g.title === 'Scheduling & batching')!
+    const seqs = sched.rows.find((r) => r.field === 'max_num_seqs')!
+    expect(seqs.varies).toBe(true)
+    expect(seqs.cells.map((c) => c.runId)).toEqual(['A', 'B'])
+  })
+  it('hides identical rows when showIdentical is false and shows them when true', () => {
+    const { a, b } = trio()
+    const hidden = buildConfigRows([a, b], ['A', 'B'], false)
+    const shown = buildConfigRows([a, b], ['A', 'B'], true)
+    const hasScheduler = (gs: ReturnType<typeof buildConfigRows>) =>
+      gs.some((g) => g.rows.some((r) => r.field === 'scheduler'))
+    expect(hasScheduler(hidden)).toBe(false) // scheduler is identical across A and B
+    expect(hasScheduler(shown)).toBe(true)
+    // The varying field survives the collapse.
+    expect(hidden.some((g) => g.rows.some((r) => r.field === 'max_num_seqs'))).toBe(true)
+  })
+  it('renders every extra_flags entry unconditionally, even when identical', () => {
+    const { a, b } = trio()
+    a.deployment.extra_flags = { 'my-flag': '1' }
+    b.deployment.extra_flags = { 'my-flag': '1' }
+    const groups = buildConfigRows([a, b], ['A', 'B'], false)
+    const extra = groups.find((g) => g.title === 'Extra flags')!
+    expect(extra.rows.map((r) => r.label)).toContain('--my-flag')
+  })
+})
+
+describe('buildMetricRows', () => {
+  it('shows the control raw and a signed percentage delta for the others', () => {
+    const { a, b } = trio()
+    const blocks = buildMetricRows([a, b], ['A', 'B'])
+    const latency = blocks.find((bl) => bl.title === 'latency')!
+    const e2e = latency.rows.find((r) => r.key === 'e2e_p99_ms')!
+    const [control, other] = e2e.cells
+    expect(control!.isControl).toBe(true)
+    expect(control!.delta).toBeNull()
+    expect(other!.delta).toMatch(/\+100(\.0)?%/) // B's e2e is 2x A's
+    expect(other!.cls).toBe('bad') // higher latency is worse
+  })
+  it('colours a throughput loss red and a gain green', () => {
+    const { a, b } = trio() // b halves tokens_per_sec
+    const loss = buildMetricRows([a, b], ['A', 'B'])
+    const lossTps = loss.find((bl) => bl.title === 'throughput')!.rows.find((r) => r.key === 'tokens_per_sec')!
+    expect(lossTps.cells[1]!.cls).toBe('bad')
+    // A run whose throughput beats the control reads green.
+    const gain = JSON.parse(JSON.stringify(a)) as RunRecord
+    gain.run_id = 'G'
+    gain.metrics = { ...gain.metrics, tokens_per_sec: a.metrics.tokens_per_sec * 2 }
+    const gainBlocks = buildMetricRows([a, gain], ['A', 'G'])
+    const gainTps = gainBlocks.find((bl) => bl.title === 'throughput')!.rows.find((r) => r.key === 'tokens_per_sec')!
+    expect(gainTps.cells[1]!.cls).toBe('good')
+  })
+  it('renders served as a plain value with no delta', () => {
+    const { a, b } = trio()
+    const blocks = buildMetricRows([a, b], ['A', 'B'])
+    const health = blocks.find((bl) => bl.title === 'health')!
+    const served = health.rows.find((r) => r.key === 'served')!
+    expect(served.cells.every((c) => c.delta === null)).toBe(true)
+    expect(served.cells.every((c) => c.cls === 'neutral')).toBe(true)
+  })
+  it('keeps a disqualified column neutral even when its number beats the control', () => {
+    const { a, dq } = trio()
+    const blocks = buildMetricRows([a, dq], ['A', 'D'])
+    const latency = blocks.find((bl) => bl.title === 'latency')!
+    const e2e = latency.rows.find((r) => r.key === 'e2e_p99_ms')!
+    expect(e2e.cells[1]!.cls).toBe('neutral')
+  })
+  it('renders a missing metric as an em-dash with no delta', () => {
+    const { a, b } = trio()
+    ;(b.metrics as unknown as Record<string, unknown>).preemption_count = null
+    const blocks = buildMetricRows([a, b], ['A', 'B'])
+    const health = blocks.find((bl) => bl.title === 'health')!
+    const pre = health.rows.find((r) => r.key === 'preemption_count')!
+    expect(pre.cells[1]!.text).toBe('—')
+    expect(pre.cells[1]!.delta).toBeNull()
   })
 })
