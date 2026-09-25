@@ -4366,12 +4366,10 @@ button.danger {
 }
 
 .cmpscroll {
+  /* Scrollable, but not a heavy box: it only bounds the height and clips overflow. The
+   * panel's own top border and the compare-mode page colour do the framing. */
   max-height: 70vh;
   overflow: auto;
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  /* A solid backdrop so the compare-mode section tint never bleeds through the cells and
-   * the accent-banded control column reads against white. */
   background: var(--panel);
 }
 table.cmptable {
@@ -4411,7 +4409,15 @@ table.cmptable thead th {
 }
 .cmpcol {
   min-width: 12rem;
+}
+/* The whole column is the grab handle, so every cell shows the grab affordance. */
+table.cmptable th.cmpcol,
+table.cmptable td.cmpval {
   cursor: grab;
+}
+table.cmptable th.cmpcol:active,
+table.cmptable td.cmpval:active {
+  cursor: grabbing;
 }
 .cmphead {
   display: flex;
@@ -4490,12 +4496,13 @@ table.cmptable thead th {
 /* Whole-column drag feedback: the dragged column dims and the drop-target column is banded,
  * so it is unmistakable an entire column is moving, not a single cell. */
 .cmpdragging {
-  opacity: 0.4;
+  opacity: 0.35;
 }
 td.cmpdropover,
 th.cmpdropover {
   background: var(--accent-soft);
-  box-shadow: inset 2px 0 0 var(--accent), inset -2px 0 0 var(--accent);
+  /* A firm accent band down the whole target column marks where the dragged column lands. */
+  box-shadow: inset 3px 0 0 var(--accent), inset -3px 0 0 var(--accent);
 }
 .cfgvary > td,
 .cfgvary > .cmprowhead {
@@ -4579,19 +4586,17 @@ tr.cmphl > td.lft {
   outline-offset: 2px;
 }
 
-/* Compare mode: wash the whole workload section in a faint accent tint with an accent ring,
- * so it is unmistakable the board is in another mode. Distinct from the control column's
- * solid accent-soft band, which sits on top of this wash. */
-.group.comparing {
-  background: var(--accent-soft);
-  border-radius: 12px;
-  padding: 1rem 1.25rem 1.5rem;
-  box-shadow: inset 0 0 0 3px var(--accent);
+/* Compare mode recolours the whole page (a class on <body>) to a distinct purple, so it is
+ * unmistakable the board is in another mode - no per-section boxing needed. The ranked table
+ * and the compare panel keep their own solid backgrounds, so only the page around them turns
+ * purple. */
+body.comparing-mode {
+  background: #e6ddf5;
 }
 .cmphint {
-  color: var(--accent-ink);
-  background: var(--accent-soft);
-  border: 1px solid var(--accent);
+  color: var(--alt-ink);
+  background: var(--alt-bg);
+  border: 1px solid var(--alt-line);
   border-radius: 6px;
   padding: 0.4rem 0.7rem;
   font-size: 0.85rem;

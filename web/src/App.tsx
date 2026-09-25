@@ -517,6 +517,14 @@ function WorkloadSection({
         .filter((r): r is RunRecord => r != null),
     [selectedIds, workload.records],
   )
+  // Compare mode recolours the whole page, so the cue is unmissable and not tied to one
+  // section. The class lives on <body> and is cleared on exit and on unmount (a workload
+  // switch or reveal remounts this section with compareMode reset), so it never lingers.
+  useEffect(() => {
+    const cls = 'comparing-mode'
+    document.body.classList.toggle(cls, compareMode)
+    return () => document.body.classList.remove(cls)
+  }, [compareMode])
   // Show a filter whenever the workload has any option for it, not just two or more. The
   // table omits the model and hardware labels when there is only one of each (a single-
   // model table has no Model column, a single-accelerator one no hardware cell), so the
@@ -526,7 +534,7 @@ function WorkloadSection({
   const showHardware = hardwareTypes.length > 0
   const emptyNoun = emptyFilterNoun(showModels, models, showHardware, hardware)
   return (
-    <section className={compareMode ? 'group comparing' : 'group'}>
+    <section className="group">
       <WorkloadHeader workload={workload} />
       {compareMode && (
         <p className="cmphint" role="status">

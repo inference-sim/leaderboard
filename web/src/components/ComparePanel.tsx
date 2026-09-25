@@ -61,12 +61,41 @@ export function ComparePanel({ records, onRemove }: ComparePanelProps) {
     setDragId(null)
     setOverId(null)
   }
-  const onDrop = (e: DragEvent<HTMLTableCellElement>, toIndex: number) => {
-    e.preventDefault()
-    const id = e.dataTransfer.getData('text/plain')
-    if (id) setOrder((cur) => reorder(cur, id, toIndex))
-    endDrag()
-  }
+
+  /**
+   * Drag-and-drop wiring shared by every cell of a column (header and body), so the whole
+   * column - not just its header row - is the grab handle and the drop target. The default
+   * single-cell drag ghost is suppressed so nothing looks like one lone cell floating away;
+   * the source column fades (.cmpdragging) and the drop-target column is banded instead.
+   */
+  const dragProps = (runId: string, index: number) => ({
+    draggable: true,
+    onDragStart: (e: DragEvent<HTMLElement>) => {
+      e.dataTransfer.setData('text/plain', runId)
+      e.dataTransfer.effectAllowed = 'move'
+      if (typeof document !== 'undefined') {
+        const ghost = document.createElement('span')
+        ghost.setAttribute('aria-hidden', 'true')
+        ghost.style.cssText = 'position:absolute;top:-9999px;opacity:0'
+        document.body.appendChild(ghost)
+        e.dataTransfer.setDragImage(ghost, 0, 0)
+        setTimeout(() => ghost.remove(), 0)
+      }
+      setDragId(runId)
+    },
+    onDragEnter: () => setOverId(runId),
+    onDragOver: (e: DragEvent<HTMLElement>) => {
+      e.preventDefault()
+      setOverId(runId)
+    },
+    onDrop: (e: DragEvent<HTMLElement>) => {
+      e.preventDefault()
+      const id = e.dataTransfer.getData('text/plain')
+      if (id) setOrder((cur) => reorder(cur, id, index))
+      endDrag()
+    },
+    onDragEnd: endDrag,
+  })
 
   /** The per-column state classes for a cell (control band, dragging, drop-over). `ci` is the
    *  column index (0 is the control); `runId` is that column's run. */
@@ -113,19 +142,7 @@ export function ComparePanel({ records, onRemove }: ComparePanelProps) {
                     key={r.run_id}
                     scope="col"
                     className={`cmpcol ${colState(r.run_id, i)}`}
-                    draggable
-                    onDragStart={(e) => {
-                      e.dataTransfer.setData('text/plain', r.run_id)
-                      e.dataTransfer.effectAllowed = 'move'
-                      setDragId(r.run_id)
-                    }}
-                    onDragEnter={() => setOverId(r.run_id)}
-                    onDragOver={(e) => {
-                      e.preventDefault()
-                      setOverId(r.run_id)
-                    }}
-                    onDrop={(e) => onDrop(e, i)}
-                    onDragEnd={endDrag}
+                    {...dragProps(r.run_id, i)}
                     title="Drag this column to reorder; drop it in the first slot to make it the control"
                   >
                     <div className="cmphead">
@@ -182,7 +199,7 @@ export function ComparePanel({ records, onRemove }: ComparePanelProps) {
                       {row.label}
                     </th>
                     {row.cells.map((cell, ci) => (
-                      <td key={cell.runId} className={`cmpval ${colState(cell.runId, ci)}`}>
+                      <td key={cell.runId} className={`cmpval ${colState(cell.runId, ci)}`} {...dragProps(cell.runId, ci)}>
                         {cell.items ? cell.items.join(', ') : cell.value}
                       </td>
                     ))}
@@ -209,7 +226,11 @@ export function ComparePanel({ records, onRemove }: ComparePanelProps) {
                       {row.label}
                     </th>
                     {row.cells.map((cell, ci) => (
-                      <td key={cell.runId} className={`cmpval delta-${cell.cls} ${colState(cell.runId, ci)}`}>
+                      <td
+                        key={cell.runId}
+                        className={`cmpval delta-${cell.cls} ${colState(cell.runId, ci)}`}
+                        {...dragProps(cell.runId, ci)}
+                      >
                         <span className="cmpraw">{cell.text}</span>
                         {cell.delta && <span className="cmpdelta">{cell.delta}</span>}
                       </td>
