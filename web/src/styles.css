@@ -4042,3 +4042,140 @@ button.danger {
   white-space: pre-wrap;
   word-break: break-word;
 }
+
+/* Compare panel: docked beneath the table, transposed (runs are columns). It reuses the
+ * table vocabulary and the .tscroll horizontal scroller so many columns never break the
+ * page. Delta colours reuse the accent (better) and crit (worse) tokens; neutral is muted. */
+.comparepanel {
+  margin-top: 1.5rem;
+  border-top: 2px solid var(--line-strong);
+  padding-top: 1rem;
+}
+.cmpprompt {
+  color: var(--muted);
+  font-style: italic;
+}
+.cmptools {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: 0.5rem;
+}
+.cmptoggle {
+  font-size: 0.85rem;
+  color: var(--muted);
+  display: inline-flex;
+  gap: 0.4rem;
+  align-items: center;
+}
+.cmpsubsetnote {
+  color: var(--warn-ink);
+  background: var(--warn-bg);
+  border: 1px solid var(--warn-line);
+  border-radius: 6px;
+  padding: 0.4rem 0.6rem;
+  font-size: 0.85rem;
+  margin-bottom: 0.6rem;
+}
+table.cmptable {
+  border-collapse: collapse;
+  font-family: var(--font-mono);
+  font-size: 0.85rem;
+}
+table.cmptable th,
+table.cmptable td {
+  border: 1px solid var(--line);
+  padding: 0.35rem 0.6rem;
+  text-align: left;
+  vertical-align: top;
+}
+.cmprowhead {
+  color: var(--muted);
+  font-weight: 500;
+  white-space: nowrap;
+  position: sticky;
+  left: 0;
+  background: var(--panel);
+}
+.cmpcol {
+  min-width: 12rem;
+}
+.cmpcontrol {
+  background: var(--accent-soft);
+}
+.cmphead {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.35rem;
+}
+.cmpname {
+  font-weight: 600;
+}
+.cmpbadge {
+  font-size: 0.7rem;
+  padding: 0.05rem 0.35rem;
+  border-radius: 4px;
+}
+.cmpbadge.control {
+  color: var(--accent-ink);
+  background: #fff;
+  border: 1px solid var(--accent);
+}
+.cmpbadge.subset {
+  color: var(--warn-ink);
+  background: var(--warn-bg);
+  border: 1px solid var(--warn-line);
+}
+.cmpreasons {
+  display: block;
+  font-size: 0.7rem;
+  color: var(--crit-ink);
+  margin-top: 0.2rem;
+}
+.cmpmove {
+  display: inline-flex;
+  gap: 0.15rem;
+  margin-left: auto;
+}
+.cmpmove button {
+  border: 1px solid var(--line-strong);
+  background: var(--panel);
+  border-radius: 4px;
+  cursor: pointer;
+  line-height: 1;
+  padding: 0.1rem 0.3rem;
+}
+.cmpmove button:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+.cmpsection th {
+  background: var(--paper);
+  font-weight: 600;
+  color: var(--ink);
+  text-transform: capitalize;
+}
+.cfgvary > td,
+.cfgvary > .cmprowhead {
+  background: var(--alt-bg);
+}
+.cfgsame {
+  color: var(--muted);
+}
+.cmpval .cmpraw {
+  display: block;
+}
+.cmpval .cmpdelta {
+  display: block;
+  font-size: 0.75rem;
+  margin-top: 0.1rem;
+}
+.delta-good .cmpdelta {
+  color: var(--accent-ink);
+}
+.delta-bad .cmpdelta {
+  color: var(--crit-ink);
+}
+.delta-neutral .cmpdelta {
+  color: var(--muted);
+}
