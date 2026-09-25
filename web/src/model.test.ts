@@ -8,6 +8,7 @@ import {
   deploymentSpec,
   distinctHardware,
   distinctModels,
+  fieldDisplay,
   gpuCount,
   knobChips,
   outputTokensPerRequest,
@@ -361,5 +362,34 @@ describe('COLUMNS', () => {
     expect(COLUMNS.find((c) => c.key === 'gpus')!.derivedFrom).toBeTruthy()
     expect(COLUMNS.find((c) => c.key === 'served')!.derivedFrom).toBeTruthy()
     expect(COLUMNS.find((c) => c.key === 'e2e_p99_ms')!.derivedFrom).toBeUndefined()
+  })
+})
+
+describe('fieldDisplay', () => {
+  const base = records[0]!
+  it('renders a scalar field as its stringified value', () => {
+    expect(fieldDisplay(base, 'tp')).toEqual({ value: String(base.deployment.tp) })
+  })
+  it('renders routing_scorers as name x weight tokens when present', () => {
+    const r = JSON.parse(JSON.stringify(base)) as RunRecord
+    r.deployment.routing_policy = 'weighted'
+    r.deployment.routing_scorers = [{ name: 'precise-prefix-cache', weight: 2 }]
+    const out = fieldDisplay(r, 'routing_scorers')
+    expect(out.value).toBe('')
+    expect(out.items).toEqual(['precise-prefix-cache ×2'])
+  })
+  it('renders disaggregation pools as tokens', () => {
+    const r = JSON.parse(JSON.stringify(base)) as RunRecord
+    r.deployment.disaggregation = {
+      prefill_instances: 2,
+      decode_instances: 1,
+      prefill_decode_instances: 0,
+      decider: 'never',
+      prefix_threshold: 16,
+      transfer_bandwidth: 25,
+      transfer_base_latency: 0.05,
+      transfer_contention: false,
+    }
+    expect(fieldDisplay(r, 'disaggregation').items).toEqual(['prefill 2', 'decode 1'])
   })
 })
