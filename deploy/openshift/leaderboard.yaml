@@ -78,7 +78,7 @@ spec:
         # loudly at startup if the volume is not writable, rather than surfacing later
         # as a failed /api/run. Same image, so no extra pull.
         - name: ensure-results-dir
-          image: ghcr.io/inference-sim/leaderboard:0.1.5
+          image: ghcr.io/inference-sim/leaderboard:0.1.6
           imagePullPolicy: Always
           command:
             - sh
@@ -95,7 +95,7 @@ spec:
               mountPath: /data
       containers:
         - name: leaderboard
-          image: ghcr.io/inference-sim/leaderboard:0.1.5
+          image: ghcr.io/inference-sim/leaderboard:0.1.6
           imagePullPolicy: Always
           workingDir: /app
           env:
