@@ -128,8 +128,8 @@ spec:
             # inference-sim#1797 the catalog is the separate blis-catalog repo (the old
             # in-repo model_configs/ tree was deleted). The image bundles it at
             # /app/inference-sim/blis-catalog, but that lives on the read-only image
-            # layer and cannot take runtime edits; the seed-data initContainer copies it
-            # once onto the PVC at /data/blis-catalog, which is where we point blis so a
+            # layer and cannot take runtime edits; the seed-data initContainer merges it
+            # onto the PVC on every boot at /data/blis-catalog, which is where we point blis so a
             # private model can be added by hand (models/<name>/config.json + model.yaml).
             # The server reads this var at startup to build the model list, and every blis
             # subprocess it spawns inherits it (both the run path and the workload-spec
