@@ -74,4 +74,4 @@ ENV BLIS_CATALOG=/app/inference-sim/blis-catalog
 ENV LEADERBOARD_RESULTS=/data/results
 ENTRYPOINT ["/app/leaderboard"]
 # Overridden by the Deployment's args; kept in sync so `docker run` behaves the same.
-CMD ["serve", "-addr=:8080", "-blis=/app/inference-sim", "-workloads=/data/workloads.yaml"]
+CMD ["serve", "-addr=:8080", "-blis=/app/inference-sim", "-workloads=/data/workloads.yaml", "-max-upload-mb=4096"]

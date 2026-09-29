@@ -77,9 +77,18 @@ func Evaluate(m schema.Metrics, g schema.Group) schema.Status {
 			fmt.Sprintf("%s requests dropped as unservable", ofDeclared(m.DroppedUnservable)))
 	}
 	if m.TimedOutRequests > 0 {
-		add(CodeRequestsTimedOut, ClassIncomplete,
-			fmt.Sprintf("%s requests timed out before their %ds deadline",
-				ofDeclared(m.TimedOutRequests), g.RequestTimeoutS))
+		// A trace replay has no --timeout: per-request deadlines come from the trace itself
+		// (its deadline_us column), not the group's RequestTimeoutS, so the message must not
+		// cite that number for a trace.
+		if g.Workload.Type == "trace" {
+			add(CodeRequestsTimedOut, ClassIncomplete,
+				fmt.Sprintf("%s requests timed out before the deadlines recorded in the trace",
+					ofDeclared(m.TimedOutRequests)))
+		} else {
+			add(CodeRequestsTimedOut, ClassIncomplete,
+				fmt.Sprintf("%s requests timed out before their %ds deadline",
+					ofDeclared(m.TimedOutRequests), g.RequestTimeoutS))
+		}
 	}
 	if m.StillQueued > 0 || m.StillRunning > 0 {
 		add(CodeWindowEndedBusy, ClassIncomplete,

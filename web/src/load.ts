@@ -279,6 +279,15 @@ function workOffered(group: RunRecord['group']): string {
   if (w.type === 'workload-spec') {
     return specShape((w.spec ?? null) as SpecObject | null)
   }
+  if (w.type === 'trace') {
+    // A trace offers its recorded stream; a pool offers N concurrent sessions (the
+    // offered-load analog of concurrency). The corpus size lives on the record's
+    // trace_meta, not the group, so the group-level title names the shape, not the count.
+    const sessions = w.trace?.concurrent_sessions ?? 0
+    return sessions > 0
+      ? `trace replay, ${sessions} concurrent sessions`
+      : 'trace replay at recorded arrivals'
+  }
   const load =
     w.load.kind === 'rate'
       ? `${w.load.value.toLocaleString('en-US', { minimumFractionDigits: 1 })} req/s`
@@ -327,6 +336,20 @@ function workloadTags(name: string | null, type: string): string[] {
   if (name && PRESET_NAMES.includes(name)) tags.push('preset')
   tags.push(type)
   return tags
+}
+
+/**
+ * Merges the committed baseline (inlined at build time) with the live records the server
+ * returns from its outDir, so the leaderboard shows both. A live record supersedes a
+ * committed one with the same group_id/run_id (a re-run wins); committed records the live
+ * set does not have are kept. This matters because `leaderboard serve`'s outDir may not be
+ * the tree the bundle was built from — the default (~/leaderboard-results) holds only this
+ * session's runs — so replacing committed with live would make the baseline vanish.
+ */
+export function mergeRecords(committed: RunRecord[], live: RunRecord[]): RunRecord[] {
+  const key = (r: RunRecord) => `${r.group_id}/${r.run_id}`
+  const inLive = new Set(live.map(key))
+  return [...live, ...committed.filter((r) => !inLive.has(key(r)))]
 }
 
 /**

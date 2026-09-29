@@ -18,7 +18,7 @@ type SchemaWorkload = Group['workload']
 
 /** The wire shape of one profile — mirrors the server's profileBody (cmd/leaderboard). */
 export interface WorkloadBody {
-  type: 'distribution' | 'workload-spec'
+  type: 'distribution' | 'workload-spec' | 'trace'
   num_requests?: number
   load?: { kind: 'rate' | 'concurrency'; value: number }
   prompt_tokens?: number
@@ -29,6 +29,25 @@ export interface WorkloadBody {
   /** The raw WorkloadSpec as YAML text; the server parses it. */
   spec_yaml?: string
   spec?: Record<string, unknown>
+  /** The trace block (type === 'trace'): comparability knobs + display/provenance,
+   * mirroring the server's traceBody. Absent for the other variants. */
+  trace?: TraceBody
+}
+
+/** The wire shape of a trace workload — mirrors the server's traceBody. The bytes live
+ * in the store; only the content hash travels. */
+export interface TraceBody {
+  sha256: string
+  session_mode: string
+  concurrent_sessions: number
+  total_sessions: number
+  shuffle_corpus: boolean
+  think_time_ms: number
+  think_time_dist: string
+  source_format: string
+  records: number
+  sessions: number
+  session_context_growth: string
 }
 
 export interface ProfileBody {
@@ -62,6 +81,65 @@ export interface FormValues {
   horizonTicks: number | null
   requestTimeoutS: number
   specYaml: string
+  /** Which variant the editor is authoring. Defaults to workload-spec (the guided/raw
+   * spec card); 'trace' switches to the trace card. */
+  kind: 'workload-spec' | 'trace'
+  /** The trace card's state, set once a trace has been ingested (POST /api/traces returns
+   * its hash and corpus). null until then, or for a spec workload. */
+  trace: TraceForm | null
+}
+
+/** The trace card's editable state: the replay knobs the author sets, plus the ingested
+ * identity and corpus display returned by /api/traces. */
+export interface TraceForm {
+  sessionMode: string
+  concurrentSessions: number
+  totalSessions: number
+  shuffleCorpus: boolean
+  thinkTimeMs: number
+  thinkTimeDist: string
+  // Set on a successful ingest; empty sha256 means nothing ingested yet.
+  sha256: string
+  sourceFormat: string
+  records: number
+  sessions: number
+  sessionContextGrowth: string
+}
+
+/** The session modes blis replay accepts. */
+export const TRACE_SESSION_MODES = ['fixed', 'closed-loop', 'fixed-accumulate'] as const
+
+/** validateTraceForm is the TS port of internal/schema.ValidateTrace: the cross-flag
+ * guards blis replay enforces, checked client-side so the editor refuses a bad
+ * combination before saving. Returns the reasons; empty means valid. */
+export function validateTraceForm(t: TraceForm): string[] {
+  const issues: string[] = []
+  if (!t.sha256) issues.push('this trace references no content; ingest a trace first')
+  if (!TRACE_SESSION_MODES.includes(t.sessionMode as (typeof TRACE_SESSION_MODES)[number])) {
+    issues.push(`session_mode "${t.sessionMode}" is not one of fixed, closed-loop, fixed-accumulate`)
+    return issues
+  }
+  if (t.thinkTimeMs < 0) issues.push(`think_time_ms must be >= 0, got ${t.thinkTimeMs}`)
+  if (t.thinkTimeMs > 0 && t.thinkTimeDist !== '')
+    issues.push('think_time_ms and think_time_dist are mutually exclusive; set at most one')
+  if ((t.thinkTimeMs > 0 || t.thinkTimeDist !== '') && t.sessionMode !== 'closed-loop')
+    issues.push(`a think-time override requires session_mode closed-loop, not "${t.sessionMode}"`)
+  if (t.concurrentSessions < 0) issues.push(`concurrent_sessions must be >= 0, got ${t.concurrentSessions}`)
+  if (t.concurrentSessions > 0) {
+    if (t.sessionMode === 'fixed-accumulate')
+      issues.push('concurrent_sessions is incompatible with session_mode fixed-accumulate; use closed-loop for a pooled replay')
+    else if (t.sessionMode !== 'closed-loop')
+      issues.push(`a session pool (concurrent_sessions > 0) requires session_mode closed-loop, not "${t.sessionMode}"`)
+  }
+  if (t.totalSessions > 0 && t.concurrentSessions === 0)
+    issues.push('total_sessions requires concurrent_sessions > 0')
+  if (t.shuffleCorpus && t.concurrentSessions === 0)
+    issues.push('shuffle_corpus requires concurrent_sessions > 0')
+  if (t.sessionContextGrowth === 'accumulate' && t.sessionMode !== 'closed-loop' && t.sessionMode !== 'fixed-accumulate')
+    issues.push(`this trace's session_context_growth is accumulate, which requires session_mode closed-loop or fixed-accumulate, not "${t.sessionMode}"`)
+  if (t.sessionMode === 'fixed-accumulate' && t.sessionContextGrowth !== 'accumulate')
+    issues.push('session_mode fixed-accumulate requires an accumulate corpus; use fixed for a trace with absolute per-round inputs')
+  return issues
 }
 
 export interface Issue {
@@ -87,6 +165,27 @@ export function initialForm(): FormValues {
     horizonTicks: null,
     requestTimeoutS: 300,
     specYaml: serializeSpec(defaultSpec()),
+    kind: 'workload-spec',
+    trace: null,
+  }
+}
+
+/** The trace card's fresh state before anything is ingested: a fixed replay with no pool.
+ * session_mode is refined once a trace is ingested (an accumulate corpus forces
+ * closed-loop). */
+export function initialTraceForm(): TraceForm {
+  return {
+    sessionMode: 'fixed',
+    concurrentSessions: 0,
+    totalSessions: 0,
+    shuffleCorpus: false,
+    thinkTimeMs: 0,
+    thinkTimeDist: '',
+    sha256: '',
+    sourceFormat: '',
+    records: 0,
+    sessions: 0,
+    sessionContextGrowth: '',
   }
 }
 
@@ -96,6 +195,30 @@ export function initialForm(): FormValues {
 export function bodyToForm(body: ProfileBody): FormValues {
   const base = initialForm()
   const w = body.workload
+  if (w.type === 'trace' && w.trace) {
+    const t = w.trace
+    return {
+      ...base,
+      name: body.name,
+      seed: body.seed,
+      horizonTicks: body.horizon_ticks,
+      requestTimeoutS: body.request_timeout_s,
+      kind: 'trace',
+      trace: {
+        sessionMode: t.session_mode,
+        concurrentSessions: t.concurrent_sessions,
+        totalSessions: t.total_sessions,
+        shuffleCorpus: t.shuffle_corpus,
+        thinkTimeMs: t.think_time_ms,
+        thinkTimeDist: t.think_time_dist,
+        sha256: t.sha256,
+        sourceFormat: t.source_format,
+        records: t.records,
+        sessions: t.sessions,
+        sessionContextGrowth: t.session_context_growth,
+      },
+    }
+  }
   const specYaml =
     w.type === 'workload-spec'
       ? w.spec_yaml ?? (w.spec ? serializeSpec(w.spec as SpecObject) : '')
@@ -177,8 +300,8 @@ function distributionToSpec(w: WorkloadBody): SpecObject {
 
 /** The variant every profile authored here is stored as: the editor is spec-first, so a
  * save is always a WorkloadSpec (the distribution variant is legacy, read on Edit only). */
-export function variantOf(_v: FormValues): 'workload-spec' {
-  return 'workload-spec'
+export function variantOf(v: FormValues): 'workload-spec' | 'trace' {
+  return v.kind
 }
 
 /**
@@ -203,10 +326,34 @@ export function interpret(v: FormValues): Interpretation {
   if (v.horizonTicks !== null && v.horizonTicks <= 0)
     push('horizonTicks', 'The horizon must be greater than 0, or empty for unbounded.')
 
-  const { error } = parseSpec(v.specYaml)
-  if (error) push('specYaml', error)
-
-  const workload: WorkloadBody = { type: 'workload-spec', spec_yaml: v.specYaml }
+  let workload: WorkloadBody
+  if (v.kind === 'trace') {
+    if (v.trace == null || !v.trace.sha256) {
+      push('trace', 'Upload and ingest a trace before saving this workload.')
+    } else {
+      for (const msg of validateTraceForm(v.trace)) push('trace', msg)
+    }
+    workload = { type: 'trace' }
+    if (v.trace && v.trace.sha256) {
+      workload.trace = {
+        sha256: v.trace.sha256,
+        session_mode: v.trace.sessionMode,
+        concurrent_sessions: v.trace.concurrentSessions,
+        total_sessions: v.trace.totalSessions,
+        shuffle_corpus: v.trace.shuffleCorpus,
+        think_time_ms: v.trace.thinkTimeMs,
+        think_time_dist: v.trace.thinkTimeDist,
+        source_format: v.trace.sourceFormat,
+        records: v.trace.records,
+        sessions: v.trace.sessions,
+        session_context_growth: v.trace.sessionContextGrowth,
+      }
+    }
+  } else {
+    const { error } = parseSpec(v.specYaml)
+    if (error) push('specYaml', error)
+    workload = { type: 'workload-spec', spec_yaml: v.specYaml }
+  }
   const body: ProfileBody = {
     name: v.name,
     seed: v.seed,
@@ -226,7 +373,36 @@ export function interpret(v: FormValues): Interpretation {
 export function profileToGroup(body: ProfileBody): Group {
   const w = body.workload
   let workload: SchemaWorkload
-  if (w.type === 'workload-spec') {
+  if (w.type === 'trace') {
+    const t = w.trace
+    const load =
+      t && t.concurrent_sessions > 0
+        ? { kind: 'sessions' as const, value: t.concurrent_sessions }
+        : { kind: 'recorded' as const, value: 0 }
+    workload = {
+      type: 'trace',
+      arrival_process: 'constant',
+      num_requests: 0,
+      load,
+      prompt_tokens: 0,
+      prompt_tokens_stdev: 0,
+      output_tokens: 0,
+      output_tokens_stdev: 0,
+      spec_file: null,
+      spec_sha256: null,
+      trace: t
+        ? {
+            sha256: t.sha256,
+            session_mode: t.session_mode,
+            concurrent_sessions: t.concurrent_sessions,
+            total_sessions: t.total_sessions,
+            shuffle_corpus: t.shuffle_corpus,
+            think_time_ms: t.think_time_ms,
+            think_time_dist: t.think_time_dist,
+          }
+        : undefined,
+    } as SchemaWorkload
+  } else if (w.type === 'workload-spec') {
     workload = {
       type: 'workload-spec',
       arrival_process: 'constant',
@@ -270,11 +446,63 @@ export function profileToGroup(body: ProfileBody): Group {
  */
 export function profileSummary(body: ProfileBody): string {
   const w = body.workload
+  if (w.type === 'trace') {
+    const t = w.trace
+    const corpus = t ? ` (${t.records.toLocaleString('en-US')} records, ${t.sessions.toLocaleString('en-US')} sessions)` : ''
+    if (t && t.concurrent_sessions > 0) return `replayed trace, ${t.concurrent_sessions} concurrent sessions${corpus}`
+    return `replayed trace at recorded arrivals${corpus}`
+  }
   if (w.type === 'workload-spec') {
     const obj = w.spec ? (w.spec as SpecObject) : parseSpec(w.spec_yaml ?? '').obj
     return summarizeSpec(obj)
   }
   return workloadTitle(profileToGroup(body))
+}
+
+/** The result of ingesting a trace, mirroring the server's /api/traces response. */
+export interface IngestResult {
+  sha256: string
+  records: number
+  sessions: number
+  session_context_growth: string
+  source_format: string
+}
+
+/** ingestTrace uploads a trace to POST /api/traces: a native TraceV2 pair (header +
+ * data), or a raw OTel/Weka file with convert options. The server stores it by content
+ * hash and returns its identity and corpus, which the trace card folds into the form. */
+export async function ingestTrace(
+  opts: {
+    sourceFormat: 'tracev2' | 'otel' | 'weka'
+    header?: File
+    data?: File
+    input?: File
+    contextGrowth?: string
+    maxThinkTime?: string
+    minRounds?: number
+    includeErrors?: boolean
+  },
+  fetchImpl: typeof fetch = fetch,
+): Promise<IngestResult> {
+  const fd = new FormData()
+  fd.set('source_format', opts.sourceFormat)
+  if (opts.sourceFormat === 'tracev2') {
+    if (opts.header) fd.set('header', opts.header)
+    if (opts.data) fd.set('data', opts.data)
+  } else {
+    if (opts.input) fd.set('input', opts.input)
+    if (opts.contextGrowth) fd.set('context_growth', opts.contextGrowth)
+    if (opts.maxThinkTime) fd.set('max_think_time', opts.maxThinkTime)
+    if (opts.minRounds != null) fd.set('min_rounds', String(opts.minRounds))
+    if (opts.includeErrors) fd.set('include_errors', 'true')
+  }
+  let res: Response
+  try {
+    res = await fetchImpl('/api/traces', { method: 'POST', body: fd })
+  } catch {
+    throw new Error(UNREACHABLE)
+  }
+  return (await readOrThrow(res)) as IngestResult
 }
 
 /**

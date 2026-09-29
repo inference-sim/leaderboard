@@ -28,8 +28,13 @@ import { serializeSpec, type SpecObject } from './spec'
 import { numeric } from './format'
 
 export type Group = RunRecord['group']
+type TraceMeta = NonNullable<RunRecord['trace_meta']>
 export type Deployment = RunRecord['deployment']
-export type LoadKind = Group['workload']['load']['kind']
+// The custom card is a distribution/spec load, so its selectable kinds are the synthetic
+// two only. The trace loads (recorded, sessions) are derived from a trace's own knobs, not
+// chosen in this form, so they are excluded here via Extract (which still ties the type to
+// the schema, so a renamed synthetic kind is caught).
+export type LoadKind = Extract<Group['workload']['load']['kind'], 'rate' | 'concurrency'>
 export type ArrivalProcess = Group['workload']['arrival_process']
 
 /** Mirrors internal/spec.runIDPattern: a run_id is also a filename. */
@@ -184,6 +189,9 @@ export interface Output {
    * or a custom workload whose content already exists under some name (reused, not
    * duplicated — P3). */
   saveProfile: ProfileBody | null
+  /** The trace's display/provenance, posted with a trace run so the record can show what
+   * was replayed. Null for a non-trace run. It is display-only, never in group_id. */
+  traceMeta: TraceMeta | null
   target: Target
   /** A complete, runnable declaration. */
   yamlFile: string
@@ -773,6 +781,25 @@ export function interpret(
 
   if (issues.length > 0 || group === null) return { issues, output: null, target, notes }
 
+  // A trace run carries the trace's display/provenance from its selected profile, so the
+  // record can show what was replayed. Only a selected trace profile has it — the custom
+  // card is spec-only — so this is null otherwise.
+  let traceMeta: TraceMeta | null = null
+  if (group.workload.type === 'trace') {
+    const profile = profiles.find((p) => p.name === values.workloadSel)
+    const t = profile?.workload.trace
+    if (t) {
+      traceMeta = {
+        // The server closes source_format to this set at ingest; the wire type is a plain
+        // string, so widen it back to the schema enum here.
+        source_format: t.source_format as TraceMeta['source_format'],
+        records: t.records,
+        sessions: t.sessions,
+        session_context_growth: t.session_context_growth,
+      }
+    }
+  }
+
   const specPath = `/tmp/${runId || 'run'}.workload.yaml`
   return {
     issues,
@@ -786,6 +813,7 @@ export function interpret(
       // under (or the existing profile it reuses when its content already exists).
       workloadName,
       saveProfile,
+      traceMeta,
       target,
       yamlFile: yamlFile(group, deployment, runId),
       yamlRow: yamlRow(deployment, baseDeployment, runId),
@@ -1292,6 +1320,7 @@ export async function postRun(output: Output, fetchImpl: typeof fetch = fetch): 
         deployment: output.deployment,
         run_id: output.runId,
         workload_name: output.workloadName,
+        trace_meta: output.traceMeta,
       }),
     })
   } catch {

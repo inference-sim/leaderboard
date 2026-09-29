@@ -139,8 +139,10 @@ func Load(path string) (*Plan, error) {
 func buildGroup(g groupSpec) (schema.Group, error) {
 	if g.Workload.Type != "distribution" {
 		return schema.Group{}, fmt.Errorf(
-			"spec: workload.type %q: only \"distribution\" is supported; --workload-spec "+
-				"is reserved in the schema but not implemented", g.Workload.Type)
+			"spec: workload.type %q: runs.yaml supports only \"distribution\". The "+
+				"\"workload-spec\" and \"trace\" variants are authored and ingested in the web "+
+				"catalog (they carry an inline spec or a multi-MB trace blob that a runs.yaml "+
+				"cannot); run them with `leaderboard serve` and the Declare-a-run form", g.Workload.Type)
 	}
 	if g.Workload.SpecFile != nil {
 		return schema.Group{}, fmt.Errorf(

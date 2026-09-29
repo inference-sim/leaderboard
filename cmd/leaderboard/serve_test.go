@@ -30,10 +30,10 @@ func TestHandleRunWritesAndReturns(t *testing.T) {
 	var gotRunID, gotName string
 	s := &server{
 		outDir: out,
-		execute: func(g schema.Group, runID string, dep schema.Deployment, workloadName string) (schema.Record, error) {
-			gotDep, gotRunID, gotName = dep, runID, workloadName
-			rec := sampleRecord(runID, "abc123")
-			rec.WorkloadName = workloadName
+		execute: func(req runRequest) (schema.Record, error) {
+			gotDep, gotRunID, gotName = req.Deployment, req.RunID, req.WorkloadName
+			rec := sampleRecord(req.RunID, "abc123")
+			rec.WorkloadName = req.WorkloadName
 			return rec, nil
 		},
 	}
@@ -78,7 +78,7 @@ func TestHandleRunRejectsBadRunID(t *testing.T) {
 	called := false
 	s := &server{
 		outDir: t.TempDir(),
-		execute: func(schema.Group, string, schema.Deployment, string) (schema.Record, error) {
+		execute: func(runRequest) (schema.Record, error) {
 			called = true
 			return schema.Record{}, nil
 		},
@@ -98,7 +98,7 @@ func TestHandleRunRejectsBadRunID(t *testing.T) {
 func TestHandleRunSurfacesExecutorError(t *testing.T) {
 	s := &server{
 		outDir: t.TempDir(),
-		execute: func(schema.Group, string, schema.Deployment, string) (schema.Record, error) {
+		execute: func(runRequest) (schema.Record, error) {
 			return schema.Record{}, os.ErrPermission
 		},
 	}

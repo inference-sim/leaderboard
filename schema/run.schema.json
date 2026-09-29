@@ -17,6 +17,7 @@
     "group_id": {"$ref": "#/$defs/shortHash", "description": "hash(group). Bounds one table."},
     "work_id": {"$ref": "#/$defs/shortHash", "description": "hash(group minus seed)."},
     "workload_name": {"type": "string", "description": "The catalog name (a preset or saved profile) the run was declared with, for display only. Optional and not part of group_id/work_id, which hash the model-free group: the name never changes which table a run lands in. Absent for a runs.yaml run, which names no workload."},
+    "trace_meta": {"$ref": "#/$defs/traceMeta"},
     "group": {"$ref": "#/$defs/group"},
     "deployment": {"$ref": "#/$defs/deployment"},
     "provenance": {"$ref": "#/$defs/provenance"},
@@ -52,10 +53,10 @@
       "required": ["type", "arrival_process", "num_requests", "load", "prompt_tokens", "prompt_tokens_stdev", "output_tokens", "output_tokens_stdev", "spec_file", "spec_sha256"],
       "description": "Two variants share this object, discriminated by `type` (§4). The base declares every field loosely; the value constraints that make a `distribution` workload well-formed live in the conditional below, so a `workload-spec` record — whose distribution fields are unused zeros — is not rejected by them. Keeping one object (rather than a oneOf) keeps the generated Workload a single type, so existing readers of `num_requests`/`load` are unchanged.",
       "properties": {
-        "type": {"enum": ["distribution", "workload-spec"], "description": "--workload. `distribution` is the flat synthetic shape; `workload-spec` carries an inline blis WorkloadSpec in `spec` and reaches the full workload surface."},
+        "type": {"enum": ["distribution", "workload-spec", "trace"], "description": "--workload for the synthetic variants; the `trace` variant runs `blis replay` against a recorded TraceV2 named in `trace`. `distribution` is the flat synthetic shape; `workload-spec` carries an inline blis WorkloadSpec in `spec`."},
         "arrival_process": {
           "enum": ["constant", "closed-loop"],
-          "description": "DERIVED, not reported: SynthesizeFromDistribution sets ArrivalSpec{Process: \"constant\"} for rate mode (../inference-sim/sim/workload/synthesis.go:33). Poisson is reachable only via --workload-spec. Not applicable to the spec variant (arrival lives inside `spec`), where it holds the placeholder \"constant\"."
+          "description": "DERIVED, not reported: SynthesizeFromDistribution sets ArrivalSpec{Process: \"constant\"} for rate mode (../inference-sim/sim/workload/synthesis.go:33). Poisson is reachable only via --workload-spec. Not applicable to the spec or trace variants (arrival lives inside the spec, or is the trace's recorded stream), where it holds the placeholder \"constant\"."
         },
         "num_requests": {"type": "integer"},
         "load": {"$ref": "#/$defs/load"},
@@ -65,7 +66,8 @@
         "output_tokens_stdev": {"type": "integer"},
         "spec_file": {"type": ["string", "null"], "description": "--workload-spec provenance: the sibling file a spec was authored from, if any. A catalog-inline profile leaves it null and carries the spec in `spec`."},
         "spec_sha256": {"type": ["string", "null"], "pattern": "^[0-9a-f]{64}$", "description": "Content hash of the inline `spec`, folded into group_id. Null for the distribution variant."},
-        "spec": {"type": "object", "minProperties": 1, "description": "The inline blis WorkloadSpec (v2), model-free, for the workload-spec variant. Absent for distribution."}
+        "spec": {"type": "object", "minProperties": 1, "description": "The inline blis WorkloadSpec (v2), model-free, for the workload-spec variant. Absent for distribution."},
+        "trace": {"$ref": "#/$defs/trace"}
       },
       "allOf": [
         {
@@ -89,6 +91,14 @@
             "required": ["spec"],
             "properties": {"spec_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}}
           }
+        },
+        {
+          "if": {"required": ["type"], "properties": {"type": {"const": "trace"}}},
+          "then": {
+            "required": ["trace"],
+            "not": {"required": ["spec"]},
+            "properties": {"spec_sha256": {"const": null}}
+          }
         }
       ]
     },
@@ -98,8 +108,35 @@
       "required": ["kind", "value"],
       "description": "Exactly one kind, so an open-loop run and a closed-loop run can never share a group.",
       "properties": {
-        "kind": {"enum": ["rate", "concurrency"]},
-        "value": {"type": "number", "description": "Offered load; > 0 for the distribution variant (enforced there). 0 is the not-applicable placeholder a workload-spec record carries."}
+        "kind": {"enum": ["rate", "concurrency", "recorded", "sessions"], "description": "`rate`/`concurrency` are the synthetic loads. A trace offers `recorded` (arrivals come from the trace; value 0) or `sessions` (a pool of N concurrent closed-loop sessions; value = N)."},
+        "value": {"type": "number", "description": "Offered load; > 0 for the distribution variant (enforced there). 0 is the not-applicable placeholder a workload-spec or recorded-trace record carries."}
+      }
+    },
+    "trace": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["sha256", "session_mode", "concurrent_sessions", "total_sessions", "shuffle_corpus", "think_time_ms", "think_time_dist"],
+      "description": "The comparability half of a `trace` workload: the content hash of the replayable TraceV2 (bytes stored at traces/<sha256>/) and the `blis replay` injection knobs. Folded into group_id, so the same trace replayed two ways is two tables. Display and provenance live on the record (trace_meta), not here.",
+      "properties": {
+        "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$", "description": "Content hash of the replayable TraceV2 (header bytes then data bytes); references traces/<sha256>/{header.yaml,data.csv}."},
+        "session_mode": {"enum": ["fixed", "closed-loop", "fixed-accumulate"], "description": "--session-mode."},
+        "concurrent_sessions": {"type": "integer", "minimum": 0, "description": "--concurrent-sessions: a pool of N concurrent closed-loop sessions; 0 = not pooled."},
+        "total_sessions": {"type": "integer", "minimum": 0, "description": "--total-sessions: pool fill by duplicating the corpus; 0 = each session once."},
+        "shuffle_corpus": {"type": "boolean", "description": "--shuffle-corpus: randomize pool step order (seeded from the group seed)."},
+        "think_time_ms": {"type": "integer", "minimum": 0, "description": "--think-time-ms: inter-round think-time override (closed-loop); 0 = derive from the trace."},
+        "think_time_dist": {"type": "string", "description": "--think-time-dist: a think-time distribution spec (closed-loop); empty = unused."}
+      }
+    },
+    "traceMeta": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["source_format", "records", "sessions", "session_context_growth"],
+      "description": "Display and provenance of a `trace` workload, carried on the record (never in group) so it cannot affect group_id.",
+      "properties": {
+        "source_format": {"enum": ["tracev2", "otel", "weka"], "description": "How the TraceV2 was produced: ingested directly, or converted from that raw format."},
+        "records": {"type": "integer", "minimum": 0, "description": "Corpus row count, read at ingest."},
+        "sessions": {"type": "integer", "minimum": 0, "description": "Distinct session_ids, read at ingest."},
+        "session_context_growth": {"type": "string", "description": "The trace header's session_context_growth (\"accumulate\" or empty); decides which session modes are valid."}
       }
     },
     "deployment": {

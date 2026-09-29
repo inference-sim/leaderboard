@@ -872,6 +872,8 @@ describe('postRun', () => {
       // A custom workload is saved to the catalog, so the record names the profile it
       // was saved under.
       workload_name: 'custom-run',
+      // A non-trace run carries no trace_meta.
+      trace_meta: null,
     })
   })
 

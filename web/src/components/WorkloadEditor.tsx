@@ -1,7 +1,8 @@
 import { useMemo } from 'react'
-import { initialForm, interpret, type FormValues, type ValidateResponse } from '../workloads'
+import { initialForm, initialTraceForm, interpret, type FormValues, type ValidateResponse } from '../workloads'
 import { appendClient, parseSpec, serializeSpec, type SpecObject } from '../spec'
 import { WorkloadSpecForm } from './WorkloadSpecForm'
+import { TraceCard } from './TraceCard'
 
 interface Props {
   values: FormValues
@@ -81,6 +82,28 @@ export function WorkloadEditor({
         </div>
       </div>
 
+      <div className="field kind-field">
+        <label id="wl-kind-label">Workload kind</label>
+        <div className="model-seg" role="group" aria-labelledby="wl-kind-label">
+          <button
+            type="button"
+            className={values.kind === 'workload-spec' ? 'on' : ''}
+            aria-pressed={values.kind === 'workload-spec'}
+            onClick={() => set('kind', 'workload-spec')}
+          >
+            Spec
+          </button>
+          <button
+            type="button"
+            className={values.kind === 'trace' ? 'on' : ''}
+            aria-pressed={values.kind === 'trace'}
+            onClick={() => onChange({ ...values, kind: 'trace', trace: values.trace ?? initialTraceForm() })}
+          >
+            Trace replay
+          </button>
+        </div>
+      </div>
+
       <fieldset className="knobs">
         <legend>Run settings</legend>
         <p className="dek">
@@ -124,34 +147,43 @@ below. Runs are grouped and ranked by these, so they live beside the spec, not i
         </div>
       </fieldset>
 
-      <div className="spec-panes">
-        <WorkloadSpecForm obj={obj} error={error} onChange={onSpecChange} />
-        <fieldset className="spec-yaml">
-          <legend>WorkloadSpec YAML</legend>
-          <p className="dek">
-            A blis WorkloadSpec (v2), model-free. Edit here or in the form as the two stay in sync. blis
-            validates it; a model or adapter pinned in a client is rejected, since the model is chosen at
-            run time.
-          </p>
-          <textarea
-            id="wl-spec"
-            name="spec_yaml"
-            className="mono"
-            aria-label="WorkloadSpec YAML"
-            spellCheck={false}
-            value={values.specYaml}
-            onChange={(e) => set('specYaml', e.target.value)}
-          />
-          {issueFor('specYaml') && <p className="issue">{issueFor('specYaml')}</p>}
-        </fieldset>
-      </div>
+      {values.kind === 'trace' ? (
+        <>
+          <TraceCard trace={values.trace} onChange={(t) => set('trace', t)} />
+          {issueFor('trace') && <p className="issue">{issueFor('trace')}</p>}
+        </>
+      ) : (
+        <>
+          <div className="spec-panes">
+            <WorkloadSpecForm obj={obj} error={error} onChange={onSpecChange} />
+            <fieldset className="spec-yaml">
+              <legend>WorkloadSpec YAML</legend>
+              <p className="dek">
+                A blis WorkloadSpec (v2), model-free. Edit here or in the form as the two stay in sync. blis
+                validates it; a model or adapter pinned in a client is rejected, since the model is chosen at
+                run time.
+              </p>
+              <textarea
+                id="wl-spec"
+                name="spec_yaml"
+                className="mono"
+                aria-label="WorkloadSpec YAML"
+                spellCheck={false}
+                value={values.specYaml}
+                onChange={(e) => set('specYaml', e.target.value)}
+              />
+              {issueFor('specYaml') && <p className="issue">{issueFor('specYaml')}</p>}
+            </fieldset>
+          </div>
 
-      {/* Add client sits below the panes, not inside the form column, so the YAML pane
-          matches the height of the form cards rather than stretching past them. */}
-      {obj && (
-        <button type="button" className="add-client" onClick={() => onSpecChange(appendClient(obj))}>
-          + Add client
-        </button>
+          {/* Add client sits below the panes, not inside the form column, so the YAML pane
+              matches the height of the form cards rather than stretching past them. */}
+          {obj && (
+            <button type="button" className="add-client" onClick={() => onSpecChange(appendClient(obj))}>
+              + Add client
+            </button>
+          )}
+        </>
       )}
 
       {verdict && (

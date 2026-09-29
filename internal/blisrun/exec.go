@@ -17,6 +17,7 @@ import (
 
 	"github.com/inference-sim/leaderboard/internal/schema"
 	"github.com/inference-sim/leaderboard/internal/status"
+	"github.com/inference-sim/leaderboard/internal/traceingest"
 )
 
 // stderrTailBytes is how much of a failed run's stderr is reported. Enough to
@@ -31,6 +32,10 @@ type RunSpec struct {
 	// profile), stored on the record for display. Empty for a runs.yaml run, which has
 	// no named workload.
 	WorkloadName string
+	// TraceMeta is the display and provenance of a trace workload (source format, corpus
+	// size, session_context_growth), from ingest. It is carried onto the record's
+	// trace_meta. nil for a non-trace run.
+	TraceMeta *schema.TraceMeta
 }
 
 // Runner executes blis from the upstream checkout and assembles records.
@@ -42,6 +47,9 @@ type Runner struct {
 	// KeepRequests writes the per-request array to a sidecar. Off by default: the
 	// MVP table needs none of it and it is 36x the aggregate payload.
 	KeepRequests bool
+	// TraceStore is the hash-addressed trace store (the traces/ dir beside the workload
+	// catalog). A trace workload's blob is resolved from it to build the replay argv.
+	TraceStore traceingest.Store
 
 	commit       string
 	dirty        bool
@@ -102,10 +110,27 @@ func (r *Runner) Run(g schema.Group, c RunSpec, metricsPath string) (schema.Reco
 	// written next to the metrics file (a per-run temp dir the caller owns), so it is
 	// cleaned up with everything else. blis resolves the path relative to its own cwd,
 	// so an absolute path is used.
-	specPath := ""
-	if g.Workload.Type == "workload-spec" {
-		var err error
-		specPath, err = writeSpecFile(g.Workload.Spec, metricsPath)
+	var argv []string
+	switch g.Workload.Type {
+	case "trace":
+		// A trace runs `blis replay` against its stored blob. The blob must be present, or
+		// the record would reference bytes that are not there; refuse before shelling out.
+		if g.Workload.Trace == nil || g.Workload.Trace.SHA256 == "" {
+			return schema.Record{}, fmt.Errorf("blisrun: %s: trace workload has no trace content", c.RunID)
+		}
+		sha := g.Workload.Trace.SHA256
+		if !r.TraceStore.Has(sha) {
+			return schema.Record{}, fmt.Errorf(
+				"blisrun: %s: trace %s is not in the store; ingest it before replaying", c.RunID, sha)
+		}
+		header, data := r.TraceStore.Paths(sha)
+		argv = ReplayArgv(r.Binary, g, c.Deployment, metricsPath, header, data)
+	case "workload-spec":
+		// A workload-spec run needs its inline spec on disk for --workload-spec. It is
+		// written next to the metrics file (a per-run temp dir the caller owns), so it is
+		// cleaned up with everything else. blis resolves the path relative to its own cwd,
+		// so an absolute path is used.
+		specPath, err := writeSpecFile(g.Workload.Spec, metricsPath)
 		if err != nil {
 			return schema.Record{}, fmt.Errorf("blisrun: %s: %w", c.RunID, err)
 		}
@@ -120,8 +145,10 @@ func (r *Runner) Run(g schema.Group, c RunSpec, metricsPath string) (schema.Reco
 			return schema.Record{}, fmt.Errorf("blisrun: %s: spec_sha256: %w", c.RunID, err)
 		}
 		g.Workload.SpecSHA256 = &sha
+		argv = Argv(r.Binary, g, c.Deployment, metricsPath, specPath)
+	default:
+		argv = Argv(r.Binary, g, c.Deployment, metricsPath, "")
 	}
-	argv := Argv(r.Binary, g, c.Deployment, metricsPath, specPath)
 
 	cmd := exec.Command(argv[0], argv[1:]...)
 	cmd.Dir = r.Cwd
@@ -134,8 +161,8 @@ func (r *Runner) Run(g schema.Group, c RunSpec, metricsPath string) (schema.Reco
 	wall := time.Since(started).Seconds()
 
 	if runErr != nil {
-		return schema.Record{}, fmt.Errorf("blisrun: %s: blis exited with %w\nstderr tail:\n%s",
-			c.RunID, runErr, tail(stderr.String()))
+		return schema.Record{}, fmt.Errorf("blisrun: %s: blis exited with %w\nstderr:\n%s",
+			c.RunID, runErr, blisStderrSummary(stderr.String()))
 	}
 
 	raw, err := os.ReadFile(metricsPath)
@@ -170,6 +197,7 @@ func (r *Runner) Run(g schema.Group, c RunSpec, metricsPath string) (schema.Reco
 		GroupID:       groupID,
 		WorkID:        workID,
 		WorkloadName:  c.WorkloadName,
+		TraceMeta:     c.TraceMeta,
 		Group:         g,
 		Deployment:    c.Deployment,
 		Provenance: schema.Provenance{
@@ -318,4 +346,17 @@ func tail(s string) string {
 		return s
 	}
 	return "…" + s[len(s)-stderrTailBytes:]
+}
+
+// blisStderrSummary picks the actionable part of blis's stderr. cobra prints a flag-parse
+// error as "Error: <message>" followed by a full usage/flag dump, so the tail would show
+// only the flag list and hide the message; for that shape, return everything before the
+// "Usage:" block. Otherwise (a logrus fatal, blis's own validation errors) the message is
+// at the end, so the tail is right.
+func blisStderrSummary(s string) string {
+	trimmed := strings.TrimSpace(s)
+	if i := strings.Index(trimmed, "\nUsage:"); i >= 0 {
+		return strings.TrimSpace(trimmed[:i])
+	}
+	return tail(trimmed)
 }

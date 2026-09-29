@@ -49,6 +49,24 @@ type workloadBody struct {
 	// are present.
 	Spec     map[string]any `json:"spec,omitempty"`
 	SpecYAML *string        `json:"spec_yaml,omitempty"`
+
+	// Trace is the nested trace block (type == "trace"): comparability knobs plus the
+	// display/provenance returned by /api/traces. Absent for the other variants.
+	Trace *traceBody `json:"trace,omitempty"`
+}
+
+type traceBody struct {
+	SHA256               string `json:"sha256"`
+	SessionMode          string `json:"session_mode"`
+	ConcurrentSessions   int    `json:"concurrent_sessions"`
+	TotalSessions        int    `json:"total_sessions"`
+	ShuffleCorpus        bool   `json:"shuffle_corpus"`
+	ThinkTimeMs          int    `json:"think_time_ms"`
+	ThinkTimeDist        string `json:"think_time_dist"`
+	SourceFormat         string `json:"source_format"`
+	Records              int    `json:"records"`
+	Sessions             int    `json:"sessions"`
+	SessionContextGrowth string `json:"session_context_growth"`
 }
 
 type loadBody struct {
@@ -94,6 +112,23 @@ func (b profileBody) toProfile() (catalog.Profile, error) {
 	if b.Workload.Load != nil {
 		w.Load = schema.Load{Kind: b.Workload.Load.Kind, Value: b.Workload.Load.Value}
 	}
+	if tb := b.Workload.Trace; tb != nil {
+		w.Trace = &schema.Trace{
+			SHA256:             tb.SHA256,
+			SessionMode:        tb.SessionMode,
+			ConcurrentSessions: tb.ConcurrentSessions,
+			TotalSessions:      tb.TotalSessions,
+			ShuffleCorpus:      tb.ShuffleCorpus,
+			ThinkTimeMs:        tb.ThinkTimeMs,
+			ThinkTimeDist:      tb.ThinkTimeDist,
+		}
+		w.TraceMeta = &schema.TraceMeta{
+			SourceFormat:         tb.SourceFormat,
+			Records:              tb.Records,
+			Sessions:             tb.Sessions,
+			SessionContextGrowth: tb.SessionContextGrowth,
+		}
+	}
 	return catalog.Profile{
 		Name:            b.Name,
 		Seed:            b.Seed,
@@ -131,6 +166,25 @@ func profileToBody(p catalog.Profile) profileBody {
 		if y, err := yaml.Marshal(p.Workload.Spec); err == nil {
 			s := string(y)
 			b.Workload.SpecYAML = &s
+		}
+	case "trace":
+		if tr := p.Workload.Trace; tr != nil {
+			tb := &traceBody{
+				SHA256:             tr.SHA256,
+				SessionMode:        tr.SessionMode,
+				ConcurrentSessions: tr.ConcurrentSessions,
+				TotalSessions:      tr.TotalSessions,
+				ShuffleCorpus:      tr.ShuffleCorpus,
+				ThinkTimeMs:        tr.ThinkTimeMs,
+				ThinkTimeDist:      tr.ThinkTimeDist,
+			}
+			if m := p.Workload.TraceMeta; m != nil {
+				tb.SourceFormat = m.SourceFormat
+				tb.Records = m.Records
+				tb.Sessions = m.Sessions
+				tb.SessionContextGrowth = m.SessionContextGrowth
+			}
+			b.Workload.Trace = tb
 		}
 	}
 	return b
@@ -344,6 +398,18 @@ func (s *server) validateProfile(p catalog.Profile, c *catalog.Catalog) validate
 			return resp
 		}
 	}
+	// A trace is runnable only if its blob is actually in the store: the catalog holds the
+	// hash, not the bytes, so a profile can name a trace that was never ingested (or whose
+	// store was not carried along). ValidateTrace (in catalog.Validate above) has already
+	// checked the knobs; this checks the content is present.
+	if p.Workload.Type == "trace" && p.Workload.Trace != nil {
+		if !s.traceStore.Has(p.Workload.Trace.SHA256) {
+			resp.Issues = append(resp.Issues, fmt.Sprintf(
+				"the trace %s is not in the store; ingest it before saving this workload",
+				p.Workload.Trace.SHA256))
+			return resp
+		}
+	}
 	resp.OK = len(resp.Issues) == 0
 	return resp
 }
@@ -383,6 +449,17 @@ func summarize(p catalog.Profile) string {
 			return fmt.Sprintf("spec-backed workload at %s req/s aggregate", trimFloat(rate))
 		}
 		return "spec-backed workload"
+	}
+	if w.Type == "trace" {
+		records, sessions := 0, 0
+		if m := w.TraceMeta; m != nil {
+			records, sessions = m.Records, m.Sessions
+		}
+		if w.Trace != nil && w.Trace.ConcurrentSessions > 0 {
+			return fmt.Sprintf("replayed trace, %d concurrent sessions (%d records, %d sessions)",
+				w.Trace.ConcurrentSessions, records, sessions)
+		}
+		return fmt.Sprintf("replayed trace at recorded arrivals (%d records, %d sessions)", records, sessions)
 	}
 	load := trimFloat(w.Load.Value) + " req/s"
 	if w.Load.Kind == "concurrency" {

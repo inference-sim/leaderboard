@@ -5,11 +5,11 @@
  */
 export type Workload = {
   /**
-   * --workload. `distribution` is the flat synthetic shape; `workload-spec` carries an inline blis WorkloadSpec in `spec` and reaches the full workload surface.
+   * --workload for the synthetic variants; the `trace` variant runs `blis replay` against a recorded TraceV2 named in `trace`. `distribution` is the flat synthetic shape; `workload-spec` carries an inline blis WorkloadSpec in `spec`.
    */
-  type: "distribution" | "workload-spec";
+  type: "distribution" | "workload-spec" | "trace";
   /**
-   * DERIVED, not reported: SynthesizeFromDistribution sets ArrivalSpec{Process: "constant"} for rate mode (../inference-sim/sim/workload/synthesis.go:33). Poisson is reachable only via --workload-spec. Not applicable to the spec variant (arrival lives inside `spec`), where it holds the placeholder "constant".
+   * DERIVED, not reported: SynthesizeFromDistribution sets ArrivalSpec{Process: "constant"} for rate mode (../inference-sim/sim/workload/synthesis.go:33). Poisson is reachable only via --workload-spec. Not applicable to the spec or trace variants (arrival lives inside the spec, or is the trace's recorded stream), where it holds the placeholder "constant".
    */
   arrival_process: "constant" | "closed-loop";
   num_requests: number;
@@ -30,6 +30,7 @@ export type Workload = {
    * The inline blis WorkloadSpec (v2), model-free, for the workload-spec variant. Absent for distribution.
    */
   spec?: {};
+  trace?: Trace;
 };
 
 /**
@@ -53,6 +54,7 @@ export interface BLISLeaderboardRunRecord {
    * The catalog name (a preset or saved profile) the run was declared with, for display only. Optional and not part of group_id/work_id, which hash the model-free group: the name never changes which table a run lands in. Absent for a runs.yaml run, which names no workload.
    */
   workload_name?: string;
+  trace_meta?: TraceMeta;
   group: Group;
   deployment: Deployment;
   provenance: Provenance;
@@ -66,6 +68,27 @@ export interface BLISLeaderboardRunRecord {
    * Path to results/<group_id>/<run_id>.requests.json when retained.
    */
   requests_sidecar: string | null;
+}
+/**
+ * Display and provenance of a `trace` workload, carried on the record (never in group) so it cannot affect group_id.
+ */
+export interface TraceMeta {
+  /**
+   * How the TraceV2 was produced: ingested directly, or converted from that raw format.
+   */
+  source_format: "tracev2" | "otel" | "weka";
+  /**
+   * Corpus row count, read at ingest.
+   */
+  records: number;
+  /**
+   * Distinct session_ids, read at ingest.
+   */
+  sessions: number;
+  /**
+   * The trace header's session_context_growth ("accumulate" or empty); decides which session modes are valid.
+   */
+  session_context_growth: string;
 }
 /**
  * The comparability key: the work offered. Model and hardware are deliberately absent (D4, E1): both are candidates under test, so a table is one workload spanning models and hardware.
@@ -86,11 +109,47 @@ export interface Group {
  * Exactly one kind, so an open-loop run and a closed-loop run can never share a group.
  */
 export interface Load {
-  kind: "rate" | "concurrency";
   /**
-   * Offered load; > 0 for the distribution variant (enforced there). 0 is the not-applicable placeholder a workload-spec record carries.
+   * `rate`/`concurrency` are the synthetic loads. A trace offers `recorded` (arrivals come from the trace; value 0) or `sessions` (a pool of N concurrent closed-loop sessions; value = N).
+   */
+  kind: "rate" | "concurrency" | "recorded" | "sessions";
+  /**
+   * Offered load; > 0 for the distribution variant (enforced there). 0 is the not-applicable placeholder a workload-spec or recorded-trace record carries.
    */
   value: number;
+}
+/**
+ * The comparability half of a `trace` workload: the content hash of the replayable TraceV2 (bytes stored at traces/<sha256>/) and the `blis replay` injection knobs. Folded into group_id, so the same trace replayed two ways is two tables. Display and provenance live on the record (trace_meta), not here.
+ */
+export interface Trace {
+  /**
+   * Content hash of the replayable TraceV2 (header bytes then data bytes); references traces/<sha256>/{header.yaml,data.csv}.
+   */
+  sha256: string;
+  /**
+   * --session-mode.
+   */
+  session_mode: "fixed" | "closed-loop" | "fixed-accumulate";
+  /**
+   * --concurrent-sessions: a pool of N concurrent closed-loop sessions; 0 = not pooled.
+   */
+  concurrent_sessions: number;
+  /**
+   * --total-sessions: pool fill by duplicating the corpus; 0 = each session once.
+   */
+  total_sessions: number;
+  /**
+   * --shuffle-corpus: randomize pool step order (seeded from the group seed).
+   */
+  shuffle_corpus: boolean;
+  /**
+   * --think-time-ms: inter-round think-time override (closed-loop); 0 = derive from the trace.
+   */
+  think_time_ms: number;
+  /**
+   * --think-time-dist: a think-time distribution spec (closed-loop); empty = unused.
+   */
+  think_time_dist: string;
 }
 /**
  * The candidate under test. Every field is written even when it holds a BLIS default, so canonicalisation is stable and the UI can tell which fields vary across a table.

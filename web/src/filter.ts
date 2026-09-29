@@ -1,3 +1,26 @@
+import type { RunRecord } from './load'
+
+/**
+ * Whether a record survives the model and hardware filters — the single predicate the table's
+ * visible rows and the Compare bar's "Select all" both run, so selecting all can never reach a
+ * run the filters have hidden. A model selection narrows to its literal set; an empty one falls
+ * back to `allModels` (the "all" reading, matched to the table's own fallback for direct callers
+ * and tests). Hardware works the same, with [] read as every accelerator. WorkloadSection guards
+ * the genuinely-empty case (a reader who cleared a filter) separately, so that fallback never
+ * stands in for "nothing selected" there.
+ */
+export function keptByFilters(
+  record: RunRecord,
+  models: string[],
+  allModels: string[],
+  hardware: string[],
+): boolean {
+  const shown = models.length > 0 ? models : allModels
+  const modelOk = shown.includes(record.deployment.model)
+  const hardwareOk = hardware.length === 0 || hardware.includes(record.deployment.hardware)
+  return modelOk && hardwareOk
+}
+
 /**
  * The filter selection after clicking `clicked`: it toggles that option in or out and
  * returns the literal set of selected options, in `options` (display) order. Unlike the

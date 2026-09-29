@@ -3,10 +3,16 @@ import { renderToStaticMarkup } from 'react-dom/server'
 import { ModelFilter } from './components/ModelFilter'
 import { HardwareFilter } from './components/HardwareFilter'
 import { EmptyFilterNote } from './components/EmptyFilterNote'
-import { emptyFilterNoun, nextSelection } from './filter'
+import { emptyFilterNoun, keptByFilters, nextSelection } from './filter'
+import type { RunRecord } from './load'
 
 const models = ['meta/llama-3-8b', 'qwen/qwen3-14b']
 const hardware = ['A100-SXM', 'H100', 'L40S']
+
+/** A minimal record carrying just the fields the filter reads. */
+function rec(model: string, hw: string): RunRecord {
+  return { deployment: { model, hardware: hw } } as unknown as RunRecord
+}
 
 /** The selectable bubbles, i.e. everything but the Clear button. */
 function tags(html: string): string[] {
@@ -48,6 +54,31 @@ describe('emptyFilterNoun (which shown filter, if any, has nothing selected)', (
 
   it('ignores an empty array for a filter that is not shown', () => {
     expect(emptyFilterNoun(false, [], true, hardware)).toBeNull()
+  })
+})
+
+describe('keptByFilters (the model + hardware row predicate the table and Select all share)', () => {
+  it('keeps a record whose model and hardware are both in the selected sets', () => {
+    expect(keptByFilters(rec('qwen/qwen3-14b', 'H100'), models, models, hardware)).toBe(true)
+  })
+
+  it('drops a record whose model was filtered out, even if its hardware is kept', () => {
+    // Select all after narrowing the model filter must not pull this back in.
+    expect(keptByFilters(rec('meta/llama-3-8b', 'H100'), ['qwen/qwen3-14b'], models, hardware)).toBe(
+      false,
+    )
+  })
+
+  it('drops a record whose hardware was filtered out, even if its model is kept', () => {
+    expect(keptByFilters(rec('qwen/qwen3-14b', 'L40S'), models, models, ['H100'])).toBe(false)
+  })
+
+  it('reads an empty model selection as "all models" via the allModels fallback', () => {
+    expect(keptByFilters(rec('meta/llama-3-8b', 'H100'), [], models, hardware)).toBe(true)
+  })
+
+  it('reads an empty hardware selection as "all hardware"', () => {
+    expect(keptByFilters(rec('qwen/qwen3-14b', 'L40S'), models, models, [])).toBe(true)
   })
 })
 

@@ -66,6 +66,13 @@ type Workload struct {
 
 	// Spec is the inline blis WorkloadSpec (v2), model-free (Type == "workload-spec").
 	Spec map[string]any
+
+	// Trace fields (Type == "trace"). Trace is the comparability half — the content hash
+	// and replay knobs folded into group_id; TraceMeta is the display and provenance,
+	// carried onto the record but never into the group. The trace bytes live in the
+	// hash-addressed store beside this catalog, not here.
+	Trace     *schema.Trace
+	TraceMeta *schema.TraceMeta
 }
 
 // --- on-disk YAML shape -----------------------------------------------------------
@@ -97,11 +104,32 @@ type workloadYAML struct {
 	// recomputed from Spec, so a hand-edited file that disagrees is rejected.
 	SpecSHA256 *string        `yaml:"spec_sha256,omitempty"`
 	Spec       map[string]any `yaml:"spec,omitempty"`
+
+	// Trace is the nested trace block (Type == "trace"): the comparability knobs plus the
+	// display/provenance, all under one key so a distribution or spec profile's YAML is
+	// unchanged. The bytes live in the store; only the hash is here.
+	Trace *traceYAML `yaml:"trace,omitempty"`
 }
 
 type loadYAML struct {
 	Kind  string  `yaml:"kind"`
 	Value float64 `yaml:"value"`
+}
+
+// traceYAML is the on-disk shape of a trace workload: comparability (sha256 + replay
+// knobs) and display/provenance (source, corpus size, growth) together.
+type traceYAML struct {
+	SHA256               string `yaml:"sha256"`
+	SessionMode          string `yaml:"session_mode"`
+	ConcurrentSessions   int    `yaml:"concurrent_sessions,omitempty"`
+	TotalSessions        int    `yaml:"total_sessions,omitempty"`
+	ShuffleCorpus        bool   `yaml:"shuffle_corpus,omitempty"`
+	ThinkTimeMs          int    `yaml:"think_time_ms,omitempty"`
+	ThinkTimeDist        string `yaml:"think_time_dist,omitempty"`
+	SourceFormat         string `yaml:"source_format"`
+	Records              int    `yaml:"records"`
+	Sessions             int    `yaml:"sessions"`
+	SessionContextGrowth string `yaml:"session_context_growth,omitempty"`
 }
 
 // Read parses workloads.yaml, validates every profile, and enforces the catalog-wide
@@ -175,6 +203,23 @@ func (py profileYAML) toProfile() (Profile, error) {
 	if py.Workload.Load != nil {
 		w.Load = schema.Load{Kind: py.Workload.Load.Kind, Value: py.Workload.Load.Value}
 	}
+	if ty := py.Workload.Trace; ty != nil {
+		w.Trace = &schema.Trace{
+			SHA256:             ty.SHA256,
+			SessionMode:        ty.SessionMode,
+			ConcurrentSessions: ty.ConcurrentSessions,
+			TotalSessions:      ty.TotalSessions,
+			ShuffleCorpus:      ty.ShuffleCorpus,
+			ThinkTimeMs:        ty.ThinkTimeMs,
+			ThinkTimeDist:      ty.ThinkTimeDist,
+		}
+		w.TraceMeta = &schema.TraceMeta{
+			SourceFormat:         ty.SourceFormat,
+			Records:              ty.Records,
+			Sessions:             ty.Sessions,
+			SessionContextGrowth: ty.SessionContextGrowth,
+		}
+	}
 	p := Profile{
 		Name:            py.Name,
 		Seed:            py.Seed,
@@ -227,6 +272,24 @@ func (c *Catalog) Write(path string) error {
 			}
 			wy.SpecSHA256 = &sha
 			wy.Spec = p.Workload.Spec
+		case "trace":
+			tr, meta := p.Workload.Trace, p.Workload.TraceMeta
+			if tr == nil || meta == nil {
+				return fmt.Errorf("catalog: %s: a trace profile needs both trace and trace_meta", p.Name)
+			}
+			wy.Trace = &traceYAML{
+				SHA256:               tr.SHA256,
+				SessionMode:          tr.SessionMode,
+				ConcurrentSessions:   tr.ConcurrentSessions,
+				TotalSessions:        tr.TotalSessions,
+				ShuffleCorpus:        tr.ShuffleCorpus,
+				ThinkTimeMs:          tr.ThinkTimeMs,
+				ThinkTimeDist:        tr.ThinkTimeDist,
+				SourceFormat:         meta.SourceFormat,
+				Records:              meta.Records,
+				Sessions:             meta.Sessions,
+				SessionContextGrowth: meta.SessionContextGrowth,
+			}
 		}
 		f.Workloads = append(f.Workloads, profileYAML{
 			Name:            p.Name,
@@ -280,6 +343,21 @@ func (w Workload) schemaWorkload() schema.Workload {
 			Load:           schema.Load{Kind: "rate"}, // placeholder; value 0
 			SpecSHA256:     &sha,
 			Spec:           w.Spec,
+		}
+	}
+	if w.Type == "trace" {
+		// A pool offers N concurrent sessions (the offered-load analog of concurrency);
+		// every other mode offers the trace's recorded arrivals. Load is derived, not
+		// stored, so it cannot drift from the session knobs.
+		load := schema.Load{Kind: "recorded"}
+		if w.Trace != nil && w.Trace.ConcurrentSessions > 0 {
+			load = schema.Load{Kind: "sessions", Value: float64(w.Trace.ConcurrentSessions)}
+		}
+		return schema.Workload{
+			Type:           "trace",
+			ArrivalProcess: "constant", // placeholder; the arrival stream is the trace
+			Load:           load,
+			Trace:          w.Trace,
 		}
 	}
 	return schema.Workload{
@@ -428,8 +506,19 @@ func Validate(p Profile) error {
 				"Declare-a-run and injected at run time (P6), so remove it to keep this "+
 				"workload comparable across models", path)
 		}
+	case "trace":
+		if p.Workload.Trace == nil {
+			return fmt.Errorf("a trace workload requires trace content (ingest a trace first)")
+		}
+		growth := ""
+		if p.Workload.TraceMeta != nil {
+			growth = p.Workload.TraceMeta.SessionContextGrowth
+		}
+		if issues := schema.ValidateTrace(*p.Workload.Trace, growth); len(issues) > 0 {
+			return fmt.Errorf("%s", strings.Join(issues, "; "))
+		}
 	default:
-		return fmt.Errorf("workload.type %q: want \"distribution\" or \"workload-spec\"", p.Workload.Type)
+		return fmt.Errorf("workload.type %q: want \"distribution\", \"workload-spec\" or \"trace\"", p.Workload.Type)
 	}
 	return nil
 }

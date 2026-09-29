@@ -19,6 +19,7 @@ import {
 import type { Column, SortSpec } from '../model'
 import { splitBySlo } from '../slo'
 import type { SloTargets } from '../slo'
+import { keptByFilters } from '../filter'
 import { Derived } from './Derived'
 import { DeleteRunButton } from './DeleteRunButton'
 import { Knob } from './Knob'
@@ -78,11 +79,6 @@ interface Props {
   onToggleHighlight?: (runId: string) => void
 }
 
-/** True when `hardware` is empty (all) or lists this record's accelerator. */
-function keptByHardware(record: RunRecord, hardware: string[]): boolean {
-  return hardware.length === 0 || hardware.includes(record.deployment.hardware)
-}
-
 /**
  * One workload's table. With `model` moved out of the comparability key (E1) a workload
  * is one comparability group whose rows may vary in both model and hardware; the model
@@ -111,10 +107,9 @@ export function ReadoutTable({
   // the highlight lives and dies with the row, not with App's reveal request.
   const [revealedKey, setRevealedKey] = useState<string | null>(null)
 
-  const shown = useMemo(() => new Set(models.length > 0 ? models : workload.models), [models, workload.models])
   const keep = useMemo(
-    () => (r: RunRecord) => shown.has(r.deployment.model) && keptByHardware(r, hardware),
-    [shown, hardware],
+    () => (r: RunRecord) => keptByFilters(r, models, workload.models, hardware),
+    [models, workload.models, hardware],
   )
   const complete = useMemo(() => group.complete.filter(keep), [group.complete, keep])
   const disqualified = useMemo(() => group.disqualified.filter(keep), [group.disqualified, keep])
