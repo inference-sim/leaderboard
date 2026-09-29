@@ -12,8 +12,8 @@
 #                             contain a built ./blis (make blis), defaults.yaml,
 #                             hardware_config.json, a .git directory (blis records
 #                             the upstream commit and dirty flag as run provenance
-#                             via `git`), and the bundled blis-catalog/ — which now
-#                             serves only as the seed for the PVC copy (see
+#                             via `git`), and the bundled blis-catalog/ — the base
+#                             catalog merged into the PVC copy on each boot (see
 #                             BLIS_CATALOG below).
 #   git on PATH               used for that provenance capture.
 #   writable /tmp             blis run/spec scratch files (emptyDir below).
@@ -83,17 +83,19 @@ spec:
         #      bit, so records written now — and by any future pod in the same fsGroup —
         #      stay writable, and fails the pod loudly if the volume is not writable
         #      rather than surfacing later as a failed /api/run;
-        #   2. seeds the model catalog onto the PVC ONCE from the image's bundled clone,
-        #      then never clobbers it — so a private model added by hand survives. Moving
-        #      the catalog off the read-only image layer is what makes it addable at
-        #      runtime: `oc rsh` in and write
-        #      /data/blis-catalog/models/<name>/{config.json,model.yaml}. The copy is
-        #      staged in a .tmp dir and atomically renamed, so a crash mid-copy leaves no
-        #      half-seeded tree that the ONCE guard would then skip. cp -R (not -a) so a
-        #      non-root UID is not asked to preserve the image's root ownership (which
-        #      would fail under set -eu); g+rwX so a later pod in the same fsGroup can
-        #      still edit it. Trade-off: the seed is one-shot, so a newer image's catalog
-        #      does NOT propagate to an existing PVC (delete /data/blis-catalog to re-seed).
+        #   2. merges the image's bundled catalog into the PVC on EVERY boot. Moving the
+        #      catalog off the read-only image layer is what makes it addable at runtime:
+        #      `oc rsh` in and write /data/blis-catalog/models/<name>/{config.json,model.yaml}.
+        #      `cp -R src/. dest/` overwrites the base entries the image ships (so an
+        #      updated/upstream catalog in a newer image DOES propagate on redeploy) but
+        #      never deletes PVC-only directories, so a hand-added private model survives.
+        #      The contract that falls out: a private model must be a NEW directory name;
+        #      the base model dirs are image-managed and a hand-edit to one is overwritten
+        #      on the next boot. cp -R (not -a) so a non-root UID is not asked to preserve
+        #      the image's root ownership (which would fail under set -eu); g+rwX so this
+        #      and a later pod in the same fsGroup can edit. The initContainer must exit 0
+        #      before the server runs, so a crash mid-merge fails the pod and retries the
+        #      full copy rather than starting the app on a half-written tree.
         - name: seed-data
           image: ghcr.io/inference-sim/leaderboard:0.1.7
           imagePullPolicy: Always
@@ -103,12 +105,9 @@ spec:
             - |
               set -eu
               mkdir -p /data/results && chmod 2775 /data/results
-              if [ ! -e /data/blis-catalog ]; then
-                rm -rf /data/blis-catalog.tmp
-                cp -R /app/inference-sim/blis-catalog /data/blis-catalog.tmp
-                chmod -R g+rwX /data/blis-catalog.tmp
-                mv /data/blis-catalog.tmp /data/blis-catalog
-              fi
+              mkdir -p /data/blis-catalog
+              cp -R /app/inference-sim/blis-catalog/. /data/blis-catalog/
+              chmod -R g+rwX /data/blis-catalog
           securityContext:
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true
