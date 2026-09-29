@@ -12,13 +12,17 @@
 #                             contain a built ./blis (make blis), defaults.yaml,
 #                             hardware_config.json, a .git directory (blis records
 #                             the upstream commit and dirty flag as run provenance
-#                             via `git`), and the bundled blis-catalog/ (see
+#                             via `git`), and the bundled blis-catalog/ — which now
+#                             serves only as the seed for the PVC copy (see
 #                             BLIS_CATALOG below).
 #   git on PATH               used for that provenance capture.
 #   writable /tmp             blis run/spec scratch files (emptyDir below).
-#   writable /data            results/<group_id>/<run_id>.json and workloads.yaml
-#                             (the PVC below); this is the only state that must
-#                             survive a restart.
+#   writable /data            results/<group_id>/<run_id>.json, workloads.yaml, and
+#                             the model catalog at /data/blis-catalog (the PVC
+#                             below); this is the only state that survives a
+#                             restart. Putting the catalog here makes it editable:
+#                             add a private model by `oc rsh` + writing
+#                             /data/blis-catalog/models/<name>/{config.json,model.yaml}.
 #
 # There is no Dockerfile in this repo yet — build an image that lays the tree out
 # as above and set `.spec.template.spec.containers[0].image` to it. A multi-stage
@@ -42,7 +46,9 @@ spec:
     - ReadWriteOnce
   resources:
     requests:
-      storage: 1Gi
+      # Holds results/, workloads.yaml, and now the seeded model catalog plus any
+      # private models added by hand — bumped from 1Gi to give that headroom.
+      storage: 2Gi
   # storageClassName: <your-class>   # omit to use the cluster default
 ---
 apiVersion: apps/v1
@@ -70,20 +76,34 @@ spec:
         seccompProfile:
           type: RuntimeDefault
       initContainers:
-        # Guarantee the server can write results before it starts. restricted-v2
-        # gives the pod an arbitrary UID plus an fsGroup and chowns the /data PVC to
-        # that fsGroup, so /data is group-writable. This creates the LEADERBOARD_RESULTS
-        # subdir with group-write and the setgid bit, so records written now — and by
-        # any future pod in the same fsGroup — stay writable. It also fails the pod
-        # loudly at startup if the volume is not writable, rather than surfacing later
-        # as a failed /api/run. Same image, so no extra pull.
-        - name: ensure-results-dir
+        # Prepare the /data PVC before the server starts. restricted-v2 gives the pod
+        # an arbitrary UID plus an fsGroup and chowns the /data PVC to that fsGroup, so
+        # /data is group-writable. This:
+        #   1. creates the LEADERBOARD_RESULTS subdir with group-write and the setgid
+        #      bit, so records written now — and by any future pod in the same fsGroup —
+        #      stay writable, and fails the pod loudly if the volume is not writable
+        #      rather than surfacing later as a failed /api/run;
+        #   2. seeds the model catalog onto the PVC ONCE from the image's bundled clone,
+        #      then never clobbers it. Moving the catalog off the read-only image layer
+        #      is what makes a private model addable at runtime: `oc rsh` in and write
+        #      /data/blis-catalog/models/<name>/{config.json,model.yaml}. g+rwX so a
+        #      later pod (different arbitrary UID, same gid 0) can still edit it.
+        #      Trade-off: because the seed is one-shot, catalog changes shipped in a
+        #      newer image do NOT propagate to an existing PVC — delete /data/blis-catalog
+        #      (losing manual edits) to re-seed. Same image, so no extra pull.
+        - name: seed-data
           image: ghcr.io/inference-sim/leaderboard:0.1.7
           imagePullPolicy: Always
           command:
             - sh
             - -c
-            - mkdir -p /data/results && chmod 2775 /data/results
+            - |
+              set -eu
+              mkdir -p /data/results && chmod 2775 /data/results
+              if [ ! -e /data/blis-catalog ]; then
+                cp -a /app/inference-sim/blis-catalog /data/blis-catalog
+                chmod -R g+rwX /data/blis-catalog
+              fi
           securityContext:
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true
@@ -102,13 +122,16 @@ spec:
             # Upstream blis (#1774) requires an explicit catalog CLONE ROOT — there is
             # no default and no search path — and refuses any run without it. Since
             # inference-sim#1797 the catalog is the separate blis-catalog repo (the old
-            # in-repo model_configs/ tree was deleted); the image bundles it at
-            # /app/inference-sim/blis-catalog (models/<name>/config.json + workloads/ +
-            # devices/), so point blis at that clone root here. This env var is inherited
-            # by every blis subprocess the server spawns (both the run path and the
-            # workload-spec validation probe), which -blis/args cannot cover.
+            # in-repo model_configs/ tree was deleted). The image bundles it at
+            # /app/inference-sim/blis-catalog, but that lives on the read-only image
+            # layer and cannot take runtime edits; the seed-data initContainer copies it
+            # once onto the PVC at /data/blis-catalog, which is where we point blis so a
+            # private model can be added by hand (models/<name>/config.json + model.yaml).
+            # The server reads this same var at startup (serve.go: os.Getenv) to build the
+            # model list, and every blis subprocess it spawns inherits it (both the run
+            # path and the workload-spec validation probe), which -blis/args cannot cover.
             - name: BLIS_CATALOG
-              value: /app/inference-sim/blis-catalog
+              value: /data/blis-catalog
             # Results directory. It lives on the /data PVC (mounted below) so it is
             # the only state that survives a restart. serve reads it via -out, whose
             # default is this env var; keep it inside the /data mount.
