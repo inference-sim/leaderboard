@@ -11,7 +11,7 @@ function trace(name: string, timeout: number): ProfileBody {
       trace: {
         sha256: '783919229d495af2506a9a4235ecbeed7a340764f98d27a81c0dc174c7c1085a',
         session_mode: 'closed-loop', concurrent_sessions: 1, total_sessions: 10,
-        shuffle_corpus: true, think_time_ms: 30, source_format: 'weka',
+        shuffle_corpus: true, think_time_ms: 30, think_time_dist: '', source_format: 'weka',
         records: 26648, sessions: 183, session_context_growth: 'accumulate',
       },
     },
@@ -28,7 +28,9 @@ function dist(name: string): ProfileBody {
 describe('WorkloadCatalog with trace profiles', () => {
   it('renders every profile row, including two same-trace variants', () => {
     const profiles = [dist('chatbot'), trace('weka-jsonl1', 1000), trace('weka-jsonl2', 3000)]
-    const html = renderToStaticMarkup(<WorkloadCatalog profiles={profiles} boardWorkloads={[]} />)
+    const html = renderToStaticMarkup(
+      <WorkloadCatalog profiles={profiles} boardWorkloads={[]} onDelete={() => {}} />,
+    )
     for (const n of ['chatbot', 'weka-jsonl1', 'weka-jsonl2']) {
       expect(html, `missing ${n}`).toContain(n)
     }
