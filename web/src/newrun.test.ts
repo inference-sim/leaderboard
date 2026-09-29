@@ -101,7 +101,9 @@ function mainClone(): ProfileBody {
     workload: {
       type: 'distribution',
       num_requests: w.num_requests,
-      load: w.load,
+      // The group's Load kind now spans the trace loads too (recorded/sessions); this
+      // clone is built from a distribution fixture, so its load is rate/concurrency.
+      load: w.load as { kind: 'rate' | 'concurrency'; value: number },
       prompt_tokens: w.prompt_tokens,
       prompt_tokens_stdev: w.prompt_tokens_stdev,
       output_tokens: w.output_tokens,
@@ -872,6 +874,8 @@ describe('postRun', () => {
       // A custom workload is saved to the catalog, so the record names the profile it
       // was saved under.
       workload_name: 'custom-run',
+      // A non-trace run carries no trace_meta.
+      trace_meta: null,
     })
   })
 

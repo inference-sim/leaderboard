@@ -10,12 +10,14 @@ import (
 	"path/filepath"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 
 	"github.com/inference-sim/leaderboard/internal/blisrun"
 	"github.com/inference-sim/leaderboard/internal/hardware"
 	"github.com/inference-sim/leaderboard/internal/schema"
+	"github.com/inference-sim/leaderboard/internal/traceingest"
 )
 
 // serveRunIDPattern mirrors internal/spec.runIDPattern. A run_id is also a
@@ -40,6 +42,10 @@ type runRequest struct {
 	// profile), stored on the record for display. Empty for the custom card, which
 	// names no profile.
 	WorkloadName string `json:"workload_name"`
+	// TraceMeta is the display and provenance of a trace workload (source, corpus size,
+	// growth), carried onto the record. Present only for a trace run; nil otherwise. It is
+	// display-only (never in group_id), so trusting the client for it is acceptable.
+	TraceMeta *schema.TraceMeta `json:"trace_meta"`
 }
 
 // server holds what the HTTP handlers need. execute and validateSpec are fields so the
@@ -53,7 +59,14 @@ type server struct {
 	// the same clone blis resolves configs against. A field so handleModels is testable
 	// without the environment; production sets it from os.Getenv in cmdServe.
 	catalogRoot string
-	execute     func(g schema.Group, runID string, dep schema.Deployment, workloadName string) (schema.Record, error)
+	// traceStore is the hash-addressed trace store beside the workload catalog
+	// (<dir of workloads.yaml>/traces). Ingest writes blobs here; a trace run resolves
+	// them here.
+	traceStore traceingest.Store
+	// maxUploadBytes caps a trace upload to /api/traces. 0 means the built-in default
+	// (defaultMaxUpload); cmdServe sets it from -max-upload-mb / $LEADERBOARD_MAX_UPLOAD_MB.
+	maxUploadBytes int64
+	execute        func(req runRequest) (schema.Record, error)
 	// validateSpec hands a raw inline WorkloadSpec to blis to surface its own parse and
 	// semantic errors (§5). nil error means blis accepts it.
 	validateSpec func(spec map[string]any) error
@@ -67,8 +80,19 @@ func cmdServe(args []string) error {
 	c.bind(fs)
 	addr := fs.String("addr", ":8080", "address to listen on")
 	catalogPath := fs.String("workloads", "", "path to the workload catalog (default <out>/workloads.yaml)")
+	// The trace-upload cap, in MiB. 0 uses the built-in default; $LEADERBOARD_MAX_UPLOAD_MB
+	// sets it when the flag is left at 0, so ops can raise it for large Weka/OTel corpora
+	// without a rebuild.
+	maxUploadMB := fs.Int("max-upload-mb", 0, "max trace upload size in MiB (0 = default, ~1 GiB; or set $LEADERBOARD_MAX_UPLOAD_MB)")
 	if err := fs.Parse(args); err != nil {
 		return err
+	}
+	if *maxUploadMB == 0 {
+		if env := os.Getenv("LEADERBOARD_MAX_UPLOAD_MB"); env != "" {
+			if n, err := strconv.Atoi(env); err == nil && n > 0 {
+				*maxUploadMB = n
+			}
+		}
 	}
 
 	// The catalog is a local artifact, so by default it lives alongside the results
@@ -78,7 +102,16 @@ func cmdServe(args []string) error {
 		catPath = filepath.Join(c.outDir, "workloads.yaml")
 	}
 
-	s := &server{outDir: c.outDir, blisDir: c.blisDir, catalogPath: catPath, catalogRoot: os.Getenv("BLIS_CATALOG")}
+	s := &server{
+		outDir:      c.outDir,
+		blisDir:     c.blisDir,
+		catalogPath: catPath,
+		catalogRoot: os.Getenv("BLIS_CATALOG"),
+		// The trace blob store is the sibling of the workload catalog, so the two travel
+		// together (§4.2).
+		traceStore:     traceingest.Store(filepath.Join(filepath.Dir(catPath), "traces")),
+		maxUploadBytes: int64(*maxUploadMB) << 20,
+	}
 	s.execute = s.runOnce
 	s.validateSpec = s.validateSpecWithBlis
 
@@ -98,6 +131,7 @@ func (s *server) routes() *http.ServeMux {
 	// collide; the method+path pattern needs Go 1.22's ServeMux, same as the workload routes.
 	mux.HandleFunc("DELETE /api/results/{group}/{run}", s.handleResultDelete)
 	s.registerWorkloadRoutes(mux)
+	mux.HandleFunc("POST /api/traces", s.handleTraceIngest)
 	mux.HandleFunc("GET /api/models", s.handleModels)
 	mux.HandleFunc("GET /api/models/config", s.handleModelConfig)
 	mux.HandleFunc("GET /api/hardware", s.handleHardware)
@@ -131,7 +165,7 @@ func (s *server) handleRun(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	rec, err := s.execute(req.Group, req.RunID, req.Deployment, req.WorkloadName)
+	rec, err := s.execute(req)
 	if err != nil {
 		// A blis failure is the caller's to read, not a server fault: the flags it
 		// declared produced it. Surface the message so the screen can show it.
@@ -203,27 +237,34 @@ func (s *server) handleResultDelete(w http.ResponseWriter, r *http.Request) {
 // catalogue, capture fresh provenance, and run. A new Runner per request means the
 // upstream commit and dirty flag on the record describe the tree as it was when the
 // run happened, not when the server started.
-func (s *server) runOnce(g schema.Group, runID string, dep schema.Deployment, workloadName string) (schema.Record, error) {
+func (s *server) runOnce(req runRequest) (schema.Record, error) {
 	cat, err := hardware.Load(filepath.Join(s.blisDir, "hardware_config.json"))
 	if err != nil {
 		return schema.Record{}, err
 	}
-	if !cat.Known(dep.Hardware) {
+	if !cat.Known(req.Deployment.Hardware) {
 		return schema.Record{}, fmt.Errorf("hardware %q is not in hardware_config.json; valid names are %s",
-			dep.Hardware, strings.Join(cat.Names(), ", "))
+			req.Deployment.Hardware, strings.Join(cat.Names(), ", "))
 	}
 
 	runner, err := blisrun.NewRunner(s.blisDir)
 	if err != nil {
 		return schema.Record{}, err
 	}
+	// A trace run resolves its blob from the store; harmless to set for every run.
+	runner.TraceStore = s.traceStore
 	tmpDir, err := os.MkdirTemp("", "leaderboard-metrics-")
 	if err != nil {
 		return schema.Record{}, fmt.Errorf("create temp dir: %w", err)
 	}
 	defer os.RemoveAll(tmpDir)
 
-	return runner.Run(g, blisrun.RunSpec{RunID: runID, Deployment: dep, WorkloadName: workloadName}, filepath.Join(tmpDir, runID+".json"))
+	return runner.Run(req.Group, blisrun.RunSpec{
+		RunID:        req.RunID,
+		Deployment:   req.Deployment,
+		WorkloadName: req.WorkloadName,
+		TraceMeta:    req.TraceMeta,
+	}, filepath.Join(tmpDir, req.RunID+".json"))
 }
 
 // probeModel and probeHardware are the placeholders the spec smoke run uses so blis —

@@ -78,7 +78,7 @@ spec:
         # loudly at startup if the volume is not writable, rather than surfacing later
         # as a failed /api/run. Same image, so no extra pull.
         - name: ensure-results-dir
-          image: ghcr.io/inference-sim/leaderboard:0.1.6
+          image: ghcr.io/inference-sim/leaderboard:0.1.7
           imagePullPolicy: Always
           command:
             - sh
@@ -95,7 +95,7 @@ spec:
               mountPath: /data
       containers:
         - name: leaderboard
-          image: ghcr.io/inference-sim/leaderboard:0.1.6
+          image: ghcr.io/inference-sim/leaderboard:0.1.7
           imagePullPolicy: Always
           workingDir: /app
           env:
@@ -131,6 +131,14 @@ spec:
             - /app/inference-sim
             - -workloads
             - /data/workloads.yaml
+            # Cap for a trace upload to /api/traces, in MiB. Real Weka/OTel corpora are far
+            # larger than a converted TraceV2, so this is generous; the server keeps only
+            # 32 MiB in memory and spills the rest to a temp file, so a large upload streams
+            # from disk rather than counting against the memory limit below (it does consume
+            # ephemeral storage while it uploads). Requires an image built from code that has
+            # the flag (>= 0.1.7); an older binary rejects it and the pod crashloops.
+            - -max-upload-mb
+            - "4096"
           ports:
             - name: http
               containerPort: 8080

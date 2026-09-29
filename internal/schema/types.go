@@ -34,6 +34,14 @@ type Record struct {
 	Provenance Provenance `json:"provenance"`
 	Status     Status     `json:"status"`
 
+	// TraceMeta is the display and provenance of a replayed-trace run: the source
+	// format, the corpus size, and the trace's own session_context_growth. It lives on
+	// the Record, not in Group, for the same reason WorkloadName does — it must never
+	// affect group_id, so recording a trace's row count or relabelling its source never
+	// moves a run to a different table. omitempty, present only for a "trace" workload,
+	// so a distribution or spec record's canonical form is byte-for-byte unchanged.
+	TraceMeta *TraceMeta `json:"trace_meta,omitempty"`
+
 	Metrics Metrics `json:"metrics"`
 	// MetricsRaw is everything blis emitted, minus requests[], preserved verbatim.
 	MetricsRaw map[string]any `json:"metrics_raw"`
@@ -86,6 +94,64 @@ type Workload struct {
 	// therefore every committed table's group_id — is byte-for-byte unchanged (P7).
 	// group_id folds it in for the spec variant; SpecSHA256 is its content hash.
 	Spec map[string]any `json:"spec,omitempty"`
+
+	// Trace is the comparability half of a "trace" workload: the content hash of the
+	// replayable TraceV2 and the injection knobs that shape how blis replays it. It is
+	// a pointer with omitempty so a non-trace workload's canonical form — and every
+	// committed group_id — is byte-for-byte unchanged (P7). group_id folds it in, so
+	// the same trace replayed two ways is two tables. It carries no display or
+	// provenance field; those live on the Record (TraceMeta), so a rename never moves a
+	// run to a different table.
+	Trace *Trace `json:"trace,omitempty"`
+}
+
+// Trace is a replayed request stream: what `blis replay` is offered. The bytes are not
+// here — they are too large to inline in every record — only their content hash, which
+// references the trace in the hash-addressed store beside the workload catalog. Every
+// field is part of the comparability key.
+type Trace struct {
+	// SHA256 is the full content hash of the replayable TraceV2 (header bytes then data
+	// bytes). It stands in for the trace content in group_id, the way SpecSHA256 backs a
+	// spec workload; the bytes live at traces/<sha256>/{header.yaml,data.csv}.
+	SHA256 string `json:"sha256"`
+	// SessionMode is --session-mode: "fixed" (recorded open-loop arrivals),
+	// "closed-loop" (load-adaptive follow-ups), or "fixed-accumulate" (recorded arrivals
+	// with reconstructed growing-prompt inputs).
+	SessionMode string `json:"session_mode"`
+	// ConcurrentSessions is --concurrent-sessions: >0 replays a fixed pool of N
+	// concurrent closed-loop sessions (the offered-load analog of concurrency). 0 = not
+	// pooled.
+	ConcurrentSessions int `json:"concurrent_sessions"`
+	// TotalSessions is --total-sessions: the pool fill, duplicating the corpus. 0 = each
+	// corpus session once. Meaningful only when ConcurrentSessions > 0.
+	TotalSessions int `json:"total_sessions"`
+	// ShuffleCorpus is --shuffle-corpus: randomize pool step order (seeded from Seed).
+	// Meaningful only when ConcurrentSessions > 0.
+	ShuffleCorpus bool `json:"shuffle_corpus"`
+	// ThinkTimeMs is --think-time-ms: inter-round think time override (closed-loop only).
+	// 0 = derive from the trace's inter-round gaps. Mutually exclusive with
+	// ThinkTimeDist.
+	ThinkTimeMs int `json:"think_time_ms"`
+	// ThinkTimeDist is --think-time-dist: a think-time distribution spec (closed-loop
+	// only), e.g. "lognormal:mu=2,sigma=0.6,min=3s,max=30s". Mutually exclusive with
+	// ThinkTimeMs.
+	ThinkTimeDist string `json:"think_time_dist"`
+}
+
+// TraceMeta is the display and provenance of a "trace" workload, carried on the Record
+// (never in Group) so it cannot affect group_id.
+type TraceMeta struct {
+	// SourceFormat is how the TraceV2 was produced: "tracev2" (ingested directly),
+	// "otel", or "weka" (converted from that raw format at ingest).
+	SourceFormat string `json:"source_format"`
+	// Records is the corpus row count; Sessions is the number of distinct session_ids.
+	// Both are read from the trace at ingest, for display.
+	Records  int `json:"records"`
+	Sessions int `json:"sessions"`
+	// SessionContextGrowth is the trace header's session_context_growth ("accumulate" or
+	// empty). It decides which session modes are valid, so it is recorded for display and
+	// to re-validate a stored profile without re-reading the blob.
+	SessionContextGrowth string `json:"session_context_growth"`
 }
 
 // DeclaredRequests is the number of requests the group offered — the count a run's
@@ -96,6 +162,14 @@ type Workload struct {
 // populations or a trace declares no single num_requests — so a caller can skip a check
 // that would otherwise compare against zero.
 func (w Workload) DeclaredRequests() (int, bool) {
+	// A trace declares no single scalar count: closed-loop replay generates follow-up
+	// rounds, and a session pool duplicates the corpus, so the injected count is a
+	// property of the replay, not a declared number. Report it unknown so the
+	// injection-short check stands down rather than comparing against zero, exactly as
+	// for a cohort-driven spec.
+	if w.Type == "trace" {
+		return 0, false
+	}
 	if w.Type != "workload-spec" {
 		return w.NumRequests, true
 	}

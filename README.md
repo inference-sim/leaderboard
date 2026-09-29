@@ -149,6 +149,46 @@ docker run -p 8080:8080 -v "$PWD/results:/app/results" leaderboard:dev
   name their formula on hover — the GPU count, the served fraction, output tokens per served
   request, and the arrival process.
 
+## Trace / replay workloads
+
+Besides the synthetic distribution and spec workloads, a workload can be a **recorded
+trace** replayed through `blis replay`. A trace is a first-class, saved workload in the
+catalog: author it in the web app's workload editor (the "Trace replay" kind), where you
+upload the trace, choose how it is replayed, and save it like any other workload. The
+trace bytes are stored once by content hash under `<results>/traces/<sha256>/`; the
+workload references that hash, so the same trace replayed the same way is one table.
+
+Three inputs are accepted (all become the TraceV2 pair `blis replay` consumes):
+
+- **TraceV2** — a header YAML + data CSV, uploaded directly.
+- **OpenTelemetry** agentic JSON — converted with `blis convert otel`.
+- **Weka** agentic JSONL — converted with `blis convert weka`.
+
+To prepare a trace outside the app (for inspection, or to script it):
+
+```bash
+cd ../inference-sim
+export BLIS_CATALOG="$PWD/../blis-catalog"
+
+# Convert a raw trace to the TraceV2 pair the leaderboard ingests (also what the web
+# upload does for you):
+./blis convert weka --input sessions.jsonl --trace-output mytrace   # -> mytrace.yaml + mytrace.csv
+./blis convert otel --input spans.json    --trace-output mytrace
+
+# Replay it directly (the same metrics the leaderboard collects):
+./blis replay --trace-header mytrace.yaml --trace-data mytrace.csv \
+  --model qwen/qwen3-14b --hardware H100 --tp 1 \
+  --session-mode closed-loop --concurrent-sessions 32 \
+  --metrics-path /tmp/metrics.json
+```
+
+The offered load for a trace is either its **recorded arrivals** (`fixed` /
+`fixed-accumulate` / plain `closed-loop`) or a **pool of N concurrent sessions**
+(`--concurrent-sessions N`, the offered-load analog of concurrency). A trace whose source
+run spanned more than one node is refused: replay cannot reproduce a multi-node fleet.
+Trace workloads are authored and run through `leaderboard serve`; a `runs.yaml` declares
+only distribution workloads, exactly as with the spec variant.
+
 ## Comparability
 
 Two runs are only comparable when they were offered the same work — the same

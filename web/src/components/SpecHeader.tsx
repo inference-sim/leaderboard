@@ -23,14 +23,101 @@ const HORIZON_NOTE =
  */
 export function WorkloadHeader({ workload }: { workload: WorkloadGroup }) {
   const g = workload.groups[0]!.group // one comparability group per workload now (E1)
-  const isSpec = g.workload.type === 'workload-spec'
+  const type = g.workload.type
 
   return (
     <header className="spec">
       <h2>{workload.title}</h2>
 
-      {isSpec ? <SpecFields workload={workload} /> : <DistributionFields workload={workload} />}
+      {type === 'trace' ? (
+        <TraceFields workload={workload} />
+      ) : type === 'workload-spec' ? (
+        <SpecFields workload={workload} />
+      ) : (
+        <DistributionFields workload={workload} />
+      )}
     </header>
+  )
+}
+
+/**
+ * A trace workload's readout: what was replayed and how. The replay knobs come from the
+ * comparability group (session mode, pool, think-time); the corpus size and source come
+ * from the record's trace_meta (display/provenance, identical across a group's rows since
+ * they share the trace). The trace bytes are not on the board — only their content hash —
+ * so a run reproduces from the record only where the trace store has that hash.
+ */
+function TraceFields({ workload }: { workload: WorkloadGroup }) {
+  const g = workload.groups[0]!.group
+  const t = g.workload.trace
+  const meta = workload.records.find((r) => r.trace_meta != null)?.trace_meta ?? null
+  const load = g.workload.load
+  return (
+    <dl className="spec-grid">
+      <div>
+        <dt>Replay</dt>
+        <dd>trace</dd>
+      </div>
+      {meta && (
+        <div>
+          <dt>Source</dt>
+          <dd>{meta.source_format}</dd>
+        </div>
+      )}
+      {t && (
+        <div>
+          <dt>Session mode</dt>
+          <dd>{t.session_mode}</dd>
+        </div>
+      )}
+      <div>
+        <dt>Offered load</dt>
+        <dd>
+          {load.kind === 'sessions' ? (
+            <>
+              {formatCount(load.value)} <small>concurrent sessions</small>
+            </>
+          ) : (
+            'recorded arrivals'
+          )}
+        </dd>
+      </div>
+      {meta && (
+        <div>
+          <dt>Corpus</dt>
+          <dd>
+            {formatCount(meta.records)} <small>records</small>
+            {meta.sessions > 0 && (
+              <>
+                {' · '}
+                {formatCount(meta.sessions)} <small>sessions</small>
+              </>
+            )}
+          </dd>
+        </div>
+      )}
+      {meta?.session_context_growth && (
+        <div>
+          <dt>Context growth</dt>
+          <dd>{meta.session_context_growth}</dd>
+        </div>
+      )}
+      {t && t.think_time_dist !== '' && (
+        <div>
+          <dt>Think time</dt>
+          <dd>{t.think_time_dist}</dd>
+        </div>
+      )}
+      {t && t.think_time_dist === '' && t.think_time_ms > 0 && (
+        <div>
+          <dt>Think time</dt>
+          <dd>
+            {formatCount(t.think_time_ms)} <small>ms</small>
+          </dd>
+        </div>
+      )}
+      <GroupKnobs workload={workload} />
+    </dl>
   )
 }
 

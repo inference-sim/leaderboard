@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import type { Dispatch, ReactNode, SetStateAction } from 'react'
-import { loadCommittedRecords, loadWorkloads } from './load'
+import { loadCommittedRecords, loadWorkloads, mergeRecords } from './load'
 import type { RunRecord, WorkloadGroup } from './load'
 import { deleteRun, fetchResults } from './results'
 import { ReadoutTable } from './components/ReadoutTable'
@@ -20,7 +20,7 @@ import { toggleSelection } from './compare'
 import { LiveRunBanner } from './components/LiveRunBanner'
 import { Catalog } from './components/Catalog'
 import { ErrorBoundary } from './components/ErrorBoundary'
-import { emptyFilterNoun } from './filter'
+import { emptyFilterNoun, keptByFilters } from './filter'
 import { initialValues, saveThenRun } from './newrun'
 import type { FormValues, Output } from './newrun'
 import { runDeclFromOutput, workloadKeyForGroup } from './liverun'
@@ -173,8 +173,11 @@ export function App() {
 
   const reload = useCallback(async () => {
     try {
-      setRecords(await fetchResults())
-      // The server answered, so its live results supersede the committed build and the
+      // Merge, not replace: the server's outDir may not be the tree the bundle was built
+      // from (the default ~/leaderboard-results holds only this session's runs), so the
+      // committed baseline must be kept and the live results layered over it.
+      setRecords(mergeRecords(committed, await fetchResults()))
+      // The server answered, so its live results are authoritative where they exist and the
       // delete control can be offered.
       setServerAvailable(true)
     } catch {
@@ -182,7 +185,7 @@ export function App() {
       // static case.
       setServerAvailable(false)
     }
-  }, [])
+  }, [committed])
 
   useEffect(() => {
     reload()
@@ -517,11 +520,6 @@ function WorkloadSection({
         .filter((r): r is RunRecord => r != null),
     [selectedIds, workload.records],
   )
-  // Select-all pulls in every run in this table (the comparability group), complete and
-  // disqualified, in declared order; Clear empties the comparison.
-  const allIds = useMemo(() => workload.records.map((r) => r.run_id), [workload.records])
-  const onSelectAll = useCallback(() => setSelectedIds(allIds), [allIds])
-  const onClearSelection = useCallback(() => setSelectedIds([]), [])
   // Show a filter whenever the workload has any option for it, not just two or more. The
   // table omits the model and hardware labels when there is only one of each (a single-
   // model table has no Model column, a single-accelerator one no hardware cell), so the
@@ -530,6 +528,22 @@ function WorkloadSection({
   const showModels = workload.models.length > 0
   const showHardware = hardwareTypes.length > 0
   const emptyNoun = emptyFilterNoun(showModels, models, showHardware, hardware)
+  // Select-all pulls in exactly the runs the model and hardware filters leave on screen (the
+  // ranked rows, any SLO-banded ones, and the disqualified band), in declared order; Clear
+  // empties the comparison. It tracks the filters so selecting all after narrowing them can
+  // never reach a run that is no longer shown. When a filter is emptied outright the table is
+  // replaced by a note and nothing is on screen, so the set is empty.
+  const allIds = useMemo(
+    () =>
+      emptyNoun
+        ? []
+        : workload.records
+            .filter((r) => keptByFilters(r, models, workload.models, hardware))
+            .map((r) => r.run_id),
+    [emptyNoun, workload.records, workload.models, models, hardware],
+  )
+  const onSelectAll = useCallback(() => setSelectedIds(allIds), [allIds])
+  const onClearSelection = useCallback(() => setSelectedIds([]), [])
   return (
     <section className="group">
       {/* Compare mode draws an indigo frame around the whole viewport with a corner flag, so
