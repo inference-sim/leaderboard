@@ -84,13 +84,16 @@ spec:
         #      stay writable, and fails the pod loudly if the volume is not writable
         #      rather than surfacing later as a failed /api/run;
         #   2. seeds the model catalog onto the PVC ONCE from the image's bundled clone,
-        #      then never clobbers it. Moving the catalog off the read-only image layer
-        #      is what makes a private model addable at runtime: `oc rsh` in and write
-        #      /data/blis-catalog/models/<name>/{config.json,model.yaml}. g+rwX so a
-        #      later pod (different arbitrary UID, same gid 0) can still edit it.
-        #      Trade-off: because the seed is one-shot, catalog changes shipped in a
-        #      newer image do NOT propagate to an existing PVC — delete /data/blis-catalog
-        #      (losing manual edits) to re-seed. Same image, so no extra pull.
+        #      then never clobbers it — so a private model added by hand survives. Moving
+        #      the catalog off the read-only image layer is what makes it addable at
+        #      runtime: `oc rsh` in and write
+        #      /data/blis-catalog/models/<name>/{config.json,model.yaml}. The copy is
+        #      staged in a .tmp dir and atomically renamed, so a crash mid-copy leaves no
+        #      half-seeded tree that the ONCE guard would then skip. cp -R (not -a) so a
+        #      non-root UID is not asked to preserve the image's root ownership (which
+        #      would fail under set -eu); g+rwX so a later pod in the same fsGroup can
+        #      still edit it. Trade-off: the seed is one-shot, so a newer image's catalog
+        #      does NOT propagate to an existing PVC (delete /data/blis-catalog to re-seed).
         - name: seed-data
           image: ghcr.io/inference-sim/leaderboard:0.1.7
           imagePullPolicy: Always
@@ -101,8 +104,10 @@ spec:
               set -eu
               mkdir -p /data/results && chmod 2775 /data/results
               if [ ! -e /data/blis-catalog ]; then
-                cp -a /app/inference-sim/blis-catalog /data/blis-catalog
-                chmod -R g+rwX /data/blis-catalog
+                rm -rf /data/blis-catalog.tmp
+                cp -R /app/inference-sim/blis-catalog /data/blis-catalog.tmp
+                chmod -R g+rwX /data/blis-catalog.tmp
+                mv /data/blis-catalog.tmp /data/blis-catalog
               fi
           securityContext:
             allowPrivilegeEscalation: false
@@ -127,9 +132,9 @@ spec:
             # layer and cannot take runtime edits; the seed-data initContainer copies it
             # once onto the PVC at /data/blis-catalog, which is where we point blis so a
             # private model can be added by hand (models/<name>/config.json + model.yaml).
-            # The server reads this same var at startup (serve.go: os.Getenv) to build the
-            # model list, and every blis subprocess it spawns inherits it (both the run
-            # path and the workload-spec validation probe), which -blis/args cannot cover.
+            # The server reads this var at startup to build the model list, and every blis
+            # subprocess it spawns inherits it (both the run path and the workload-spec
+            # validation probe), which -blis/args cannot cover.
             - name: BLIS_CATALOG
               value: /data/blis-catalog
             # Results directory. It lives on the /data PVC (mounted below) so it is
