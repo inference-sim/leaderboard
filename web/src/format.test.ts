@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { formatCount, formatMs, formatNumber } from './format'
+import { formatCount, formatMs, formatNumber, formatPercent } from './format'
 
 describe('formatMs', () => {
   it('reads sub-second values in milliseconds to one decimal', () => {
@@ -32,5 +32,18 @@ describe('formatCount', () => {
   it('renders integers with grouping and no decimals', () => {
     expect(formatCount(500)).toBe('500')
     expect(formatCount(248510)).toBe('248,510')
+  })
+})
+
+describe('formatPercent', () => {
+  it('renders a 0..1 fraction as a percentage to one decimal', () => {
+    expect(formatPercent(0.42)).toBe('42.0%')
+    expect(formatPercent(0.4234)).toBe('42.3%')
+    expect(formatPercent(0)).toBe('0.0%')
+    expect(formatPercent(1)).toBe('100.0%')
+  })
+  it('renders a missing value as an em dash, not 0%', () => {
+    expect(formatPercent(null)).toBe('—')
+    expect(formatPercent(undefined)).toBe('—')
   })
 })

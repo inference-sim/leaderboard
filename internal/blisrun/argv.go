@@ -244,6 +244,14 @@ func appendCandidateTail(a []string, d schema.Deployment) []string {
 
 	add("--gpu-memory-utilization", strconv.FormatFloat(d.GPUMemoryUtilization, 'f', -1, 64))
 
+	// --total-kv-blocks pins the KV cache capacity. Emitted only when > 0: 0 is the "auto"
+	// sentinel (blis sizes the cache from the hardware when the flag is omitted, and fatally
+	// rejects --total-kv-blocks 0), following the same "emit only when the capability is on"
+	// rule as the speculative trio.
+	if d.TotalKVBlocks > 0 {
+		add("--total-kv-blocks", strconv.FormatInt(d.TotalKVBlocks, 10))
+	}
+
 	// The speculative trio follows the --dp precedent: emitted only when the capability
 	// is on. blis requires --speculative-acceptance-rate when K>0 and rejects a
 	// --speculative-method (or a non-zero acceptance rate) when K==0, so an off run

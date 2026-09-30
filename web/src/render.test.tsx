@@ -155,6 +155,14 @@ describe('ReadoutTable, single-model workload (mainW: one model, three accelerat
     expect(html).toMatch(/class="derived"[^>]*data-tip="completed_requests ÷ injected_requests[^"]*"/)
   })
 
+  it('tags the candidate-identity block so it freezes on horizontal scroll', () => {
+    // The grouped candidate cell and the GPUs column carry the classes that pin them at the left
+    // edge (see .gcol-candidate / .gpcol in styles.css), so the whole candidate block — grouped
+    // header included — stays frozen as the reader scrolls right into the metrics.
+    expect(html).toMatch(/scope="colgroup" class="gcol-candidate"/)
+    expect(html).toMatch(/<td class="gpcol">/)
+  })
+
   it('keeps the group separator at the throughput/health boundary, on the Served cells', () => {
     // Served leads the health group now, so the grey bar sits to its left in both the
     // header and every body row — not only the header.
@@ -205,6 +213,39 @@ describe('ReadoutTable, single-model workload (mainW: one model, three accelerat
   })
 })
 
+describe('ReadoutTable, KV cache metrics are hidden behind a toggle (§5.2)', () => {
+  const html = renderToStaticMarkup(<ReadoutTable workload={mainW} models={[]} />)
+
+  it('offers a "Show KV cache metrics" toggle in the table tools', () => {
+    expect(html).toContain('Show KV cache metrics')
+    expect(html).toMatch(/aria-label="Show KV cache metrics"/)
+    // aria-pressed reflects the off state, so a screen reader hears it as a toggle.
+    expect(html).toMatch(/aria-pressed="false"/)
+  })
+
+  it('renders none of the KV columns on load, so the default readout is unchanged', () => {
+    for (const label of ['Cache hit', 'Preempt rate', 'KV alloc fails', 'KV thrash'])
+      expect(html).not.toContain(label)
+    // The uppercased "KV" group header is the colgroup cell text (raw key "kv"); absent by default.
+    expect(html).not.toMatch(/scope="colgroup"[^>]*>kv</)
+  })
+
+  it('leaves the table wrapper a non-scroll container by default, so the header freezes to the viewport', () => {
+    // tscroll-x (the horizontal scroll frame) is added only with the wide KV group; without it
+    // the wrapper stays the plain .tscroll that keeps the sticky header against the viewport.
+    expect(html).toMatch(/class="tscroll"/)
+    expect(html).not.toContain('tscroll-x')
+  })
+
+  it('keeps the four KV columns out of every body row while hidden', () => {
+    // Each data row renders only the visible numeric columns: deployment + 10 = 11 cells,
+    // never the 4 KV cells. (A sweep would add a Load cell; mainW is a single load.)
+    for (const row of tbodyRows(html)) {
+      expect(cellsOfRow(row)).toHaveLength(11)
+    }
+  })
+})
+
 describe('ReadoutTable, a load sweep (one profile, two offered loads)', () => {
   const w = twoLoadWorkload()
   const html = renderToStaticMarkup(<ReadoutTable workload={w} models={[]} />)
@@ -224,6 +265,16 @@ describe('ReadoutTable, a load sweep (one profile, two offered loads)', () => {
   it('omits the load column when the reader narrows to a single load level', () => {
     const one = renderToStaticMarkup(<ReadoutTable workload={w} models={[]} loads={[6]} />)
     expect(one).not.toContain('>Arrival rate<')
+  })
+
+  it('marks the table hasload and tags the Load column so it can freeze beside Deployment', () => {
+    // hasload drives the stacked-sticky freeze and the gray separator (styles.css); the Load
+    // header and every load cell carry .lcol, the class that pins the column at the left edge.
+    expect(html).toMatch(/<table class="readout hasload">/)
+    expect(html).not.toContain('noloadfreeze')
+    // The Load header cell and the body load cells both carry lcol.
+    expect(html).toMatch(/<th[^>]*class="lcol"/)
+    expect(html).toMatch(/<td class="loadcell lcol">/)
   })
 })
 

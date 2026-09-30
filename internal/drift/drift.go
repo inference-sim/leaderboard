@@ -13,6 +13,7 @@ import (
 	"go/ast"
 	"go/parser"
 	"go/token"
+	"os"
 	"reflect"
 	"sort"
 	"strconv"
@@ -22,6 +23,16 @@ import (
 // DefaultMetricsPath is where upstream's MetricsOutput lives, relative to this
 // repo's root.
 const DefaultMetricsPath = "../inference-sim/sim/metrics_utils.go"
+
+// DefaultRunCmdPath is where upstream's printKVCacheMetrics prints the KV Cache Metrics
+// section, relative to this repo's root. The thrashing-rate scraper reads that section
+// off stdout, so a rename of the label there must fail a test rather than blank a column.
+const DefaultRunCmdPath = "../inference-sim/cmd/root.go"
+
+// KVThrashingStdoutLabel is the label upstream prints before the KV thrashing rate. It
+// mirrors internal/blisrun's own (unexported) parser constant; the optional-presence
+// guard asserts upstream still prints it, so the two cannot diverge unnoticed.
+const KVThrashingStdoutLabel = "KV Thrashing Rate:"
 
 // RequiredJSONFields returns the contract names of typeName's fields that
 // encoding/json always emits, in declaration order. That matches encoding/json's
@@ -39,6 +50,23 @@ const DefaultMetricsPath = "../inference-sim/sim/metrics_utils.go"
 // does not do. An embedded field that does carry a json tag name is treated as an
 // ordinary named field, since a name suppresses promotion.
 func RequiredJSONFields(path, typeName string) ([]string, error) {
+	return jsonFields(path, typeName, false)
+}
+
+// AllJSONFields is RequiredJSONFields without the omitempty filter: it returns every
+// field encoding/json could emit for typeName, including the omitempty ones. The
+// optional-presence guard (§4.3) uses it because cache_hit_rate and
+// kv_allocation_failures are omitempty upstream — RequiredJSONFields drops them — yet
+// the leaderboard's typed metrics and stdout scraper still depend on their names, so a
+// rename must surface as a failed test rather than a silently blank column.
+func AllJSONFields(path, typeName string) ([]string, error) {
+	return jsonFields(path, typeName, true)
+}
+
+// jsonFields is the shared field collector. With includeOmitempty false it returns only
+// the always-emitted fields (the required contract); with it true it also returns the
+// omitempty ones. The exported/dashed/unexported rules are identical either way.
+func jsonFields(path, typeName string, includeOmitempty bool) ([]string, error) {
 	fset := token.NewFileSet()
 	f, err := parser.ParseFile(fset, path, nil, parser.SkipObjectResolution)
 	if err != nil {
@@ -92,7 +120,7 @@ func RequiredJSONFields(path, typeName string) ([]string, error) {
 				continue
 			}
 			if tagName != "" {
-				if !omitempty {
+				if !omitempty || includeOmitempty {
 					out = append(out, tagName)
 				}
 				continue
@@ -108,7 +136,7 @@ func RequiredJSONFields(path, typeName string) ([]string, error) {
 			if !name.IsExported() {
 				continue // encoding/json never emits an unexported field
 			}
-			if dashed || omitempty {
+			if dashed || (omitempty && !includeOmitempty) {
 				continue
 			}
 			contractName := tagName
@@ -136,6 +164,17 @@ func exprString(expr ast.Expr) string {
 	default:
 		return fmt.Sprintf("%T", expr)
 	}
+}
+
+// FileContains reports whether the file at path contains needle as a literal substring.
+// A read error (a moved or renamed file) is returned rather than reported as absence, so
+// the label guard fails loudly on a moved upstream file instead of passing silently.
+func FileContains(path, needle string) (bool, error) {
+	body, err := os.ReadFile(path)
+	if err != nil {
+		return false, fmt.Errorf("drift: read %s: %w", path, err)
+	}
+	return strings.Contains(string(body), needle), nil
 }
 
 // Compare reports the difference between upstream's always-emitted fields and the

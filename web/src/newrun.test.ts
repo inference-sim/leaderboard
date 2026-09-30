@@ -347,6 +347,33 @@ describe('interpret: a selected profile', () => {
   })
 })
 
+describe('interpret: total_kv_blocks (KV cache capacity, auto by default)', () => {
+  it('leaves the field, the flag and the yaml line off when blank — blis auto-calculates', () => {
+    const { output, issues } = interpret(valid(), groups, [])
+    expect(issues).toEqual([])
+    expect(output!.deployment.total_kv_blocks).toBeUndefined()
+    expect(output!.argv).not.toContain('--total-kv-blocks')
+    expect(output!.yamlFile).not.toContain('total_kv_blocks')
+  })
+
+  it('pins the block count when set: on the deployment, the argv and the yaml', () => {
+    const { output, issues } = interpret(valid({ totalKvBlocks: '20000' }), groups, [])
+    expect(issues).toEqual([])
+    expect(output!.deployment.total_kv_blocks).toBe(20000)
+    expect(output!.argv).toContain('--total-kv-blocks')
+    expect(output!.argv[output!.argv.indexOf('--total-kv-blocks') + 1]).toBe('20000')
+    expect(output!.yamlFile).toContain('total_kv_blocks: 20000')
+  })
+
+  it('rejects a non-positive or non-integer value, pointing to blank for auto', () => {
+    for (const bad of ['0', '-5', 'abc', '1.5']) {
+      const { issues, output } = interpret(valid({ totalKvBlocks: bad }), groups, [])
+      expect(output, `total_kv_blocks=${bad} should block`).toBeNull()
+      expect(issues.some((i) => i.field === 'totalKvBlocks')).toBe(true)
+    }
+  })
+})
+
 describe('interpret: the custom card', () => {
   type SpecClient = {
     concurrency?: number

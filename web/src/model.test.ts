@@ -11,13 +11,17 @@ import {
   distinctModels,
   fieldDisplay,
   gpuCount,
+  groupStartKeys,
+  groupedHeaders,
   knobChips,
   outputTokensPerRequest,
   nextSort,
+  preemptionRate,
   removeSort,
   servedFraction,
   sortRecords,
   varyingDeploymentFields,
+  visibleColumns,
   wouldBeRank,
 } from './model'
 
@@ -374,16 +378,142 @@ describe('derived values', () => {
 })
 
 describe('COLUMNS', () => {
-  it('groups headers as candidate, latency, throughput, health', () => {
+  it('groups headers as candidate, latency, throughput, health, kv', () => {
     const seen: string[] = []
     for (const c of COLUMNS) if (seen[seen.length - 1] !== c.group) seen.push(c.group)
-    expect(seen).toEqual(['candidate', 'latency', 'throughput', 'health'])
+    // KV is last so it appends to the right when toggled on, past the default readout.
+    expect(seen).toEqual(['candidate', 'latency', 'throughput', 'health', 'kv'])
   })
 
   it('marks the derived columns so the UI can flag what BLIS did not report', () => {
     expect(COLUMNS.find((c) => c.key === 'gpus')!.derivedFrom).toBeTruthy()
     expect(COLUMNS.find((c) => c.key === 'served')!.derivedFrom).toBeTruthy()
     expect(COLUMNS.find((c) => c.key === 'e2e_p99_ms')!.derivedFrom).toBeUndefined()
+  })
+})
+
+describe('KV cache columns', () => {
+  const col = (key: string) => COLUMNS.find((c) => c.key === key)!
+  const withKV = (over: Partial<RunRecord['metrics']> & { kv_thrashing_rate?: number }): RunRecord => {
+    const r = JSON.parse(JSON.stringify(main.complete[0]!)) as RunRecord
+    const { kv_thrashing_rate, ...metrics } = over
+    Object.assign(r.metrics, metrics)
+    if (kv_thrashing_rate !== undefined) r.kv_thrashing_rate = kv_thrashing_rate
+    return r
+  }
+
+  it('appends the four KV columns in order, all in the kv group', () => {
+    const kv = COLUMNS.filter((c) => c.group === 'kv').map((c) => c.key)
+    expect(kv).toEqual(['cache_hit_rate', 'preemption_rate', 'kv_allocation_failures', 'kv_thrashing_rate'])
+  })
+
+  it('reads cache hit rate from the metric, higher is better, and shows null when absent', () => {
+    expect(col('cache_hit_rate').higherIsBetter).toBe(true)
+    expect(col('cache_hit_rate').value(withKV({ cache_hit_rate: 0.42 }))).toBe(0.42)
+    // An older BLIS omits it: value is null (renders "—"), not a spurious 0.
+    const noHit = withKV({})
+    delete noHit.metrics.cache_hit_rate
+    expect(col('cache_hit_rate').value(noHit)).toBeNull()
+  })
+
+  it('derives preemption rate and marks it derived at the point of display', () => {
+    const c = col('preemption_rate')
+    expect(c.derivedFrom).toBeTruthy()
+    expect(c.derivedFrom!.formula).toContain('preemption_count')
+    expect(c.value(withKV({ preemption_count: 12, completed_requests: 400 }))).toBeCloseTo(0.03, 6)
+  })
+
+  it('treats kv allocation failures as an integer count, defaulting an absent value to 0', () => {
+    expect(col('kv_allocation_failures').digits).toBe(0)
+    expect(col('kv_allocation_failures').value(withKV({ kv_allocation_failures: 7 }))).toBe(7)
+    const none = withKV({})
+    delete none.metrics.kv_allocation_failures
+    expect(col('kv_allocation_failures').value(none)).toBe(0)
+  })
+
+  it('reads the scraped thrashing rate off the record, null when not reported', () => {
+    expect(col('kv_thrashing_rate').value(withKV({ kv_thrashing_rate: 0.0345 }))).toBe(0.0345)
+    const none = withKV({})
+    delete none.kv_thrashing_rate
+    expect(col('kv_thrashing_rate').value(none)).toBeNull()
+  })
+})
+
+describe('preemptionRate', () => {
+  const rec = (preemption_count: number, completed_requests: number): RunRecord => {
+    const r = JSON.parse(JSON.stringify(main.complete[0]!)) as RunRecord
+    r.metrics.preemption_count = preemption_count
+    r.metrics.completed_requests = completed_requests
+    return r
+  }
+
+  it('is preemption_count ÷ completed_requests', () => {
+    expect(preemptionRate(rec(12, 400))).toBeCloseTo(0.03, 6)
+  })
+
+  it('is null when no request completed, so it never divides by zero', () => {
+    expect(preemptionRate(rec(3, 0))).toBeNull()
+  })
+})
+
+describe('groupedHeaders (the grouped top header row, over the visible columns)', () => {
+  it('collapses runs of the same group into colspans, KV hidden by default', () => {
+    expect(groupedHeaders(visibleColumns(false), false)).toEqual([
+      { group: 'candidate', span: 2 },
+      { group: 'latency', span: 5 },
+      { group: 'throughput', span: 2 },
+      { group: 'health', span: 2 },
+    ])
+  })
+
+  it('appends a KV span when the KV columns are visible', () => {
+    expect(groupedHeaders(visibleColumns(true), false)).toEqual([
+      { group: 'candidate', span: 2 },
+      { group: 'latency', span: 5 },
+      { group: 'throughput', span: 2 },
+      { group: 'health', span: 2 },
+      { group: 'kv', span: 4 },
+    ])
+  })
+
+  it('prepends a blank leading cell for the Load column of a sweep', () => {
+    const headers = groupedHeaders(visibleColumns(false), true)
+    expect(headers[0]).toEqual({ group: '', span: 1 })
+  })
+})
+
+describe('groupStartKeys (the columns a group separator sits left of)', () => {
+  it('marks the first column of each group after candidate, tracking the visible set', () => {
+    expect([...groupStartKeys(visibleColumns(false))]).toEqual([
+      'ttft_p99_ms',
+      'tokens_per_sec',
+      'served',
+    ])
+  })
+
+  it('adds the KV group boundary when KV is visible', () => {
+    expect(groupStartKeys(visibleColumns(true)).has('cache_hit_rate')).toBe(true)
+  })
+})
+
+describe('visibleColumns', () => {
+  it('drops the KV group when the toggle is off (the default readout)', () => {
+    const keys = visibleColumns(false).map((c) => c.key)
+    expect(keys).not.toContain('cache_hit_rate')
+    expect(keys).not.toContain('kv_thrashing_rate')
+    // Everything else is untouched, so the default table is exactly as before.
+    expect(visibleColumns(false)).toEqual(COLUMNS.filter((c) => c.group !== 'kv'))
+  })
+
+  it('appends the KV columns to the right when the toggle is on', () => {
+    const keys = visibleColumns(true).map((c) => c.key)
+    expect(keys.slice(-4)).toEqual([
+      'cache_hit_rate',
+      'preemption_rate',
+      'kv_allocation_failures',
+      'kv_thrashing_rate',
+    ])
+    expect(visibleColumns(true)).toEqual(COLUMNS)
   })
 })
 

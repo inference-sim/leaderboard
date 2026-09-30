@@ -54,6 +54,10 @@ export interface BLISLeaderboardRunRecord {
    * The catalog name (a preset or saved profile) the run was declared with, for display only. Optional and not part of group_id/work_id, which hash the model-free group: the name never changes which table a run lands in. Absent for a runs.yaml run, which names no workload.
    */
   workload_name?: string;
+  /**
+   * KV thrashing rate, scraped from BLIS's stdout `=== KV Cache Metrics ===` section (the only KV signal that is neither in the metrics file nor derivable from it). It lives on the record, not in `metrics`, because `metrics` mirrors BLIS's metrics JSON and this value is not in that file. Optional: absent (BLIS omits the whole section when preemption, cache-hit, and thrashing rates are all zero) renders as "—". Lower is better.
+   */
+  kv_thrashing_rate?: number;
   trace_meta?: TraceMeta;
   group: Group;
   deployment: Deployment;
@@ -271,6 +275,10 @@ export interface Deployment {
    */
   gpu_memory_utilization: number;
   /**
+   * --total-kv-blocks. KV cache capacity in blocks, per replica. Optional and NOT in required: absent means auto — blis sizes the KV cache from the candidate's hardware memory when the flag is omitted (what makes a hardware-vs-hardware table meaningful), and fatally rejects --total-kv-blocks 0. Present only when the reader pins a positive block count, emitted to the argv only then, so a candidate left on auto — including every record predating this field — is canonically unchanged (cf. disaggregation, kv_offload).
+   */
+  total_kv_blocks?: number;
+  /**
    * KV-cache CPU offloading (--kv-offload-config): the single host-CPU tier that spills KV blocks off the GPU. Present only when offloading is on, so a record without it is canonically unchanged (cf. disaggregation, routing_scorers). Materialized at run time to a YAML file with a top-level kv_offload: block. NOTE: at the pinned upstream HEAD the offload subsystem is inert (blis parses and validates the config but no mechanism consumes it yet), so these knobs are plumbed ahead and do not move metrics. Secondary spill tiers (secondary_tiers) are a deliberate follow-up, not modelled here.
    */
   kv_offload?: {
@@ -361,7 +369,7 @@ export interface Warning {
   detail: string;
 }
 /**
- * Exactly the sim.MetricsOutput fields declared without omitempty — the 27 BLIS always emits. internal/drift asserts this list against upstream source. Everything omitempty (cache_hit_rate, kv_allocation_failures, goodput_rps, slo_attainment, per_class, adapters, saturation) lives in metrics_raw.
+ * The 27 sim.MetricsOutput fields declared without omitempty — the ones BLIS always emits, which internal/drift asserts against upstream source and lists in `required` — plus two optional KV-cache fields (cache_hit_rate, kv_allocation_failures) BLIS emits with omitempty. The optional pair is deliberately absent from `required`, so a run that omits either (an older BLIS, or kv_allocation_failures when zero) still validates; they also remain in metrics_raw verbatim. The remaining omitempty MetricsOutput fields (goodput_rps, slo_attainment, per_class, adapters, saturation) are not promoted here and live only in metrics_raw.
  */
 export interface Metrics {
   instance_id: string;
@@ -400,4 +408,12 @@ export interface Metrics {
   dropped_unservable: number;
   length_capped_requests: number;
   timed_out_requests: number;
+  /**
+   * Aggregate KV prefix-cache hit rate, read from the metrics file (BLIS emits it omitempty; current BLIS sets it for every run). Optional, not in `required`: a record that omits it (an older BLIS) still validates, and its absence is distinct from a reported 0.0. Higher is better; especially meaningful for trace/replay workloads with shared session prefixes.
+   */
+  cache_hit_rate?: number;
+  /**
+   * Count of KV block allocation failures, read from the metrics file. BLIS omits it (omitempty) exactly when it is zero, so its absence means zero and it is not in `required`. Lower is better; 0 is healthy.
+   */
+  kv_allocation_failures?: number;
 }

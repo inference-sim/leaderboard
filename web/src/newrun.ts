@@ -137,6 +137,10 @@ export interface FormValues {
   kvCacheDtype: string
   latencyModel: string
   gpuMemoryUtilization: string
+  /** --total-kv-blocks: KV cache capacity in blocks, per replica. Blank means auto — blis
+   * sizes the cache from the candidate's hardware — which is the default; a positive whole
+   * number pins it. blis rejects 0, so blank/0 both read as auto. */
+  totalKvBlocks: string
   // --- KV-cache CPU offloading (--kv-offload-config). Read only when kvCpuOffload === 'on';
   // when off the candidate declares no kv_offload block. The subsystem is inert upstream at
   // the pinned HEAD, so these are plumbed ahead and do not move metrics. ---
@@ -475,6 +479,10 @@ export function initialValues(): FormValues {
     kvCacheDtype: d.kv_cache_dtype,
     latencyModel: d.latency_model,
     gpuMemoryUtilization: String(d.gpu_memory_utilization),
+    // total_kv_blocks opens blank: auto (blis sizes the KV cache from the hardware). The
+    // reader types a positive block count only to pin it, so the default declaration carries
+    // no --total-kv-blocks and every candidate is auto-sized by its own hardware.
+    totalKvBlocks: d.total_kv_blocks != null ? String(d.total_kv_blocks) : '',
     // KV CPU offloading off by default (no kv_offload block); the knobs carry blis's
     // defaults so the card opens on a valid, runnable config when it is turned on.
     // cpu_bytes_to_use is required and > 0 with no blis default, so it seeds to a modest
@@ -564,6 +572,18 @@ export function interpret(
   const gpuMemoryUtilization = Number(values.gpuMemoryUtilization)
   if (!Number.isFinite(gpuMemoryUtilization) || gpuMemoryUtilization <= 0 || gpuMemoryUtilization > 1) {
     push('gpuMemoryUtilization', 'GPU memory utilization is a fraction in (0, 1.0]. blis defaults it to 0.9.')
+  }
+  // total_kv_blocks: blank means auto (blis sizes the KV cache from the hardware), the
+  // default. A value pins the per-replica block count and must be a positive whole number;
+  // blis fatally rejects 0, so 0 is not a pinned value — leave it blank for auto. When auto,
+  // no --total-kv-blocks is emitted and the field is omitted from the record entirely.
+  const totalKvBlocksRaw = values.totalKvBlocks.trim()
+  const totalKvBlocks = totalKvBlocksRaw === '' ? 0 : Number(totalKvBlocksRaw)
+  if (totalKvBlocksRaw !== '' && (!Number.isInteger(totalKvBlocks) || totalKvBlocks <= 0)) {
+    push(
+      'totalKvBlocks',
+      'Total KV blocks is a whole number greater than 0, or blank for auto (blis sizes the KV cache from the hardware).',
+    )
   }
   const numSpeculativeTokens = Number(values.numSpeculativeTokens)
   if (!Number.isInteger(numSpeculativeTokens) || numSpeculativeTokens < 0) {
@@ -824,6 +844,10 @@ export function interpret(
       kv_cache_dtype: values.kvCacheDtype as Deployment['kv_cache_dtype'],
       latency_model: values.latencyModel as Deployment['latency_model'],
       gpu_memory_utilization: gpuMemoryUtilization,
+      // total_kv_blocks is present only when the reader pinned a positive count; auto (blank/0)
+      // omits it, so an auto candidate is canonically identical to a stored record and blis
+      // sizes the cache from the hardware.
+      ...(totalKvBlocks > 0 ? { total_kv_blocks: totalKvBlocks } : {}),
       // The kv_offload block is present only when offloading is on, so a non-offloading
       // candidate omits it and stays canonically identical to a stored record. Every field
       // is written (the "always emit all" rule), so the config on disk is fully spelled out.
@@ -1270,6 +1294,9 @@ export function yamlFile(group: Group, deployment: Deployment, runId: string): s
     `  kv_cache_dtype: ${deployment.kv_cache_dtype}`,
     `  latency_model: ${deployment.latency_model}`,
     `  gpu_memory_utilization: ${deployment.gpu_memory_utilization}`,
+    // Written only when pinned — auto (absent) omits it, the same rule the record and the
+    // argv follow, so the file declares --total-kv-blocks only when the reader set it.
+    ...(deployment.total_kv_blocks ? [`  total_kv_blocks: ${deployment.total_kv_blocks}`] : []),
     // Written only when offloading is on — the same rule the record and the argv follow.
     ...(deployment.kv_offload ? [`  kv_offload: ${kvOffloadFlow(deployment.kv_offload)}`] : []),
     `  num_speculative_tokens: ${deployment.num_speculative_tokens}`,
@@ -1441,6 +1468,10 @@ export function argvFor(
   add('--latency-model', d.latency_model)
 
   add('--gpu-memory-utilization', numeric(d.gpu_memory_utilization))
+
+  // --total-kv-blocks pins the KV cache capacity; emitted only when > 0 (0/absent is the
+  // auto sentinel, and blis rejects --total-kv-blocks 0). Mirrors internal/blisrun.Argv.
+  if (d.total_kv_blocks && d.total_kv_blocks > 0) add('--total-kv-blocks', d.total_kv_blocks)
 
   // The speculative trio follows the --dp precedent: emitted only when the capability is
   // on (K>0), so an off run reproduces from the record's stored defaults.

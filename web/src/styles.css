@@ -481,6 +481,42 @@ code {
   /* intentionally empty — see the note above on why this must not scroll */
 }
 
+/*
+ * The exception: the KV cache group adds four columns, which push the table past the page's
+ * content column. When it is shown the wrapper becomes a scroll frame — a bounded box that
+ * scrolls in both axes — so the wide table stays within the margin and both the header and the
+ * leading columns freeze against the frame:
+ *   - overflow: auto both scrolls the extra width horizontally and, with the max-height below,
+ *     scrolls the rows vertically inside the frame;
+ *   - max-height turns the frame into a stable viewport, so the sticky header (thead) freezes at
+ *     its top and the sticky first column(s) (.lft / .lcol) freeze at its left, instead of
+ *     riding the page — an auto-height overflow box scrolls away with the page and takes the
+ *     sticky header with it, which is why the header did not stay put before.
+ * This is confined to the wide KV view; the default table keeps riding the page with its header
+ * frozen against the viewport (see the empty .tscroll note above).
+ */
+.tscroll-x {
+  overflow: auto;
+  /* Roughly a viewport tall, so a long table scrolls inside the frame under a frozen header
+   * rather than growing without bound. dvh tracks the mobile URL bar; vh is the fallback. */
+  max-height: 78vh;
+  max-height: 78dvh;
+}
+
+/*
+ * Let the table take its natural width rather than being squeezed into the frame. The default
+ * `width: 100%` makes auto table-layout shrink the flexible Deployment column toward its minimum
+ * to fit every column into the window — the tiny, hard-to-read first column this avoids. With
+ * `max-content` each column keeps a comfortable width (Deployment stays at its readable
+ * max-width, numeric headers wrap as before) and the overflow simply scrolls; `min-width: 100%`
+ * still fills the frame on the off chance the content is narrower than it. Readability over real
+ * estate: reach the extra columns by scrolling, never by crushing the ones already there.
+ */
+.tscroll-x table.readout {
+  width: max-content;
+  min-width: 100%;
+}
+
 table.readout {
   width: 100%;
   border-collapse: collapse;
@@ -491,6 +527,24 @@ table.readout {
    * exactly that offset (both header rows stay visible when the body scrolls). Kept in
    * step with `.grp th`'s fixed line-height plus its 8px/4px vertical padding. */
   --grp-h: 28px;
+  /* The Load column's fixed width, and the left offset the frozen Deployment column stacks at.
+   * Freezing two columns needs a known width for the first, so a load sweep pins the Load
+   * column at this width and the Deployment column at exactly its right edge. Without a Load
+   * column --dep-left is 0 and Deployment pins to the edge as before; .hasload sets it to the
+   * Load width. Wide enough for the longest header, "Concurrency" (one unbreakable word) plus
+   * its sort caret — a narrower value would clip it; a rate sweep ("Arrival rate", which wraps)
+   * just carries a little more room. */
+  --load-w: 120px;
+  --dep-left: 0px;
+  /* The Deployment column's fixed width. Fixed (not the old 190–300 flexible range) so the GPUs
+   * column, which freezes to its right as part of the candidate identity block, can stack at a
+   * known offset (--dep-left + --dep-w). Comfortable for the model / hardware / spec lines, which
+   * wrap within it. */
+  --dep-w: 248px;
+}
+
+table.readout.hasload {
+  --dep-left: var(--load-w);
 }
 
 table.readout th,
@@ -569,13 +623,17 @@ table.readout thead th {
  */
 table.readout thead tr:not(.grp) th.lft {
   position: sticky;
-  left: 0;
+  left: var(--dep-left);
   top: var(--grp-h);
 }
 
-table.readout thead tr.grp th:first-child {
-  left: 0;
-}
+/*
+ * The grouped-header cells (CANDIDATE, LATENCY, …) are NOT pinned horizontally: a group cell
+ * spans several columns, so pinning the first one to left:0 made it overhang the scrolling
+ * columns and paint over them ("the header taking over"). They stay sticky to the top only, so
+ * on horizontal scroll they slide with the columns beneath them, while the column-label row and
+ * body freeze the leading columns. Vertical freezing (both header rows) is unaffected.
+ */
 
 /* ---------- Metric-group separators ----------
  * A hairline vertical rule at each group boundary (candidate | latency | throughput |
@@ -669,13 +727,14 @@ th[aria-sort] .sortbtn .car {
 th.lft,
 td.lft {
   position: sticky;
-  left: 0;
+  left: var(--dep-left);
   z-index: 1;
   background: var(--panel);
   border-right: 1px solid var(--line-strong);
   white-space: normal;
-  min-width: 190px;
-  max-width: 300px;
+  width: var(--dep-w);
+  min-width: var(--dep-w);
+  max-width: var(--dep-w);
 }
 
 thead tr.grp th.lft {
@@ -686,13 +745,76 @@ thead tr:not(.grp) th.lft {
   z-index: 3;
 }
 
-/* A load sweep adds a Load column before the deployment. Two stacked sticky columns would
- * fight for the left edge, so the frozen behaviour is dropped for that table; the Load column
- * is narrow enough that the row reads without it. */
-table.readout.noloadfreeze th.lft,
-table.readout.noloadfreeze td.lft {
-  position: static;
-  min-width: 0;
+/*
+ * The GPUs column is the third part of the frozen candidate-identity block: it stacks to the
+ * right of Deployment (at --dep-left + the fixed Deployment width) so the whole candidate — Load,
+ * Deployment, and its GPU count — stays in view while the metrics scroll. Freezing it is also
+ * what lets the grouped "CANDIDATE" cell, which spans Deployment+GPUs, freeze over exactly the
+ * frozen columns without overhanging the scrolling ones.
+ */
+.gpcol {
+  position: sticky;
+  left: calc(var(--dep-left) + var(--dep-w));
+  z-index: 1;
+  background: var(--panel);
+}
+
+thead th.gpcol {
+  z-index: 3;
+}
+
+/*
+ * The grouped (top-level) header cells over the frozen columns freeze horizontally too, so the
+ * group labels stay put above their columns as the reader scrolls right. Only the leading cells
+ * are pinned — the blank cell above the Load column, and the candidate cell above Deployment+GPUs
+ * (pinned at the Deployment offset, spanning exactly the frozen Deployment+GPUs so it never
+ * overhangs the scrolling groups). The latency/throughput/health/kv group cells are left to
+ * scroll with their columns.
+ */
+table.readout thead tr.grp th.gcol-candidate {
+  position: sticky;
+  left: var(--dep-left);
+  z-index: 3;
+}
+
+table.readout.hasload thead tr.grp th.gcol-lead {
+  position: sticky;
+  left: 0;
+  z-index: 3;
+}
+
+/*
+ * A load sweep adds a Load column before the deployment. Both freeze on horizontal scroll,
+ * stacked at the left edge: the Load column at 0 and the Deployment column at the Load column's
+ * width (--dep-left resolves to --load-w under .hasload, set on table.readout above). The Load
+ * column is pinned to a fixed --load-w so that offset is exact. A gray separator sits between
+ * the two frozen columns, continuing down every row the group bar the grouped-header already
+ * draws between the Load and candidate groups.
+ */
+.lcol {
+  width: var(--load-w);
+  min-width: var(--load-w);
+  max-width: var(--load-w);
+}
+
+table.readout.hasload .lcol {
+  position: sticky;
+  left: 0;
+  z-index: 1;
+  background: var(--panel);
+}
+
+/* The Load header cell sits above the scrolling metric headers, so it needs their z-index + 1
+ * to stay on top as they slide under it — matching the Deployment header's z-index:3. */
+table.readout.hasload thead th.lcol {
+  z-index: 3;
+}
+
+/* The gray bar between the frozen Load and Deployment columns, on the Deployment column across
+ * the header label and every body row, so it runs unbroken like the other group separators. */
+table.readout.hasload th.lft,
+table.readout.hasload td.lft {
+  border-left: 1px solid var(--line);
 }
 
 /* The offered-load column: a narrow, right-aligned numeric column leading each row. It reads as

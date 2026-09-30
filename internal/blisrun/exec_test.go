@@ -97,6 +97,48 @@ func TestSplitMetricsKeepsCoreAndStripsRequests(t *testing.T) {
 	}
 }
 
+// The two KV JSON fields are optional typed metrics, not required core: BLIS emits
+// cache_hit_rate for every run going forward but omitempty guards older records, and
+// kv_allocation_failures is omitted entirely when zero. SplitMetrics must decode them
+// onto Metrics when present and leave the zero value (nil pointer, 0 count) when absent,
+// never rejecting a run that omits them.
+func TestSplitMetricsDecodesOptionalKVFields(t *testing.T) {
+	withFailures := strings.Replace(blisOutput,
+		`"cache_hit_rate": 0.42,`,
+		`"cache_hit_rate": 0.42, "kv_allocation_failures": 7,`, 1)
+	core, _, _, err := SplitMetrics([]byte(withFailures))
+	if err != nil {
+		t.Fatalf("SplitMetrics: %v", err)
+	}
+	if core.CacheHitRate == nil {
+		t.Fatal("cache_hit_rate present in the file but nil on Metrics")
+	}
+	if *core.CacheHitRate != 0.42 {
+		t.Errorf("cache_hit_rate = %v, want 0.42", *core.CacheHitRate)
+	}
+	if core.KVAllocationFailures != 7 {
+		t.Errorf("kv_allocation_failures = %d, want 7", core.KVAllocationFailures)
+	}
+}
+
+// A run from an older BLIS (or any run whose prefix cache never engaged) omits
+// cache_hit_rate, and every healthy run omits kv_allocation_failures. Neither absence
+// is an error: nil distinguishes "not reported" from "reported 0.0", and a zero count
+// is the healthy default.
+func TestSplitMetricsAcceptsAbsentKVFields(t *testing.T) {
+	withoutCacheHit := strings.Replace(blisOutput, `"cache_hit_rate": 0.42,`, "", 1)
+	core, _, _, err := SplitMetrics([]byte(withoutCacheHit))
+	if err != nil {
+		t.Fatalf("a run without cache_hit_rate must still be accepted: %v", err)
+	}
+	if core.CacheHitRate != nil {
+		t.Errorf("cache_hit_rate absent but non-nil: %v", *core.CacheHitRate)
+	}
+	if core.KVAllocationFailures != 0 {
+		t.Errorf("kv_allocation_failures absent but %d, want 0", core.KVAllocationFailures)
+	}
+}
+
 func TestSplitMetricsRejectsAMissingCoreField(t *testing.T) {
 	stripped := strings.Replace(blisOutput, `"ttft_p99_ms": 31.4,`, "", 1)
 	_, _, _, err := SplitMetrics([]byte(stripped))
@@ -209,6 +251,100 @@ func TestRunFinalizesWorkloadSpecSHA(t *testing.T) {
 	// The regression: without the finalized sha the schema rejects the record.
 	if err := schema.ValidateRecord(rec); err != nil {
 		t.Errorf("runner produced a record the schema rejects: %v", err)
+	}
+}
+
+// Run must scrape the KV thrashing rate from BLIS's stdout — the one KV signal that is
+// neither in the metrics file nor derivable from it — and carry it on the record. This
+// is hermetic: a stub stands in for blis, writing the fixture metrics to the metrics
+// path (Argv puts it last) and printing the human KV Cache Metrics section to stdout,
+// exactly as printKVCacheMetrics does upstream.
+func TestRunScrapesKVThrashingFromStdout(t *testing.T) {
+	dir := t.TempDir()
+	stub := filepath.Join(dir, "blis-stub.sh")
+	script := "#!/bin/sh\n" +
+		"for a in \"$@\"; do last=\"$a\"; done\n" +
+		"cat > \"$last\" <<'JSON'\n" + blisOutput + "\nJSON\n" +
+		"echo '=== KV Cache Metrics ==='\n" +
+		"echo 'Preemption Rate: 0.0120'\n" +
+		"echo 'Cache Hit Rate: 0.4200'\n" +
+		"echo 'KV Thrashing Rate: 0.0345'\n"
+	if err := os.WriteFile(stub, []byte(script), 0o755); err != nil {
+		t.Fatalf("write stub: %v", err)
+	}
+	r := &Runner{Binary: stub, Cwd: dir, commit: "abcdef1", binarySHA256: "0123456789abcdef"}
+
+	g := schema.Group{
+		Seed: 42, RequestTimeoutS: 300,
+		Workload: schema.Workload{
+			Type: "distribution", ArrivalProcess: "constant", NumRequests: 500,
+			Load:         schema.Load{Kind: "rate", Value: 6.0},
+			PromptTokens: 512, PromptTokensStdev: 128,
+			OutputTokens: 128, OutputTokensStdev: 32,
+		},
+	}
+	d := schema.Deployment{
+		Model:    "qwen/qwen3-14b",
+		Hardware: "L40S", TP: 1, DP: 1, NumInstances: 1,
+		MaxModelLen: 40960, BlockSizeInTokens: 16, MaxNumSeqs: 256,
+		MaxNumBatchedTokens: 8192, LongPrefillTokenThreshold: 0,
+		Scheduler: "fcfs", PreemptionPolicy: "fcfs",
+		RoutingPolicy: "round-robin", AdmissionPolicy: "always-admit",
+		KVCacheDtype: "auto", LatencyModel: "trained-physics",
+		GPUMemoryUtilization: 0.9,
+		ExtraFlags:           map[string]string{},
+	}
+
+	rec, err := r.Run(g, RunSpec{RunID: "kv-run", Deployment: d}, filepath.Join(dir, "m.json"))
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if rec.KVThrashingRate == nil {
+		t.Fatal("KV Thrashing Rate printed to stdout but the record's kv_thrashing_rate is nil")
+	}
+	if *rec.KVThrashingRate != 0.0345 {
+		t.Errorf("kv_thrashing_rate = %v, want 0.0345", *rec.KVThrashingRate)
+	}
+	if err := schema.ValidateRecord(rec); err != nil {
+		t.Errorf("runner produced a record the schema rejects: %v", err)
+	}
+}
+
+// When BLIS prints no KV Cache Metrics section (all three rates zero), the scraped rate
+// is nil and the record simply omits it — never a spurious zero. The workload-spec stub
+// already prints nothing to stdout, so this pins the absence path through Run.
+func TestRunOmitsKVThrashingWhenStdoutHasNoSection(t *testing.T) {
+	dir := t.TempDir()
+	stub := filepath.Join(dir, "blis-stub.sh")
+	script := "#!/bin/sh\nfor a in \"$@\"; do last=\"$a\"; done\ncat > \"$last\" <<'JSON'\n" + blisOutput + "\nJSON\n"
+	if err := os.WriteFile(stub, []byte(script), 0o755); err != nil {
+		t.Fatalf("write stub: %v", err)
+	}
+	r := &Runner{Binary: stub, Cwd: dir, commit: "abcdef1", binarySHA256: "0123456789abcdef"}
+	g := schema.Group{
+		Seed: 42, RequestTimeoutS: 300,
+		Workload: schema.Workload{
+			Type: "distribution", ArrivalProcess: "constant", NumRequests: 500,
+			Load:         schema.Load{Kind: "rate", Value: 6.0},
+			PromptTokens: 512, PromptTokensStdev: 128,
+			OutputTokens: 128, OutputTokensStdev: 32,
+		},
+	}
+	d := schema.Deployment{
+		Model: "qwen/qwen3-14b", Hardware: "L40S", TP: 1, DP: 1, NumInstances: 1,
+		MaxModelLen: 40960, BlockSizeInTokens: 16, MaxNumSeqs: 256,
+		MaxNumBatchedTokens: 8192, LongPrefillTokenThreshold: 0,
+		Scheduler: "fcfs", PreemptionPolicy: "fcfs",
+		RoutingPolicy: "round-robin", AdmissionPolicy: "always-admit",
+		KVCacheDtype: "auto", LatencyModel: "trained-physics",
+		GPUMemoryUtilization: 0.9, ExtraFlags: map[string]string{},
+	}
+	rec, err := r.Run(g, RunSpec{RunID: "kv-run-none", Deployment: d}, filepath.Join(dir, "m.json"))
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if rec.KVThrashingRate != nil {
+		t.Errorf("no KV section but kv_thrashing_rate = %v, want nil", *rec.KVThrashingRate)
 	}
 }
 

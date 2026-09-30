@@ -2,7 +2,7 @@ import type { RunGroup, RunRecord } from './load'
 import { offeredLoad, runKey } from './load'
 import { numeric } from './format'
 
-export type ColumnGroup = 'work' | 'candidate' | 'latency' | 'throughput' | 'health'
+export type ColumnGroup = 'work' | 'candidate' | 'latency' | 'throughput' | 'health' | 'kv'
 
 /** One column of the readout. */
 export interface Column {
@@ -24,6 +24,12 @@ export interface Column {
   help?: string
   /** Fixed decimal places. Undefined means format as a duration. */
   digits?: number
+  /**
+   * Render the value as a percentage: `value` stays the raw fraction (so sorting and the
+   * would-be-rank read the underlying 0..1 number), and the cell shows it as NN.N%. A null
+   * value still renders "—". Used by the KV cache-hit column.
+   */
+  percent?: boolean
   /**
    * Set when the leaderboard computed this rather than reading it from BLIS.
    * `formula` names the calculation in general terms; `note` explains why BLIS
@@ -106,10 +112,97 @@ export const COLUMNS: Column[] = [
     value: (r) => r.metrics.preemption_count,
     digits: 0,
   },
+  // The KV cache group. Hidden by default and appended to the right when the reader turns
+  // it on (ReadoutTable's showKV), so it never crowds the default performance readout. Each
+  // column carries the same "no automatic best" contract as the rest — higherIsBetter only
+  // orients the disqualified band's would-be-rank arrow (E5).
+  {
+    key: 'cache_hit_rate',
+    label: 'Cache hit',
+    group: 'kv',
+    // The raw fraction, so sorting reads the underlying number; the cell renders it as a
+    // percentage. null when an older BLIS did not report it — distinct from a reported 0.
+    value: (r) => r.metrics.cache_hit_rate ?? null,
+    higherIsBetter: true,
+    percent: true,
+    help:
+      'aggregate KV prefix-cache hit rate, from BLIS. Especially meaningful for trace/replay ' +
+      'workloads with shared session prefixes, where a warm prefix cache is the point.',
+  },
+  {
+    key: 'preemption_rate',
+    label: 'Preempt rate',
+    group: 'kv',
+    value: (r) => preemptionRate(r),
+    digits: 4,
+    derivedFrom: {
+      formula: 'preemption_count ÷ completed_requests',
+      note:
+        'BLIS prints this rate to stdout but not to the metrics JSON; the leaderboard ' +
+        'recomputes it from the two counts it does report',
+    },
+  },
+  {
+    key: 'kv_allocation_failures',
+    label: 'KV alloc fails',
+    group: 'kv',
+    // Absent means zero (BLIS omits it only when zero), so an absent value reads as 0.
+    value: (r) => r.metrics.kv_allocation_failures ?? 0,
+    digits: 0,
+  },
+  {
+    key: 'kv_thrashing_rate',
+    label: 'KV thrash',
+    group: 'kv',
+    value: (r) => r.kv_thrashing_rate ?? null,
+    digits: 4,
+    help:
+      "read from BLIS's stdout KV Cache Metrics section, not the metrics JSON (it is not in " +
+      'that file). Not reported for a run with no KV activity, shown as "—".',
+  },
 ]
 
-/** The numeric columns, i.e. everything the deployment cell does not render itself. */
+/** The numeric columns, i.e. everything the deployment cell does not render itself. The
+ *  KV columns are included so sortRecords and wouldBeRank resolve them uniformly; only
+ *  their rendering is gated (see visibleColumns). */
 export const NUMERIC_COLUMNS = COLUMNS.filter((c) => c.key !== 'deployment')
+
+/**
+ * The columns the table renders, gated by the KV toggle. Off (the default) drops the `kv`
+ * group so the readout is exactly the performance table; on returns every column, the KV
+ * ones appended to the right. Sorting still resolves against the full COLUMNS/NUMERIC_COLUMNS,
+ * so this governs rendering only, never which keys are sortable.
+ */
+export function visibleColumns(showKV: boolean): Column[] {
+  return showKV ? COLUMNS : COLUMNS.filter((c) => c.group !== 'kv')
+}
+
+/**
+ * The grouped top header row's colspans, built from a run of columns' `group`. Takes the
+ * visible columns (not the module-level COLUMNS) so the KV span appears only when KV is on.
+ * With a Load column present a blank leading cell spans it (its own label sits in the column
+ * header below).
+ */
+export function groupedHeaders(cols: Column[], showLoad: boolean): { group: ColumnGroup | ''; span: number }[] {
+  const headers: { group: ColumnGroup | ''; span: number }[] = []
+  for (const col of cols) {
+    const last = headers[headers.length - 1]
+    if (last && last.group === col.group) last.span += 1
+    else headers.push({ group: col.group, span: 1 })
+  }
+  return showLoad ? [{ group: '', span: 1 }, ...headers] : headers
+}
+
+/**
+ * The keys of the columns that begin a new group (latency's first column, throughput's,
+ * health's, and — when visible — kv's): the boundaries a vertical rule sits to the left of.
+ * The candidate group is first, so it never carries one; the table's own edge is its left
+ * boundary. Derived from the visible columns so the separators track what is shown, not a
+ * hand-kept list.
+ */
+export function groupStartKeys(cols: Column[]): Set<string> {
+  return new Set(cols.filter((col, i) => i > 0 && col.group !== cols[i - 1]!.group).map((c) => c.key))
+}
 
 /**
  * The offered-load column of a sweep: the rate or concurrency a row was run at. It is not part
@@ -436,6 +529,18 @@ export function servedFraction(r: RunRecord): {
 /** tp × num_instances. Derived: BLIS does not report a GPU count. */
 export function gpuCount(r: RunRecord): number {
   return r.deployment.tp * r.deployment.num_instances
+}
+
+/**
+ * preemption_count ÷ completed_requests. Derived, not scraped: BLIS prints this rate to
+ * stdout but not to the metrics JSON, and the leaderboard already stores both counts, so
+ * recomputing it is exact and does not depend on the stdout section being present. null
+ * when no request completed, so it never divides by zero (renders "—").
+ */
+export function preemptionRate(r: RunRecord): number | null {
+  const completed = r.metrics.completed_requests
+  if (completed === 0) return null
+  return r.metrics.preemption_count / completed
 }
 
 /**
