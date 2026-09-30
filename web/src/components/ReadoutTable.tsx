@@ -3,17 +3,19 @@ import type { RunGroup, RunRecord, WorkloadGroup } from '../load'
 import { offeredLoad, runKey } from '../load'
 import { rowId } from '../liverun'
 import type { RevealTarget } from '../liverun'
-import { formatCount, formatMs, formatNumber } from '../format'
+import { formatCount, formatMs, formatNumber, formatPercent } from '../format'
 import {
-  COLUMNS,
   LOAD_COLUMN,
-  NUMERIC_COLUMNS,
   deploymentSpec,
   distinctHardware,
   distinctModels,
   gpuCount,
+  groupStartKeys,
+  groupedHeaders,
+  preemptionRate,
   servedFraction,
   varyingDeploymentFields,
+  visibleColumns,
 } from '../model'
 import type { Column, SortSpec } from '../model'
 import type { SloTargets } from '../slo'
@@ -127,6 +129,17 @@ export function ReadoutTable({
   // The run_id of the row currently pulsing from a reveal, or null. Local to the table so
   // the highlight lives and dies with the row, not with App's reveal request.
   const [revealedKey, setRevealedKey] = useState<string | null>(null)
+  // Whether the KV cache column group is shown. Hidden on load so it never crowds the
+  // default performance readout; a TableTools toggle turns it on and the columns append to
+  // the right (§5.2). Local to the table, like the reproduce toggles.
+  const [showKV, setShowKV] = useState(false)
+  const visibleCols = useMemo(() => visibleColumns(showKV), [showKV])
+  const numericCols = useMemo(() => visibleCols.filter((c) => c.key !== 'deployment'), [visibleCols])
+  // The group-separator boundaries, tracking the visible set so the rule appears left of the
+  // KV group only when KV is shown. A shared helper the header and every body cell read, so
+  // separators cannot drift between them.
+  const starts = useMemo(() => groupStartKeys(visibleCols), [visibleCols])
+  const sep = (key: string): string | undefined => (starts.has(key) ? 'gsep' : undefined)
 
   // The rows as displayed, from the single shared source, so the Compare panel opens its columns
   // in the very order the table renders — the same filter, SLO split, and sort.
@@ -187,7 +200,17 @@ export function ReadoutTable({
   // Sorting is owned by the section (so Compare can mirror it); a direct caller/test that passes
   // no handler simply cannot sort, which is fine for the static render tests.
   const toggle = onSort ?? (() => {})
-  const headerGroups = groupedHeaders(showLoad)
+  const headerGroups = groupedHeaders(visibleCols, showLoad)
+  // Turning the KV group off drops any sort tiers keyed on a KV column, so a hidden column
+  // never silently drives the sort — and, since the sort is owned by the section and also
+  // orders the Compare panel, the two can never disagree. A KV tier can only exist while KV
+  // is shown (its header is the only way to add one), so this fires exactly when needed.
+  const toggleKV = () => {
+    if (showKV) {
+      for (const s of sort) if (KV_COLUMN_KEYS.has(s.key)) onRemoveSort?.(s.key)
+    }
+    setShowKV((on) => !on)
+  }
 
   return (
     <>
@@ -203,13 +226,22 @@ export function ReadoutTable({
             onRemoveSort={onRemoveSort ?? (() => {})}
             repro={repro}
             showControls={true}
+            showKV={showKV}
+            onToggleKV={toggleKV}
           />
 
-          {/* With a Load column present the frozen first column is dropped (noloadfreeze):
-              two stacked sticky columns would fight, and the Load column is narrow enough that
-              the whole row reads without freezing. */}
-          <div className="tscroll">
-            <table className={showLoad ? 'readout noloadfreeze' : 'readout'}>
+          {/* With a Load column present the table freezes both the Load and Deployment columns
+              on horizontal scroll (hasload): they stack at the left edge, so the reader keeps the
+              load level and the candidate in view while the metrics scroll. A gray separator sits
+              between them (see .hasload .lft in styles.css).
+
+              tscroll-x is added only when the KV group is shown: those four extra columns push
+              the table past the page's content column, so it gets its own horizontal scrollbar
+              and stays within the margin (the frozen columns pin within that frame). The default
+              table is not a scroll container, so its header keeps freezing against the viewport —
+              see the .tscroll note in styles.css. */}
+          <div className={showKV ? 'tscroll tscroll-x' : 'tscroll'}>
+            <table className={showLoad ? 'readout hasload' : 'readout'}>
               <thead>
                 <tr className="grp">
                   {headerGroups.map((h, i) => (
@@ -217,16 +249,19 @@ export function ReadoutTable({
                       key={`${h.group}-${i}`}
                       colSpan={h.span}
                       scope="colgroup"
-                      className={i > 0 ? 'gsep' : undefined}
+                      // gcol-<group> lets the leading group cells (the blank Load cell and the
+                      // candidate cell, which spans Deployment+GPUs) freeze horizontally over the
+                      // frozen columns; the blank Load cell's group is '' so it is tagged 'lead'.
+                      className={[i > 0 ? 'gsep' : '', `gcol-${h.group || 'lead'}`].filter(Boolean).join(' ')}
                     >
                       {h.group}
                     </th>
                   ))}
                 </tr>
                 <tr>
-                  {showLoad && <HeaderCell col={loadCol} sort={sort} onSort={toggle} />}
-                  {COLUMNS.map((col) => (
-                    <HeaderCell key={col.key} col={col} sort={sort} onSort={toggle} />
+                  {showLoad && <HeaderCell col={loadCol} sort={sort} onSort={toggle} sep={sep} />}
+                  {visibleCols.map((col) => (
+                    <HeaderCell key={col.key} col={col} sort={sort} onSort={toggle} sep={sep} />
                   ))}
                 </tr>
               </thead>
@@ -236,6 +271,9 @@ export function ReadoutTable({
                     key={runKey(record)}
                     record={record}
                     varying={varying}
+                    numericCols={numericCols}
+                    sep={sep}
+                    colCount={visibleCols.length}
                     showModel={showModel}
                     showHardware={showHardware}
                     showLoad={showLoad}
@@ -351,72 +389,73 @@ function ReproControls({
 }
 
 /**
- * The bar above the table: the removable sort chips on the left, the expand/collapse-all
- * control on the right. The expand/collapse-all control is always shown; each button
- * disables itself when it would be a no-op, so the pair also reads as the resting state.
+ * The bar above the table: the removable sort chips on the left, then the KV toggle and the
+ * expand/collapse-all control on the right. Both right-side controls are always shown; each
+ * expand/collapse button disables itself when it would be a no-op, so the pair also reads as
+ * the resting state.
  */
 function TableTools({
   sort,
   onRemoveSort,
   repro,
   showControls,
+  showKV,
+  onToggleKV,
 }: {
   sort: SortSpec[]
   onRemoveSort: (key: string) => void
   repro: ReturnType<typeof useReproToggles>
   showControls: boolean
+  /** Whether the KV cache column group is currently shown. */
+  showKV: boolean
+  /** Toggle the KV cache column group. */
+  onToggleKV: () => void
 }) {
   if (sort.length === 0 && !showControls) return null
   return (
     <div className="tabletools">
       <SortNote sort={sort} onRemove={onRemoveSort} />
       {showControls && (
-        <ReproControls
-          allOpen={repro.allOpen}
-          noneOpen={repro.noneOpen}
-          onExpandAll={repro.expandAll}
-          onCollapseAll={repro.collapseAll}
-        />
+        <div className="rowtools">
+          <button
+            type="button"
+            className="rowtool"
+            onClick={onToggleKV}
+            aria-pressed={showKV}
+            aria-label={`${showKV ? 'Hide' : 'Show'} KV cache metrics`}
+          >
+            <span className="car" aria-hidden="true">
+              {showKV ? '▾' : '▸'}
+            </span>
+            {showKV ? 'Hide KV cache metrics' : 'Show KV cache metrics'}
+          </button>
+          <ReproControls
+            allOpen={repro.allOpen}
+            noneOpen={repro.noneOpen}
+            onExpandAll={repro.expandAll}
+            onCollapseAll={repro.collapseAll}
+          />
+        </div>
       )}
     </div>
   )
 }
 
-/**
- * The keys of the columns that begin a new group (latency's first column, throughput's
- * first, health's first) — the boundaries a vertical rule sits to the left of. The
- * candidate group is first, so it never carries one; the table's own edge is its left
- * boundary. Derived from COLUMNS so the separators track the grouping, not a hand-kept list.
- */
-const GROUP_START_KEYS = new Set(
-  COLUMNS.filter((col, i) => i > 0 && col.group !== COLUMNS[i - 1]!.group).map((c) => c.key),
-)
-
-/** The separator class for a column, or undefined when it does not start a group. */
-function sepClass(key: string): string | undefined {
-  return GROUP_START_KEYS.has(key) ? 'gsep' : undefined
-}
-
-/** The grouped top header row's colspans, built from COLUMNS' `group` runs. With a Load column
- *  present, a blank leading group cell spans it (its own label sits in the column header below). */
-function groupedHeaders(showLoad: boolean): { group: string; span: number }[] {
-  const headerGroups: { group: string; span: number }[] = []
-  for (const col of COLUMNS) {
-    const last = headerGroups[headerGroups.length - 1]
-    if (last && last.group === col.group) last.span += 1
-    else headerGroups.push({ group: col.group, span: 1 })
-  }
-  return showLoad ? [{ group: '', span: 1 }, ...headerGroups] : headerGroups
-}
+/** The KV column keys, so the KV toggle can drop any sort tier keyed on one when it hides
+ *  the group (see toggleKV). Derived from the columns, not hand-kept. */
+const KV_COLUMN_KEYS = new Set(visibleColumns(true).filter((c) => c.group === 'kv').map((c) => c.key))
 
 function HeaderCell({
   col,
   sort,
   onSort,
+  sep,
 }: {
   col: Column
   sort: SortSpec[]
   onSort: (key: string) => void
+  /** The group-separator class for a column key, tracking the visible column set. */
+  sep: (key: string) => string | undefined
 }) {
   const sortable = col.key !== 'deployment'
   const idx = sort.findIndex((s) => s.key === col.key)
@@ -425,7 +464,18 @@ function HeaderCell({
   // The rank only reads as a rank when more than one column is in play; a lone sort
   // needs no "1" beside its caret.
   const rank = active && sort.length > 1 ? idx + 1 : null
-  const className = col.key === 'deployment' ? 'lft' : sepClass(col.key)
+  // The frozen "candidate identity" block stacks at the left edge on horizontal scroll: the
+  // Load column (lcol, left:0), the Deployment column (lft), and the GPUs column (gpcol), so the
+  // reader keeps the candidate in view while the metrics scroll. Every other column takes its
+  // group-separator class.
+  const className =
+    col.key === 'deployment'
+      ? 'lft'
+      : col.key === 'load'
+        ? 'lcol'
+        : col.key === 'gpus'
+          ? 'gpcol'
+          : sep(col.key)
   const label = active
     ? `${col.label}, sorted ${dir === 1 ? 'ascending' : 'descending'}${
         rank != null ? `, sort priority ${rank}` : ''
@@ -473,6 +523,9 @@ function HeaderCell({
 function DataRow({
   record,
   varying,
+  numericCols,
+  sep,
+  colCount,
   showModel,
   showHardware,
   showLoad,
@@ -486,6 +539,12 @@ function DataRow({
 }: {
   record: RunRecord
   varying: string[]
+  /** The numeric columns to render, in order — the visible set (KV columns only when shown). */
+  numericCols: Column[]
+  /** The group-separator class for a column key, tracking the visible column set. */
+  sep: (key: string) => string | undefined
+  /** The visible column count, for the reproduce row's colSpan. */
+  colCount: number
   showModel: boolean
   showHardware: boolean
   /** Whether the Load column is present (the profile spans more than one offered load). */
@@ -538,13 +597,13 @@ function DataRow({
           reproPanelId={panelId}
           onDelete={onDelete}
         />
-        {NUMERIC_COLUMNS.map((col) => (
-          <ValueCell key={col.key} col={col} record={record} />
+        {numericCols.map((col) => (
+          <ValueCell key={col.key} col={col} record={record} sep={sep} />
         ))}
       </tr>
       {open && (
         <tr className="reprorow">
-          <td colSpan={COLUMNS.length + (showLoad ? 1 : 0)} id={panelId}>
+          <td colSpan={colCount + (showLoad ? 1 : 0)} id={panelId}>
             <ReproPanel record={record} />
           </td>
         </tr>
@@ -655,18 +714,27 @@ function DeploymentCell({
 function LoadCell({ record }: { record: RunRecord }) {
   const load = offeredLoad(record.group)
   return (
-    <td className="loadcell">
+    <td className="loadcell lcol">
       <span className="val">{formatNumber(load.value, load.kind === 'rate' ? 1 : 0)}</span>
     </td>
   )
 }
 
-function ValueCell({ col, record }: { col: Column; record: RunRecord }) {
+function ValueCell({
+  col,
+  record,
+  sep,
+}: {
+  col: Column
+  record: RunRecord
+  /** The group-separator class for a column key, tracking the visible column set. */
+  sep: (key: string) => string | undefined
+}) {
   if (col.key === 'gpus') {
     const gpus = gpuCount(record)
     const derived = col.derivedFrom! // gpus always carries a formula, see COLUMNS
     return (
-      <td>
+      <td className="gpcol">
         <Derived
           formula={`${derived.formula} = ${record.deployment.tp} × ${record.deployment.num_instances} = ${gpus}. ${derived.note}.`}
         >
@@ -679,7 +747,7 @@ function ValueCell({ col, record }: { col: Column; record: RunRecord }) {
     const s = servedFraction(record)
     const derived = col.derivedFrom! // served always carries a formula, see COLUMNS
     return (
-      <td className={sepClass(col.key)}>
+      <td className={sep(col.key)}>
         <Derived
           formula={`${derived.formula} = ${s.completed} ÷ ${s.injected} = ${s.percent}%. ${derived.note}.`}
         >
@@ -689,12 +757,36 @@ function ValueCell({ col, record }: { col: Column; record: RunRecord }) {
       </td>
     )
   }
+  if (col.key === 'preemption_rate') {
+    // Derived like served/gpus: BLIS prints this rate to stdout but not the JSON, so it is
+    // recomputed from the two counts and marked as derived at the point of display (CLAUDE.md).
+    const rate = preemptionRate(record)
+    const derived = col.derivedFrom! // preemption_rate always carries a formula, see COLUMNS
+    return (
+      <td className={sep(col.key)}>
+        {rate == null ? (
+          // No request completed: the rate is undefined, shown as "—", never a spurious 0.
+          <span className="val">{formatNumber(null, col.digits!)}</span>
+        ) : (
+          <Derived
+            formula={`${derived.formula} = ${record.metrics.preemption_count} ÷ ${record.metrics.completed_requests} = ${formatNumber(rate, col.digits!)}. ${derived.note}.`}
+          >
+            {formatNumber(rate, col.digits!)}
+          </Derived>
+        )}
+      </td>
+    )
+  }
 
   const value = col.value(record)
   return (
-    <td className={sepClass(col.key)}>
+    <td className={sep(col.key)}>
       <span className="val">
-        {col.digits != null ? formatNumber(value, col.digits) : formatMs(value)}
+        {col.percent
+          ? formatPercent(value)
+          : col.digits != null
+            ? formatNumber(value, col.digits)
+            : formatMs(value)}
       </span>
     </td>
   )

@@ -95,6 +95,26 @@ func TestArgvAlwaysCarriesMetricsPath(t *testing.T) {
 	}
 }
 
+// total_kv_blocks 0 means "auto": blis auto-calculates the KV cache from the candidate's
+// hardware when --total-kv-blocks is omitted, which is what makes a hardware-vs-hardware
+// table meaningful. blis also fatally rejects --total-kv-blocks 0, so the flag must never
+// be emitted at the default — only when the reader pins a positive block count.
+func TestArgvOmitsTotalKVBlocksWhenAuto(t *testing.T) {
+	joined := strings.Join(Argv("./blis", group(), deployment(), "/tmp/m.json", "", ""), " ")
+	if strings.Contains(joined, "--total-kv-blocks") {
+		t.Errorf("total_kv_blocks 0 (auto) must not emit --total-kv-blocks: %s", joined)
+	}
+}
+
+func TestArgvEmitsTotalKVBlocksWhenPinned(t *testing.T) {
+	d := deployment()
+	d.TotalKVBlocks = 20000
+	joined := strings.Join(Argv("./blis", group(), d, "/tmp/m.json", "", ""), " ")
+	if !strings.Contains(joined, "--total-kv-blocks 20000") {
+		t.Errorf("a pinned total_kv_blocks must emit --total-kv-blocks: %s", joined)
+	}
+}
+
 func TestArgvConcurrencyModeReplacesRate(t *testing.T) {
 	g := group()
 	g.Workload.Load = schema.Load{Kind: "concurrency", Value: 32}

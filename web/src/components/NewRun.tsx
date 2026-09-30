@@ -275,7 +275,7 @@ export function NewRun({
   // One serving knob as a number field. min is '0' for the fields where 0 is a valid
   // "off"/auto (max-model-len, long-prefill, draft tokens); step is a
   // fraction for the two ratio knobs (gpu-memory-utilization, acceptance rate).
-  const knobNum = (field: keyof FormValues, label: string, min = '1', step = '1') => (
+  const knobNum = (field: keyof FormValues, label: string, min = '1', step = '1', placeholder?: string) => (
     <>
       <label className="nrrow">
         <span className="nrlabel">{label}</span>
@@ -283,6 +283,7 @@ export function NewRun({
           type="number"
           min={min}
           step={step}
+          placeholder={placeholder}
           value={String(values[field])}
           onChange={(e) => set(field, e.target.value as FormValues[typeof field])}
           aria-invalid={issueFor(field) != null}
@@ -602,6 +603,9 @@ export function NewRun({
                 {knobSel('kvCacheDtype', 'KV cache dtype', KV_CACHE_DTYPES)}
                 {knobNum('blockSize', 'KV block size (tokens)')}
                 {knobNum('gpuMemoryUtilization', 'GPU memory utilization', '0', '0.05')}
+                {/* Blank = auto: blis sizes the KV cache from the candidate's hardware. The
+                    placeholder says so, so the default reads as auto rather than empty. */}
+                {knobNum('totalKvBlocks', 'Total KV blocks', '1', '1', 'auto — blis sizes from hardware')}
                 <KvOffloadCard values={values} set={set} issueFor={issueFor} />
               </>,
             )}

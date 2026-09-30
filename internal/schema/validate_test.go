@@ -152,6 +152,85 @@ func TestWorkloadNameIsOptional(t *testing.T) {
 	}
 }
 
+// The KV-cache fields are all optional: cache_hit_rate and kv_allocation_failures on
+// metrics, kv_thrashing_rate at the record top level. A record validates with all three
+// absent (an older BLIS, or a run with no KV activity) and with all three present, so
+// promoting them into the typed schema never rejects a pre-existing record.
+func TestKVFieldsAreOptional(t *testing.T) {
+	raw, err := os.ReadFile(filepath.Join("..", "..", "schema", "testdata", "valid", "complete.json"))
+	if err != nil {
+		t.Fatalf("read: %v", err)
+	}
+	if err := Validate(raw); err != nil {
+		t.Fatalf("record without KV fields rejected: %v", err)
+	}
+
+	var rec map[string]any
+	if err := json.Unmarshal(raw, &rec); err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	rec["kv_thrashing_rate"] = 0.0345
+	metrics := rec["metrics"].(map[string]any)
+	metrics["cache_hit_rate"] = 0.42
+	metrics["kv_allocation_failures"] = 7
+	withKV, err := json.Marshal(rec)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if err := Validate(withKV); err != nil {
+		t.Errorf("record with all KV fields present rejected: %v", err)
+	}
+
+	// cache_hit_rate is a rate in [0,1]: a value above 1 is a bug and must be rejected,
+	// so the promoted field is validated, not merely accepted.
+	metrics["cache_hit_rate"] = 1.5
+	badRate, err := json.Marshal(rec)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if err := Validate(badRate); err == nil {
+		t.Error("cache_hit_rate 1.5 accepted; it must be constrained to [0,1]")
+	}
+}
+
+// total_kv_blocks is optional (auto is its absence), so a record validates without it and
+// with a positive pinned value. An explicit 0 is rejected: 0 means auto, which is expressed
+// by omitting the field (the Go struct is omitempty), and blis fatally rejects
+// --total-kv-blocks 0 — so a stored 0 would be a bug, not a value.
+func TestTotalKVBlocksIsOptionalAndPositive(t *testing.T) {
+	raw, err := os.ReadFile(filepath.Join("..", "..", "schema", "testdata", "valid", "complete.json"))
+	if err != nil {
+		t.Fatalf("read: %v", err)
+	}
+	if err := Validate(raw); err != nil {
+		t.Fatalf("record without total_kv_blocks rejected: %v", err)
+	}
+
+	var rec map[string]any
+	if err := json.Unmarshal(raw, &rec); err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	dep := rec["deployment"].(map[string]any)
+
+	dep["total_kv_blocks"] = 20000
+	pinned, err := json.Marshal(rec)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if err := Validate(pinned); err != nil {
+		t.Errorf("a pinned total_kv_blocks 20000 was rejected: %v", err)
+	}
+
+	dep["total_kv_blocks"] = 0
+	zero, err := json.Marshal(rec)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if err := Validate(zero); err == nil {
+		t.Error("an explicit total_kv_blocks 0 was accepted; auto is absence, and 0 must be rejected")
+	}
+}
+
 func TestRequiredCoreNamesMatchesTheStruct(t *testing.T) {
 	names, err := RequiredCoreNames()
 	if err != nil {

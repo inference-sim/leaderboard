@@ -43,6 +43,13 @@ type Record struct {
 	TraceMeta *TraceMeta `json:"trace_meta,omitempty"`
 
 	Metrics Metrics `json:"metrics"`
+
+	// KVThrashingRate is the KV thrashing rate scraped from BLIS's stdout KV Cache
+	// Metrics section. It lives here, not in Metrics, because Metrics mirrors BLIS's
+	// metrics JSON file and this value is printed only to stdout, not written to that
+	// file. nil means BLIS printed no section (all KV rates zero) and renders as "—".
+	KVThrashingRate *float64 `json:"kv_thrashing_rate,omitempty"`
+
 	// MetricsRaw is everything blis emitted, minus requests[], preserved verbatim.
 	MetricsRaw map[string]any `json:"metrics_raw"`
 	// RequestsSidecar is the path to the per-request file when it was retained.
@@ -324,6 +331,16 @@ type Deployment struct {
 	// given to the KV cache, in (0, 1.0]. Always emitted.
 	GPUMemoryUtilization float64 `json:"gpu_memory_utilization"`
 
+	// TotalKVBlocks is --total-kv-blocks: the KV cache capacity in blocks, per replica.
+	// 0 means "auto": when the flag is omitted blis sizes the KV cache from the
+	// candidate's hardware memory, which is exactly what makes a hardware-vs-hardware
+	// table meaningful, so auto is the default and pinning a value is the exception. It
+	// follows the disaggregation/kv_offload precedent rather than the always-written rule:
+	// omitempty, emitted to the argv only when > 0 (blis fatally rejects
+	// --total-kv-blocks 0), so a candidate that leaves it auto — including every record
+	// predating this field — is canonically unchanged and reads correctly as auto.
+	TotalKVBlocks int64 `json:"total_kv_blocks,omitempty"`
+
 	// KVOffload is the KV-cache CPU offloading config. It follows the Disaggregation
 	// precedent: a pointer, omitempty, set only when offloading is enabled, so a
 	// deployment without it is canonically unchanged and twin-detection against every
@@ -382,10 +399,13 @@ type Warning struct {
 	Detail string `json:"detail"`
 }
 
-// Metrics is exactly the set of sim.MetricsOutput fields declared without
-// omitempty: the 27 fields BLIS always emits. internal/drift asserts this list
-// against upstream source, so the boundary is a property of the struct rather
-// than a taste call.
+// Metrics mirrors sim.MetricsOutput: the 27 fields BLIS always emits (declared
+// without omitempty), which internal/drift asserts against upstream source so the
+// required boundary is a property of the struct rather than a taste call, plus a
+// short tail of optional KV-cache fields BLIS emits with omitempty. The optional
+// fields are deliberately *not* in the schema's required core (drift ignores them
+// on both sides, since they are omitempty upstream too), so a run that omits them —
+// an older BLIS, or kv_allocation_failures when zero — is still accepted.
 type Metrics struct {
 	InstanceID        string `json:"instance_id"`
 	CompletedRequests int    `json:"completed_requests"`
@@ -419,4 +439,18 @@ type Metrics struct {
 	DroppedUnservable    int     `json:"dropped_unservable"`
 	LengthCappedRequests int     `json:"length_capped_requests"`
 	TimedOutRequests     int     `json:"timed_out_requests"`
+
+	// The optional KV-cache tail. Both are omitempty upstream and here, so they are
+	// absent from the required core and from internal/drift's diff. They decode
+	// automatically from the metrics file (SplitMetrics needs no new branch) and also
+	// remain in metrics_raw verbatim, like every core field.
+
+	// CacheHitRate is the aggregate KV prefix-cache hit rate (file key cache_hit_rate).
+	// A pointer so "not reported" (nil, an older BLIS) is distinct from "reported 0.0";
+	// current BLIS always sets it in the file branch, so it is present going forward.
+	CacheHitRate *float64 `json:"cache_hit_rate,omitempty"`
+	// KVAllocationFailures is the count of KV block allocation failures
+	// (kv_allocation_failures). A plain int64 because BLIS omits it only when it is
+	// zero, so absence genuinely means zero — no pointer is needed to disambiguate.
+	KVAllocationFailures int64 `json:"kv_allocation_failures,omitempty"`
 }

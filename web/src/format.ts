@@ -28,6 +28,16 @@ export function formatCount(value: number | null | undefined): string {
 }
 
 /**
+ * Renders a 0..1 fraction as a percentage (0.42 → "42.0%"). A missing value is an em dash,
+ * not "0.0%", so an unreported rate never reads as a real zero. Used by the KV cache-hit
+ * column, whose sortable value stays the raw fraction.
+ */
+export function formatPercent(value: number | null | undefined, digits = 1): string {
+  if (value == null || !Number.isFinite(value)) return EM_DASH
+  return `${formatNumber(value * 100, digits)}%`
+}
+
+/**
  * Renders a number the way Go's strconv.FormatFloat(v, 'f', -1, 64) does for the
  * magnitudes this schema holds: 6 stays "6", 6.5 stays "6.5", and no value picks up
  * an exponent. Shared by the runs.yaml/argv rendering in newrun.ts and the readout's

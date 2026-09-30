@@ -169,7 +169,12 @@ func (r *Runner) Run(g schema.Group, c RunSpec, metricsPath string) (schema.Reco
 	cmd.Dir = r.Cwd
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
-	cmd.Stdout = nil // stdout is a lesser copy of the metrics file; ignore it
+	// Capture stdout: it carries the aggregate metrics JSON plus the human-readable
+	// sections (no per-request rows), so it is small and safe to buffer. The KV thrashing
+	// rate is printed only here, not in the metrics file, so this is the sole source for
+	// it. See parseKVThrashing.
+	var stdout bytes.Buffer
+	cmd.Stdout = &stdout
 
 	started := time.Now()
 	runErr := cmd.Run()
@@ -226,6 +231,7 @@ func (r *Runner) Run(g schema.Group, c RunSpec, metricsPath string) (schema.Reco
 		},
 		Status:          status.Evaluate(core, g),
 		Metrics:         core,
+		KVThrashingRate: parseKVThrashing(stdout.String()),
 		MetricsRaw:      rawMap,
 		RequestsSidecar: sidecar,
 	}
