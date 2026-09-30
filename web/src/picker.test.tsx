@@ -62,6 +62,22 @@ describe('WorkloadPicker', () => {
     expect(html).toContain('>rate<') // the fixture workloads are rate distributions
   })
 
+  it('tags a trace session-pool load as concurrency, not the internal "sessions" kind', () => {
+    const rec = JSON.parse(JSON.stringify(records.find((r) => r.status.complete))) as RunRecord
+    rec.group = JSON.parse(JSON.stringify(rec.group)) as RunRecord['group']
+    rec.group.workload.type = 'trace'
+    rec.group.workload.load = { kind: 'sessions', value: 8 }
+    rec.group_id = 'traceg'
+    rec.run_id = 'tr1'
+    const w = loadWorkloads([rec])
+    const html = renderToStaticMarkup(
+      <WorkloadPicker workloads={w} selected={w[0]!.workloadKey} onSelect={() => {}} />,
+    )
+    expect(html).toContain('tag-load')
+    expect(html).toContain('>concurrency<')
+    expect(html).not.toContain('>sessions<')
+  })
+
   it('omits the load-levels count for a single-load workload', () => {
     const html = renderToStaticMarkup(
       <WorkloadPicker workloads={workloads} selected={workloads[0]!.workloadKey} onSelect={() => {}} />,

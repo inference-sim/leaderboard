@@ -4,6 +4,7 @@ import fixture from '../../prototypes/results.json'
 import { loadWorkloads } from './load'
 import type { RunRecord } from './load'
 import { ReadoutTable } from './components/ReadoutTable'
+import { DqWhy } from './components/DqWhy'
 import { SortNote } from './components/SortNote'
 import { ReproPanel } from './components/ReproPanel'
 import { WorkloadHeader } from './components/SpecHeader'
@@ -64,17 +65,33 @@ function cellsOfRow(rowHtml: string): string[] {
   return rowHtml.match(/<td[^>]*>[\s\S]*?<\/td>/g) ?? []
 }
 
-function tbodyRows(html: string): string[] {
+/** A <tr>'s opening tag alone, for classifying it by id/class. */
+function openTag(tr: string): string {
+  return tr.slice(0, tr.indexOf('>') + 1)
+}
+
+/** Every <tr> in the tbody, in document order: the data rows, the windowed divider, and the
+ *  windowed rows. Reproduce panels are closed under static markup, so nothing else appears. */
+function allTbodyRows(html: string): string[] {
   const tbody = html.match(/<tbody>([\s\S]*)<\/tbody>/)?.[1]
   if (tbody == null) throw new Error('table did not render a <tbody>')
-  // Data rows now carry a run-<group_id>-<run_id> id (the reveal scroll target), so match
-  // <tr with any attributes. Reproduce panels are closed under static markup, so the only
-  // rows here are the data rows.
   return tbody.match(/<tr[^>]*>[\s\S]*?<\/tr>/g) ?? []
 }
 
-function dqBand(html: string): string | undefined {
-  return html.match(/<section[^>]*aria-label="Disqualified runs"[^>]*>[\s\S]*?<\/section>/)?.[0]
+/** The ranked complete rows: data rows (id="run-…") that are not the windowed (.dqline) rows.
+ *  Disqualified runs now render inline beneath the ranked rows, so this excludes them. */
+function tbodyRows(html: string): string[] {
+  return allTbodyRows(html).filter((tr) => /id="run-/.test(openTag(tr)) && !/dqline/.test(openTag(tr)))
+}
+
+/** The disqualified rows, shown inline beneath the ranked rows (muted, flagged .dqline). */
+function dqRows(html: string): string[] {
+  return allTbodyRows(html).filter((tr) => /dqline/.test(openTag(tr)))
+}
+
+/** The divider row that opens the windowed group, or undefined when there are none. */
+function dqDivider(html: string): string | undefined {
+  return allTbodyRows(html).find((tr) => /dqsub/.test(openTag(tr)))
 }
 
 describe('SortNote (the removable active-sort chips above a table)', () => {
@@ -123,11 +140,17 @@ describe('ReadoutTable, single-model workload (mainW: one model, three accelerat
   const rows = tbodyRows(html)
   const tbody = html.match(/<tbody>([\s\S]*)<\/tbody>/)![1]!
 
-  it('renders all 10 complete runs and never the disqualified h100-tp2-len640', () => {
+  it('renders the 10 complete runs, with the disqualified h100-tp2-len640 as a flagged row below them', () => {
     expect(rows).toHaveLength(10)
-    expect(tbody).not.toContain('max_model_len 640')
-    expect(tbody).not.toContain('241/500')
-    expect(tbody.match(/500\/500/g) ?? []).toHaveLength(10)
+    // The complete rows all served the full 500; none is the shed run.
+    expect(rows.join('').match(/500\/500/g) ?? []).toHaveLength(10)
+    for (const row of rows) expect(row).not.toContain('max_model_len 640')
+    // The disqualified run is shown, not hidden: one flagged row beneath the ranked ones.
+    const dq = dqRows(html)
+    expect(dq).toHaveLength(1)
+    expect(dq[0]).toContain('dqflag')
+    expect(dq[0]).toContain('max_model_len 640')
+    expect(dq[0]).toContain('241') // its served subset shows in the Served cell
   })
 
   it('marks no automatic best: there is no ★ anywhere, and Resp/s still renders a number', () => {
@@ -166,8 +189,10 @@ describe('ReadoutTable, single-model workload (mainW: one model, three accelerat
   it('keeps the group separator at the throughput/health boundary, on the Served cells', () => {
     // Served leads the health group now, so the grey bar sits to its left in both the
     // header and every body row — not only the header.
+    // Every body row carries the separator on its Served cell — the 10 complete rows and the
+    // 1 windowed row alike, since the windowed run is a full table row now.
     const servedCells = tbody.match(/<td class="gsep">[\s\S]*?completed_requests ÷ injected_requests/g) ?? []
-    expect(servedCells).toHaveLength(10)
+    expect(servedCells).toHaveLength(11)
     expect(html).toMatch(/<th[^>]*class="gsep"[^>]*>[\s\S]*?Served/)
   })
 
@@ -278,6 +303,55 @@ describe('ReadoutTable, a load sweep (one profile, two offered loads)', () => {
   })
 })
 
+describe('ReadoutTable, a trace session-pool sweep', () => {
+  function traceRec(sessions: number): RunRecord {
+    const r = JSON.parse(
+      JSON.stringify(records.find((x) => x.group_id === MAIN && x.status.complete)!),
+    ) as RunRecord
+    r.group_id = `wk-${sessions}`
+    r.run_id = 'weka'
+    r.workload_name = 'weka-jsonl'
+    r.group.workload = {
+      type: 'trace',
+      arrival_process: 'constant',
+      num_requests: 0,
+      load: { kind: 'sessions', value: sessions },
+      prompt_tokens: 0,
+      prompt_tokens_stdev: 0,
+      output_tokens: 0,
+      output_tokens_stdev: 0,
+      spec_file: null,
+      spec_sha256: null,
+      trace: {
+        sha256: 'weka-abc',
+        session_mode: 'closed-loop',
+        concurrent_sessions: sessions,
+        total_sessions: 183,
+        shuffle_corpus: true,
+        think_time_ms: 30,
+        think_time_dist: '',
+        source_format: 'weka',
+        records: 26648,
+        sessions: 183,
+        session_context_growth: 'accumulate',
+      },
+    } as RunRecord['group']['workload']
+    return r
+  }
+  const w = loadWorkloads([traceRec(8), traceRec(32)])[0]!
+  const html = renderToStaticMarkup(<ReadoutTable workload={w} models={[]} />)
+
+  it('names the load column "Concurrent sessions" for a sessions sweep', () => {
+    expect(html).toContain('>Concurrent sessions<')
+    expect(html).toMatch(/aria-label="Sort by Concurrent sessions"/)
+  })
+
+  it('shows the two session-pool levels as the load column, before Deployment', () => {
+    expect(html).toMatch(/<td class="loadcell lcol">/)
+    expect(html.indexOf('>Concurrent sessions<')).toBeLessThan(html.indexOf('Deployment'))
+  })
+})
+
 describe('ReadoutTable, two models against one workload', () => {
   const two = twoModelWorkload()
   const html = renderToStaticMarkup(<ReadoutTable workload={two} models={[]} />)
@@ -302,16 +376,14 @@ describe('ReadoutTable, two models against one workload', () => {
     expect(new Set(models)).toEqual(new Set(['llama-3-8b', 'qwen3-14b']))
   })
 
-  it('shows every disqualified run, labeled by model, and keeps the would-be rank scoped to the shared work (§5.1)', () => {
-    const band = dqBand(html)
-    expect(band).toBeDefined()
-    expect(band).toContain('requests_dropped')
-    // One disqualified run per model, each labeled by model.
-    expect(band).toContain('meta/llama-3-8b')
-    expect(band).toContain('qwen/qwen3-14b')
-    // The rank is kept: the work it never did is shared by the whole table.
-    expect(band).toContain('would place it')
-    expect(band).toMatch(/#\d+ of \d+/)
+  it('shows every disqualified run as a flagged row, one per model, labeled by model', () => {
+    const dq = dqRows(html)
+    expect(dq).toHaveLength(2)
+    for (const r of dq) expect(r).toContain('dqflag')
+    const models = dq.map((r) => (r.match(/meta\/llama-3-8b|qwen\/qwen3-14b/) ?? [])[0])
+    expect(new Set(models)).toEqual(new Set(['meta/llama-3-8b', 'qwen/qwen3-14b']))
+    // The divider names the count.
+    expect(dqDivider(html)).toContain('2 runs')
   })
 })
 
@@ -327,10 +399,11 @@ describe('ReadoutTable, filtering a two-model workload to one model', () => {
     expect(tbody).not.toContain('meta/llama-3-8b')
   })
 
-  it('keeps the disqualified band with its within-table would-be rank', () => {
-    const band = dqBand(html)
-    expect(band).toContain('#1 of 11')
-    expect(band).toContain('first place')
+  it('keeps the disqualified run as a flagged row when filtered to one model', () => {
+    const dq = dqRows(html)
+    expect(dq).toHaveLength(1)
+    expect(dq[0]).toContain('dqflag')
+    expect(dq[0]).toContain('max_model_len 640')
   })
 })
 
@@ -345,20 +418,22 @@ describe('ReadoutTable, hardware filter (a row filter, orthogonal to the model f
     expect(tbody).not.toContain('L40S')
   })
 
-  it('still shows the H100 disqualified run', () => {
+  it('still shows the H100 disqualified run as a flagged row', () => {
     const html = renderToStaticMarkup(<ReadoutTable workload={mainW} models={[]} hardware={['H100']} />)
-    const band = dqBand(html)
-    expect(band).toContain('max_model_len 640')
+    const dq = dqRows(html)
+    expect(dq).toHaveLength(1)
+    expect(dq[0]).toContain('max_model_len 640')
   })
 
-  it('narrowed to A100-SXM shows its 3 rows and no disqualified band (its only DQ run is H100)', () => {
+  it('narrowed to A100-SXM shows its 3 rows and no windowed group (its only DQ run is H100)', () => {
     const html = renderToStaticMarkup(
       <ReadoutTable workload={mainW} models={[]} hardware={['A100-SXM']} />,
     )
     const tbody = html.match(/<tbody>([\s\S]*)<\/tbody>/)![1]!
     expect(tbodyRows(html)).toHaveLength(3)
     expect(tbody).not.toContain('H100')
-    expect(html).not.toMatch(/aria-label="Disqualified runs"/)
+    expect(dqRows(html)).toHaveLength(0)
+    expect(dqDivider(html)).toBeUndefined()
   })
 
   it('an empty hardware selection is unchanged: every accelerator shows (10 complete runs)', () => {
@@ -408,82 +483,129 @@ describe('SLO-target filtering (via ReadoutTable)', () => {
     expect(sloBand(html)).toBeUndefined()
   })
 
-  it('replaces the table with a note when no run meets the targets, still listing them in the band', () => {
+  it('replaces the table with a note when no complete run meets the targets and there are no windowed rows', () => {
+    // A100-SXM has 3 complete runs and no disqualified run, so an impossible target leaves the
+    // table with nothing to show and the note stands in for it.
     const html = renderToStaticMarkup(
-      <ReadoutTable workload={mainW} models={[]} sloTargets={{ e2e_p99_ms: 1 }} />,
+      <ReadoutTable workload={mainW} models={[]} hardware={['A100-SXM']} sloTargets={{ e2e_p99_ms: 1 }} />,
     )
     expect(html).not.toContain('<tbody>')
     expect(html).toContain('No runs meet the SLO targets')
     const band = sloBand(html)
-    expect(band).toContain('10 runs')
+    expect(band).toContain('3 runs')
   })
 
-  it('orders the section as ranked table, then SLO band, then disqualified band', () => {
+  it('still shows the windowed rows when an SLO target hides every complete run', () => {
+    // The target hides all 10 complete runs into the SLO band, but the disqualified run is not
+    // subject to SLO, so the table renders it rather than falling back to the note.
+    const html = renderToStaticMarkup(
+      <ReadoutTable workload={mainW} models={[]} sloTargets={{ e2e_p99_ms: 1 }} />,
+    )
+    expect(html).toContain('<tbody>')
+    expect(html).not.toContain('No runs meet the SLO targets')
+    expect(tbodyRows(html)).toHaveLength(0)
+    expect(dqRows(html)).toHaveLength(1)
+    expect(sloBand(html)).toContain('10 runs')
+  })
+
+  it('orders the rows ranked-then-windowed, with the SLO band below the whole table', () => {
     const html = renderToStaticMarkup(
       <ReadoutTable workload={mainW} models={[]} sloTargets={{ e2e_p99_ms: 5000 }} />,
     )
-    const iTable = html.indexOf('<tbody>')
+    const iTbody = html.indexOf('<tbody>')
+    const iDivider = html.indexOf('class="dqsub"')
     const iSlo = html.indexOf('<details class="sloband">')
-    const iDq = html.indexOf('aria-label="Disqualified runs"')
-    expect(iTable).toBeGreaterThan(-1)
-    expect(iSlo).toBeGreaterThan(iTable)
-    expect(iDq).toBeGreaterThan(iSlo)
+    expect(iTbody).toBeGreaterThan(-1)
+    expect(iDivider).toBeGreaterThan(iTbody) // the windowed divider sits inside the tbody, after the ranked rows
+    expect(iSlo).toBeGreaterThan(iDivider) // the SLO band follows the whole table
   })
 
-  it('never applies SLO targets to the disqualified band', () => {
+  it('never applies SLO targets to the windowed rows', () => {
     // The impossible target empties the ranked table, but the disqualified run is unchanged.
     const html = renderToStaticMarkup(
       <ReadoutTable workload={mainW} models={[]} sloTargets={{ e2e_p99_ms: 1 }} />,
     )
-    const band = dqBand(html)
-    expect(band).toContain('max_model_len 640')
-    expect(band).toContain('requests_dropped')
+    const dq = dqRows(html)
+    expect(dq).toHaveLength(1)
+    expect(dq[0]).toContain('max_model_len 640')
   })
 })
 
-describe('DqBand (via ReadoutTable)', () => {
+describe('Disqualified rows, inline (via ReadoutTable)', () => {
   const html = renderToStaticMarkup(<ReadoutTable workload={mainW} models={[]} />)
-  const tbody = html.match(/<tbody>([\s\S]*)<\/tbody>/)![1]!
-  const band = dqBand(html)
 
-  it('shows h100-tp2-len640 with its requests_dropped reason and incomplete class, and never in the table body above it', () => {
-    expect(band).toBeDefined()
-    expect(band).toContain('H100 tp2')
-    expect(band).toContain('max_model_len 640')
-    expect(band).toContain('requests_dropped')
-    expect(band).toContain('259 of 500')
-    expect(band).toMatch(/class="chip crit"/)
-    expect(band).toContain('incomplete')
-    expect(tbody).not.toContain('max_model_len 640')
-    expect(tbody).not.toContain('241')
+  it('shows h100-tp2-len640 as a flagged row beneath the ranked rows, not among them', () => {
+    const dq = dqRows(html)
+    expect(dq).toHaveLength(1)
+    expect(dq[0]).toContain('dqflag')
+    expect(dq[0]).toContain('max_model_len 640')
+    expect(dq[0]).toContain('241') // its served subset shows in the row's Served cell
+    // It is none of the ranked complete rows above the divider.
+    for (const r of tbodyRows(html)) expect(r).not.toContain('max_model_len 640')
+  })
+
+  it('introduces the group with a windowed divider naming the count', () => {
+    const div = dqDivider(html)
+    expect(div).toBeDefined()
+    expect(div).toContain('Windowed')
+    expect(div).toContain('1 run')
+  })
+
+  it('orders the windowed row after every ranked complete row', () => {
+    const rows = allTbodyRows(html)
+    const isComplete = (tr: string) => /id="run-/.test(openTag(tr)) && !/dqline/.test(openTag(tr))
+    const iLastComplete = rows.map(isComplete).lastIndexOf(true)
+    const iDivider = rows.findIndex((tr) => /dqsub/.test(openTag(tr)))
+    const iFirstDq = rows.findIndex((tr) => /dqline/.test(openTag(tr)))
+    expect(iDivider).toBeGreaterThan(iLastComplete)
+    expect(iFirstDq).toBeGreaterThan(iDivider)
   })
 
   it('does not label the model when the table holds only one', () => {
-    // mainW is a single model, so the band's cards carry no model chip.
-    expect(band).not.toContain('class="model"')
+    // mainW is a single model, so the flagged row carries no model line.
+    expect(dqRows(html)[0]).not.toContain('class="dep-model"')
   })
 
-  it('states it would place #1 of 11 on latency', () => {
-    expect(band).toContain('#1 of 11')
-    expect(band).toContain('first place')
-  })
-
-  it('renders the output-tokens-per-request figure and its comparison against the complete runs', () => {
-    expect(band).toContain('output tokens per served request')
-    expect(band).toContain('94.6')
-    expect(band).toContain('186.1')
-    expect(band).toContain('across the complete runs')
-  })
-
-  it("shows the second workload's lone record with both of its disqualification reasons", () => {
+  it('shows the lone windowed record of a bounded-window workload as a flagged row', () => {
     const horizonHtml = renderToStaticMarkup(<ReadoutTable workload={horizonW} models={[]} />)
-    const horizonBand = dqBand(horizonHtml)
-    expect(horizonBand).toBeDefined()
-    expect(horizonBand).toContain('H100 tp4')
-    expect(horizonBand).toContain('window_ended_busy')
-    expect(horizonBand).toContain('injection_short')
-    expect(horizonBand).toContain('#1 of 1')
-    expect(horizonBand).not.toContain('across the complete runs')
+    const dq = dqRows(horizonHtml)
+    expect(dq).toHaveLength(1)
+    expect(dq[0]).toContain('dqflag')
+    expect(dqDivider(horizonHtml)).toContain('1 run')
+  })
+})
+
+describe('DqWhy (the why-block in an expanded disqualified row)', () => {
+  const dqRec = records.find((r) => r.group_id === MAIN && !r.status.complete)!
+  const horizonRec = records.find((r) => r.group_id === HORIZON)!
+
+  it('lists every disqualification reason with its class and detail', () => {
+    const html = renderToStaticMarkup(<DqWhy record={dqRec} completePerReqMean={186.1} />)
+    expect(html).toContain('requests_dropped')
+    expect(html).toMatch(/class="chip crit"/)
+    expect(html).toContain('incomplete')
+    expect(html).toContain('259 of 500')
+  })
+
+  it('quantifies the size bias against the complete runs', () => {
+    const html = renderToStaticMarkup(<DqWhy record={dqRec} completePerReqMean={186.1} />)
+    expect(html).toContain('output tokens per served request')
+    expect(html).toContain('94.6')
+    expect(html).toContain('186.1')
+    expect(html).toContain('across the complete runs')
+  })
+
+  it('makes no ranking claim (windowed rows are never ranked beside complete ones)', () => {
+    const html = renderToStaticMarkup(<DqWhy record={dqRec} completePerReqMean={186.1} />)
+    expect(html).not.toContain('would place')
+    expect(html).not.toContain('of 11')
+  })
+
+  it('reports both reasons and omits the comparison when there is no complete baseline', () => {
+    const html = renderToStaticMarkup(<DqWhy record={horizonRec} completePerReqMean={null} />)
+    expect(html).toContain('window_ended_busy')
+    expect(html).toContain('injection_short')
+    expect(html).not.toContain('across the complete runs')
   })
 })
 
@@ -492,8 +614,10 @@ describe('Reproduce the blis command (row-level)', () => {
   const tbody = html.match(/<tbody>([\s\S]*)<\/tbody>/)![1]!
   const tableToggles = tbody.match(/class="reprotoggle"/g) ?? []
 
-  it('offers a reproduce toggle on every complete row, collapsed on load', () => {
-    expect(tableToggles).toHaveLength(10)
+  it('offers a reproduce toggle on every row (complete and windowed), collapsed on load', () => {
+    // A toggle on each of the 10 complete rows and the 1 windowed row.
+    expect(tableToggles).toHaveLength(tbodyRows(html).length + dqRows(html).length)
+    expect(tableToggles).toHaveLength(11)
     expect(tbody).toMatch(/class="reprotoggle"[^>]*aria-expanded="false"/)
     expect(tbody).not.toContain('aria-expanded="true"')
   })
@@ -507,11 +631,10 @@ describe('Reproduce the blis command (row-level)', () => {
     expect(html).toMatch(/class="reprotoggle"[^>]*aria-label="[^"]*h100-tp1[^"]*"/)
   })
 
-  it('offers the same reproduce toggle on a disqualified run in the band', () => {
-    const band = dqBand(html)
-    expect(band).toBeDefined()
-    expect(band).toContain('reprotoggle')
-    expect(band).toMatch(/class="reprotoggle[^"]*"[^>]*aria-label="[^"]*h100-tp2-len640[^"]*"/)
+  it('offers the same reproduce toggle on a disqualified row', () => {
+    const dq = dqRows(html)[0]!
+    expect(dq).toContain('reprotoggle')
+    expect(dq).toMatch(/class="reprotoggle"[^>]*aria-label="[^"]*h100-tp2-len640[^"]*"/)
   })
 })
 
@@ -877,21 +1000,21 @@ describe('the per-run delete control (a trash button, server mode only)', () => 
       <ReadoutTable workload={mainW} models={[]} canDelete onDelete={(r) => seen.push(r)} />,
     )
     const buttons = html.match(/class="delrow onrow"/g) ?? []
-    expect(buttons.length).toBe(tbodyRows(html).length)
+    // A trash button on every row, complete and windowed alike.
+    expect(buttons.length).toBe(tbodyRows(html).length + dqRows(html).length)
     expect(buttons.length).toBeGreaterThan(0)
     // Each names its run in the accessible label so the control is unambiguous.
     expect(html).toMatch(/aria-label="Delete the run [^"]+"/)
   })
 
-  it('offers deletion on disqualified runs too, in their band', () => {
+  it('offers deletion on a disqualified row too', () => {
     const withDelete = renderToStaticMarkup(
       <ReadoutTable workload={horizonW} models={[]} canDelete onDelete={() => {}} />,
     )
-    const band = dqBand(withDelete)!
-    expect(band).toContain('class="delrow dq"')
+    expect(dqRows(withDelete)[0]).toContain('class="delrow onrow"')
 
     // and not when deletion is not offered
     const without = renderToStaticMarkup(<ReadoutTable workload={horizonW} models={[]} />)
-    expect(dqBand(without)!).not.toContain('class="delrow')
+    expect(dqRows(without)[0]).not.toContain('delrow')
   })
 })

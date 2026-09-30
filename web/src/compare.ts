@@ -2,7 +2,7 @@ import type { RunRecord } from './load'
 import { runKey } from './load'
 import type { Column } from './model'
 import { COLUMNS, fieldDisplay, servedFraction, varyingDeploymentFields } from './model'
-import { formatCount, formatMs, formatNumber } from './format'
+import { formatCount, formatMs, formatNumber, formatPercent } from './format'
 import { FIELD_GROUPS, SEPARATELY_RENDERED } from './fieldgroups'
 
 /** Add an unselected run to the comparison, or remove it if already selected. Insertion
@@ -95,13 +95,6 @@ export function deltaClass(
   if (delta.pct == null || delta.neutral) return 'neutral'
   return delta.better ? 'good' : 'bad'
 }
-
-/** The metric columns of the panel: everything BLIS-measured, grouped as in the table. The
- *  candidate group (the deployment cell and the derived gpus count) is configuration, not a
- *  metric, so it is excluded here. */
-export const METRIC_COLUMNS: Column[] = COLUMNS.filter(
-  (c) => c.group === 'latency' || c.group === 'throughput' || c.group === 'health',
-)
 
 export interface ConfigCell {
   runId: string
@@ -231,6 +224,8 @@ function rawText(record: RunRecord, col: Column): string {
   const v = col.value(record)
   if (v == null) return '—'
   if (col.key === 'gpus') return formatCount(v)
+  // A percent column (KV cache hit) stores the raw fraction; render it as a percentage.
+  if (col.percent) return formatPercent(v)
   return col.digits != null ? formatNumber(v, col.digits) : formatMs(v)
 }
 
@@ -242,18 +237,27 @@ function deltaText(pct: number): string {
 }
 
 /**
- * The metrics section: latency, throughput, health, in COLUMNS order. The control (order[0])
- * shows raw values only. Every other run shows the raw value plus a control-relative delta,
- * coloured by deltaClass. served is always a plain value (a share of offered work, not a
- * percentage-of-a-percentage), and doubles as the honesty signal for a disqualified column.
+ * The metrics section: latency, throughput, health (and the KV-cache group when the compared
+ * runs carry KV data), in COLUMNS order. The control (order[0]) shows raw values only. Every
+ * other run shows the raw value plus a control-relative delta, coloured by deltaClass. served
+ * is always a plain value (a share of offered work, not a percentage-of-a-percentage), and
+ * doubles as the honesty signal for a disqualified column. KV metrics ride alongside the table's
+ * KV group: they appear here whenever a compared run reports them, so the two never disagree.
  */
 export function buildMetricRows(records: RunRecord[], order: string[]): MetricGroupBlock[] {
   const cols = inOrder(records, order)
   const control = cols[0]
   const blocks: MetricGroupBlock[] = []
 
-  for (const groupName of ['latency', 'throughput', 'health'] as const) {
-    const groupCols = METRIC_COLUMNS.filter((c) => c.group === groupName)
+  const hasKV = cols.some(
+    (r) => r.metrics.cache_hit_rate != null || r.kv_thrashing_rate != null || r.metrics.kv_allocation_failures != null,
+  )
+  const groupNames = hasKV
+    ? (['latency', 'throughput', 'health', 'kv'] as const)
+    : (['latency', 'throughput', 'health'] as const)
+
+  for (const groupName of groupNames) {
+    const groupCols = COLUMNS.filter((c) => c.group === groupName)
     const rows: MetricRow[] = groupCols.map((col) => ({
       key: col.key,
       label: col.label,

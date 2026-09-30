@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { renderToStaticMarkup } from 'react-dom/server'
 import fixture from '../../prototypes/results.json'
-import { loadGroups } from './load'
+import { loadGroups, runKey } from './load'
 import type { RunRecord } from './load'
 import { SloBand } from './components/SloBand'
 import { splitBySlo } from './slo'
@@ -53,6 +53,23 @@ describe('SloBand', () => {
     expect(html).toContain('Tokens/s')
     expect(html).toContain('falls short of')
     expect(html).toContain('1,100.0')
+  })
+
+  it('in compare mode, highlights a selected SLO-banded run so Select all reaches it', () => {
+    const { hidden } = splitBySlo(main.complete, { e2e_p99_ms: 5000 })
+    const pick = runKey(hidden[0]!)
+    const html = renderToStaticMarkup(
+      <SloBand
+        hidden={hidden}
+        targets={{ e2e_p99_ms: 5000 }}
+        compareMode
+        selectedIds={[pick]}
+        onToggleHighlight={() => {}}
+      />,
+    )
+    // the selected run carries the highlight; the rest are selectable but not highlighted
+    expect((html.match(/slohidden[^"]*cmphl/g) ?? []).length).toBe(1)
+    expect((html.match(/slohidden[^"]*selectable/g) ?? []).length).toBe(hidden.length)
   })
 
   it('reports a null metric as a miss with no value rather than an em dash', () => {

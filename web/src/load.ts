@@ -253,7 +253,9 @@ export function offeredLoad(group: RunRecord['group']): { kind: string; value: n
  * profile, not part of its identity, so it is stripped from the key — runs differing only in
  * load collapse into one workload. Where the load lives differs by type: a distribution drops
  * `load.value`; a workload-spec drops the spec's `aggregate_rate` and per-client `concurrency`
- * (and the derived `spec_sha256` that folds them in). A trace keeps its full group.
+ * (and the derived `spec_sha256` that folds them in). A trace drops the placeholder `load.value`
+ * and the replay's `concurrent_sessions` (the offered-load pool), so replaying one corpus at
+ * several session counts collapses into a single sweep — the trace analog of a spec's concurrency.
  */
 export function workloadKey(group: RunRecord['group']): string {
   const g = JSON.parse(JSON.stringify(group)) as {
@@ -262,6 +264,7 @@ export function workloadKey(group: RunRecord['group']): string {
       load: { value?: number }
       spec_sha256?: unknown
       spec?: { aggregate_rate?: unknown; clients?: unknown[] }
+      trace?: { concurrent_sessions?: unknown }
     }
   }
   const w = g.workload
@@ -278,6 +281,9 @@ export function workloadKey(group: RunRecord['group']): string {
         }
       }
     }
+  } else if (w.type === 'trace') {
+    delete w.load.value
+    if (w.trace) delete w.trace.concurrent_sessions
   }
   return canonicalJSON(g)
 }

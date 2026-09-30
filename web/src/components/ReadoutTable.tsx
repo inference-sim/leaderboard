@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, type MouseEvent as ReactMouseEvent } from 'react'
-import type { RunGroup, RunRecord, WorkloadGroup } from '../load'
+import type { RunRecord, WorkloadGroup } from '../load'
 import { offeredLoad, runKey } from '../load'
 import { rowId } from '../liverun'
 import type { RevealTarget } from '../liverun'
@@ -23,7 +23,7 @@ import { visibleRows } from '../rows'
 import { Derived } from './Derived'
 import { DeleteRunButton } from './DeleteRunButton'
 import { Knob } from './Knob'
-import { DqBand } from './DqBand'
+import { DqWhy } from './DqWhy'
 import { ReproPanel } from './ReproPanel'
 import { SloBand } from './SloBand'
 import { SortNote } from './SortNote'
@@ -122,10 +122,6 @@ export function ReadoutTable({
   onRemoveSort,
 }: Props) {
   const showDelete = canDelete && onDelete != null
-  // A profile may span several offered-load levels (a sweep), so the table reads across all of
-  // the workload's comparability groups. baseGroup is kept only as the base for the synthesised
-  // RunGroup the disqualified band takes.
-  const baseGroup = workload.groups[0]!
   // The run_id of the row currently pulsing from a reveal, or null. Local to the table so
   // the highlight lives and dies with the row, not with App's reveal request.
   const [revealedKey, setRevealedKey] = useState<string | null>(null)
@@ -143,10 +139,19 @@ export function ReadoutTable({
 
   // The rows as displayed, from the single shared source, so the Compare panel opens its columns
   // in the very order the table renders — the same filter, SLO split, and sort.
-  const { complete, records, ranked: rows, slobanded: hidden, disqualified } = useMemo(
+  const { complete, records, ranked: rows, slobanded: hidden, dqRanked } = useMemo(
     () => visibleRows(workload, models, hardware, loads, sloTargets, sort),
     [workload, models, hardware, loads, sloTargets, sort],
   )
+  // Mean output tokens per served request across the complete runs on screen, for the size-bias
+  // comparison in a disqualified row's why-block. null when there is no complete run to compare
+  // against (e.g. an all-disqualified sweep), which reads as "no baseline" rather than "0".
+  const completePerReqMean = useMemo(() => {
+    const perReq = complete
+      .map((r) => (r.metrics.completed_requests > 0 ? r.metrics.total_output_tokens / r.metrics.completed_requests : null))
+      .filter((v): v is number => v != null)
+    return perReq.length === 0 ? null : perReq.reduce((a, b) => a + b, 0) / perReq.length
+  }, [complete])
 
   const varying = useMemo(() => varyingDeploymentFields(records), [records])
   // Only label the model or GPU type when the table holds more than one: a single-model
@@ -160,22 +165,25 @@ export function ReadoutTable({
     [records],
   )
   // The Load column is named for what it varies: "Arrival rate" for a rate sweep, "Concurrency"
-  // for a concurrency one. Same key ('load') so it sorts through sortRecords like any column.
+  // for a concurrency one, "Concurrent sessions" for a trace's session-pool sweep. Same key
+  // ('load') so it sorts through sortRecords like any column.
   const loadCol = useMemo(
-    () => ({ ...LOAD_COLUMN, label: workload.loadAxis.kind === 'concurrency' ? 'Concurrency' : 'Arrival rate' }),
+    () => ({
+      ...LOAD_COLUMN,
+      label:
+        workload.loadAxis.kind === 'concurrency'
+          ? 'Concurrency'
+          : workload.loadAxis.kind === 'sessions'
+            ? 'Concurrent sessions'
+            : 'Arrival rate',
+    }),
     [workload.loadAxis.kind],
   )
   const repro = useReproToggles(rows)
-  // The table is replaced by a short note only when a target removed every row, not when the
-  // group simply has no complete runs, which renders the empty table as before.
-  const allHiddenBySlo = rows.length === 0 && hidden.length > 0
-
-  // The disqualified band works over the same filtered rows, so its would-be rank is
-  // computed against exactly the complete runs on screen.
-  const filtered: RunGroup = useMemo(
-    () => ({ ...baseGroup, complete, disqualified, records }),
-    [baseGroup, complete, disqualified, records],
-  )
+  // The table is replaced by a short note only when a target removed every complete row and
+  // there are no disqualified rows to show either; a group with only disqualified runs (a
+  // windowed sweep) still renders them inline, so it is never mistaken for empty.
+  const allHiddenBySlo = rows.length === 0 && hidden.length > 0 && dqRanked.length === 0
 
   // The reveal: once a target row belonging to this table is on screen, scroll it into
   // view and mark it so the CSS pulse (or, under reduce, a static outline) plays, then clear
@@ -286,17 +294,55 @@ export function ReadoutTable({
                     onToggleHighlight={onToggleHighlight}
                   />
                 ))}
+                {/* Disqualified runs, shown rather than hidden (CLAUDE.md), grouped beneath the
+                    ranked rows under a divider so a windowed/incomplete run is never ranked beside
+                    a complete one. They sort among themselves via the same sort; each row is muted
+                    and flagged, and expanding it shows why (DqWhy) above its blis command. */}
+                {dqRanked.length > 0 && (
+                  <>
+                    <tr className="dqsub">
+                      <td colSpan={visibleCols.length + (showLoad ? 1 : 0)}>
+                        <span className="dqflag" aria-hidden="true">
+                          ⚠
+                        </span>{' '}
+                        Windowed · incomplete — {dqRanked.length}{' '}
+                        {dqRanked.length === 1 ? 'run' : 'runs'}, shown but not ranked (percentiles
+                        describe a subset of the declared work)
+                      </td>
+                    </tr>
+                    {dqRanked.map((record) => (
+                      <DataRow
+                        key={runKey(record)}
+                        record={record}
+                        varying={varying}
+                        numericCols={numericCols}
+                        sep={sep}
+                        colCount={visibleCols.length}
+                        showModel={showModel}
+                        showHardware={showHardware}
+                        showLoad={showLoad}
+                        open={repro.isOpen(record)}
+                        onToggleRepro={() => repro.toggle(record)}
+                        revealed={revealedKey === runKey(record)}
+                        onDelete={showDelete ? onDelete : undefined}
+                        compareMode={compareMode}
+                        highlighted={selectedIds.includes(runKey(record))}
+                        onToggleHighlight={onToggleHighlight}
+                        dq
+                        completePerReqMean={completePerReqMean}
+                      />
+                    ))}
+                  </>
+                )}
               </tbody>
             </table>
           </div>
         </>
       )}
 
-      <SloBand hidden={hidden} targets={sloTargets} />
-
-      <DqBand
-        group={filtered}
-        onDelete={showDelete ? onDelete : undefined}
+      <SloBand
+        hidden={hidden}
+        targets={sloTargets}
         compareMode={compareMode}
         selectedIds={selectedIds}
         onToggleHighlight={onToggleHighlight}
@@ -536,6 +582,8 @@ function DataRow({
   compareMode,
   highlighted,
   onToggleHighlight,
+  dq = false,
+  completePerReqMean = null,
 }: {
   record: RunRecord
   varying: string[]
@@ -564,6 +612,12 @@ function DataRow({
   highlighted: boolean
   /** Toggle this run's highlight membership (compare mode only). */
   onToggleHighlight?: (runId: string) => void
+  /** Whether this is a disqualified run: the row is muted and flagged, and its expanded panel
+   *  leads with a why-block (DqWhy) before the blis command. Defaults to false (a ranked row). */
+  dq?: boolean
+  /** Mean output tokens per served request across the complete runs, passed through to DqWhy for
+   *  the size-bias comparison. Only read when dq. */
+  completePerReqMean?: number | null
 }) {
   const panelId = `repro-${record.group_id}-${record.run_id}`
 
@@ -581,7 +635,9 @@ function DataRow({
     onToggleRepro()
   }
 
-  const rowClass = [revealed ? 'revealed' : '', highlighted ? 'cmphl' : ''].filter(Boolean).join(' ')
+  const rowClass = [revealed ? 'revealed' : '', highlighted ? 'cmphl' : '', dq ? 'dqline' : '']
+    .filter(Boolean)
+    .join(' ')
 
   return (
     <>
@@ -596,6 +652,7 @@ function DataRow({
           onToggleRepro={onToggleRepro}
           reproPanelId={panelId}
           onDelete={onDelete}
+          dq={dq}
         />
         {numericCols.map((col) => (
           <ValueCell key={col.key} col={col} record={record} sep={sep} />
@@ -604,6 +661,7 @@ function DataRow({
       {open && (
         <tr className="reprorow">
           <td colSpan={colCount + (showLoad ? 1 : 0)} id={panelId}>
+            {dq && <DqWhy record={record} completePerReqMean={completePerReqMean} />}
             <ReproPanel record={record} />
           </td>
         </tr>
@@ -631,6 +689,7 @@ function DeploymentCell({
   onToggleRepro,
   reproPanelId,
   onDelete,
+  dq = false,
 }: {
   record: RunRecord
   varying: string[]
@@ -642,6 +701,9 @@ function DeploymentCell({
   reproPanelId: string
   /** Opens the delete confirmation for this run, or undefined when deletion is not offered. */
   onDelete?: (record: RunRecord) => void
+  /** Whether this is a disqualified run: leads the cell with a ⚠ marker (the row's non-color
+   *  flag; the reasons live in the expanded why-block). */
+  dq?: boolean
 }) {
   const [expanded, setExpanded] = useState(false)
   const spec = deploymentSpec(record, varying)
@@ -667,6 +729,11 @@ function DeploymentCell({
       </button>
       {onDelete && <DeleteRunButton record={record} onDelete={onDelete} variant="onrow" />}
       <div className="depbox">
+        {dq && (
+          <span className="dqflag" title="Incomplete (windowed) — expand for why" aria-label="incomplete windowed run">
+            ⚠
+          </span>
+        )}
         {showModel && <span className="dep-model">{record.deployment.model}</span>}
         {showHardware && <span className="dep-hw">{record.deployment.hardware}</span>}
 

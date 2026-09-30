@@ -19,8 +19,11 @@ export interface VisibleRows {
   ranked: RunRecord[]
   /** Kept complete runs a set SLO target pulled out — the SLO band. */
   slobanded: RunRecord[]
-  /** Kept disqualified runs — the disqualified band. */
+  /** Kept disqualified runs, unsorted — for counts and varying-field checks. */
   disqualified: RunRecord[]
+  /** Kept disqualified runs in the active sort: the table renders these beneath the ranked
+   *  complete rows (under a divider), so a windowed run never sorts above a complete one. */
+  dqRanked: RunRecord[]
 }
 
 /** Partition a workload's rows for display. `sort` empty means declared/board order (nothing is
@@ -38,7 +41,14 @@ export function visibleRows(
   const disqualified = workload.disqualified.filter(keep)
   const records = workload.records.filter(keep)
   const { passing, hidden } = splitBySlo(complete, sloTargets)
-  return { complete, records, ranked: sortRecords(passing, sort), slobanded: hidden, disqualified }
+  return {
+    complete,
+    records,
+    ranked: sortRecords(passing, sort),
+    slobanded: hidden,
+    disqualified,
+    dqRanked: sortRecords(disqualified, sort),
+  }
 }
 
 /**
@@ -47,5 +57,5 @@ export function visibleRows(
  * columns in (top row = control).
  */
 export function visibleOrder(v: VisibleRows): RunRecord[] {
-  return [...v.ranked, ...v.slobanded, ...v.disqualified]
+  return [...v.ranked, ...v.slobanded, ...v.dqRanked]
 }

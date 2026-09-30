@@ -309,17 +309,25 @@ func writeSpecFile(spec map[string]any, metricsPath string) (string, error) {
 // be rejected, and secondary_tiers are not modelled here. Every field is written
 // explicitly so the config on disk is the full record, not blis's defaults.
 func writeKVOffloadFile(kv *schema.KVOffload, metricsPath string) (string, error) {
-	body, err := yaml.Marshal(map[string]any{
-		"kv_offload": map[string]any{
-			"cpu_bytes_to_use":          kv.CPUBytesToUse,
-			"block_size":                kv.BlockSize,
-			"blocks_per_chunk":          kv.BlocksPerChunk,
-			"tokens_per_hash":           kv.TokensPerHash,
-			"eviction_policy":           kv.EvictionPolicy,
-			"offload_prompt_only":       kv.OffloadPromptOnly,
-			"self_describing_kv_events": kv.SelfDescribingKVEvents,
-		},
-	})
+	block := map[string]any{
+		"cpu_bytes_to_use":          kv.CPUBytesToUse,
+		"tokens_per_hash":           kv.TokensPerHash,
+		"eviction_policy":           kv.EvictionPolicy,
+		"offload_prompt_only":       kv.OffloadPromptOnly,
+		"self_describing_kv_events": kv.SelfDescribingKVEvents,
+	}
+	// block_size and blocks_per_chunk are mutually exclusive alternate encodings of the
+	// same chunk-granularity quantity — blis rejects a config that carries both
+	// (block_size = blocks_per_chunk × gpu_block_size). Emit at most one: block_size when
+	// pinned (the explicit token count, as the schema and the reference deployments carry
+	// it), else blocks_per_chunk, else neither so blis applies vLLM's default.
+	switch {
+	case kv.BlockSize > 0:
+		block["block_size"] = kv.BlockSize
+	case kv.BlocksPerChunk > 0:
+		block["blocks_per_chunk"] = kv.BlocksPerChunk
+	}
+	body, err := yaml.Marshal(map[string]any{"kv_offload": block})
 	if err != nil {
 		return "", fmt.Errorf("encode kv offload config: %w", err)
 	}

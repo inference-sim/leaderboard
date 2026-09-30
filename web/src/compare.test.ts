@@ -219,6 +219,23 @@ describe('buildMetricRows', () => {
     const gainTps = gainBlocks.find((bl) => bl.title === 'throughput')!.rows.find((r) => r.key === 'tokens_per_sec')!
     expect(gainTps.cells[1]!.cls).toBe('good')
   })
+  it('omits the KV group when no compared run reports KV data', () => {
+    const { a, b } = trio()
+    expect(buildMetricRows([a, b], ['A', 'B']).some((bl) => bl.title === 'kv')).toBe(false)
+  })
+
+  it('shows the KV group, with cache hit as a percentage, when a run reports it', () => {
+    const { a, b } = trio()
+    a.metrics = { ...a.metrics, cache_hit_rate: 0.66 }
+    b.metrics = { ...b.metrics, cache_hit_rate: 0.5 }
+    const kv = buildMetricRows([a, b], ['A', 'B']).find((bl) => bl.title === 'kv')
+    expect(kv).toBeTruthy()
+    const hit = kv!.rows.find((r) => r.key === 'cache_hit_rate')!
+    expect(hit.cells[0]!.text).toBe('66.0%')
+    // a lower cache hit than the control is worse (higher is better), so it colours red
+    expect(hit.cells[1]!.cls).toBe('bad')
+  })
+
   it('renders served as a plain value with no delta', () => {
     const { a, b } = trio()
     const blocks = buildMetricRows([a, b], ['A', 'B'])

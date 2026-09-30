@@ -112,6 +112,34 @@ function mainClone(): ProfileBody {
   }
 }
 
+/** A trace-backed profile: a session-pool replay, the weka arm's shape. Its offered load is a
+ *  `sessions` pool the per-run load control sets, so one corpus sweeps across session counts. */
+function traceProfile(sessions: number, overrides: Partial<ProfileBody> = {}): ProfileBody {
+  return {
+    name: 'weka',
+    seed: 42,
+    horizon_ticks: null,
+    request_timeout_s: 600,
+    workload: {
+      type: 'trace',
+      trace: {
+        sha256: 'weka-abc',
+        session_mode: 'closed-loop',
+        concurrent_sessions: sessions,
+        total_sessions: 183,
+        shuffle_corpus: true,
+        think_time_ms: 30,
+        think_time_dist: '',
+        source_format: 'weka',
+        records: 26648,
+        sessions: 183,
+        session_context_growth: 'accumulate',
+      },
+    },
+    ...overrides,
+  }
+}
+
 /** A spec-backed profile, the variant the custom card cannot represent. */
 function specProfile(overrides: Partial<ProfileBody> = {}): ProfileBody {
   return {
@@ -343,6 +371,29 @@ describe('interpret: a selected profile', () => {
   it('flags a workload that is no longer in the catalog', () => {
     const { issues, output } = interpret(valid({ workloadSel: 'gone' }), groups, [mainClone()])
     expect(issues.map((i) => i.message).join(' ')).toMatch(/no longer in the catalog/)
+    expect(output).toBeNull()
+  })
+})
+
+describe('interpret: a selected trace profile sweeps on its concurrent-sessions pool', () => {
+  it('sets the session pool and the sessions load from the load control (overriding the profile)', () => {
+    const { issues, output } = interpret(valid({ workloadSel: 'weka', loadValue: '32' }), groups, [traceProfile(8)])
+    expect(issues).toEqual([])
+    expect(output?.group.workload.type).toBe('trace')
+    expect(output?.group.workload.load).toEqual({ kind: 'sessions', value: 32 })
+    expect(
+      (output?.group.workload as { trace?: { concurrent_sessions?: number } }).trace?.concurrent_sessions,
+    ).toBe(32)
+  })
+
+  it('carries the replayed corpus’s trace_meta onto the run', () => {
+    const { output } = interpret(valid({ workloadSel: 'weka', loadValue: '16' }), groups, [traceProfile(8)])
+    expect(output?.traceMeta).toMatchObject({ source_format: 'weka', sessions: 183 })
+  })
+
+  it('rejects a non-integer session pool (sessions are whole in-flight counts)', () => {
+    const { issues, output } = interpret(valid({ workloadSel: 'weka', loadValue: '3.5' }), groups, [traceProfile(8)])
+    expect(issues.some((i) => i.field === 'loadValue')).toBe(true)
     expect(output).toBeNull()
   })
 })
