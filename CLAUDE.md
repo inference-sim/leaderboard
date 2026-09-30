@@ -13,7 +13,8 @@ plus a Vite + React + TypeScript app in `web/`. A run declaration (a `runs.yaml`
 author, or the web app's new-run form) names one comparability group and its candidate
 deployments; `leaderboard run` executes them against `blis` and
 writes `results/<group_id>/<run_id>.json`; the web app renders one sortable table per
-group with disqualified runs shown beneath it. Read `README.md` for the dependency and
+group with disqualified runs shown within the table, grouped and flagged beneath the
+ranked rows (never ranked beside a complete run). Read `README.md` for the dependency and
 the BLIS invocation details, and `docs/superpowers/specs/` for the design and its
 corrections; this file covers how to work here.
 

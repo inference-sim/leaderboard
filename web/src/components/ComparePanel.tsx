@@ -3,6 +3,7 @@ import type { RunRecord } from '../load'
 import { offeredLoad, runKey } from '../load'
 import { buildConfigRows, buildMetricRows, reconcileOrder, removeColumn, reorder } from '../compare'
 import { formatNumber } from '../format'
+import { ComparePlot } from './ComparePlot'
 
 interface ComparePanelProps {
   /** The highlighted records, in selection order. Fewer than two shows the prompt. */
@@ -285,6 +286,8 @@ export function ComparePanel({ records, onRemove }: ComparePanelProps) {
           )
         })}
       </div>
+
+      <ComparePlot records={records} />
     </section>
   )
 }

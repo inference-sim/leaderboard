@@ -1,9 +1,17 @@
 import type { WorkloadGroup } from '../load'
 
-/** Whether the load axis is one the load tag names — a synthetic rate or concurrency, as
- *  opposed to a trace's recorded/sessions load. */
+/** Whether the load axis is a swept one the load tag names — a synthetic rate or concurrency,
+ *  or a trace's pool of closed-loop `sessions` — as opposed to a trace's `recorded` arrivals
+ *  (value 0), which is not a load level to vary. */
 function isLoadKind(kind: string): boolean {
-  return kind === 'rate' || kind === 'concurrency'
+  return kind === 'rate' || kind === 'concurrency' || kind === 'sessions'
+}
+
+/** The tag label for a load kind. There are two offered-load types the reader sees: an arrival
+ *  rate, or a concurrency — a trace's pool of concurrent sessions is the same thing, so it is
+ *  labelled 'concurrency' rather than exposing the internal 'sessions' kind. */
+function loadKindLabel(kind: string): string {
+  return kind === 'sessions' ? 'concurrency' : kind
 }
 
 interface Props {
@@ -42,7 +50,7 @@ export function WorkloadPicker({ workloads, selected, onSelect }: Props) {
                     {/* The load kind being varied (rate / concurrency), so the reader knows what
                         the sweep's axis measures before opening the table. */}
                     {isLoadKind(workload.loadAxis.kind) && (
-                      <span className="spec-tag tag-load">{workload.loadAxis.kind}</span>
+                      <span className="spec-tag tag-load">{loadKindLabel(workload.loadAxis.kind)}</span>
                     )}
                     {workload.tags.map((tag) => (
                       <span key={tag} className={`spec-tag tag-${tag}`}>

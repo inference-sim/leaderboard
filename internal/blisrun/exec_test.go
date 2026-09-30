@@ -55,13 +55,45 @@ func TestWriteKVOffloadFile(t *testing.T) {
 		t.Errorf("config must have a top-level kv_offload: block:\n%s", s)
 	}
 	for _, want := range []string{
-		"cpu_bytes_to_use: 1073741824", "block_size: 32", "blocks_per_chunk: 2",
+		"cpu_bytes_to_use: 1073741824", "block_size: 32",
 		"tokens_per_hash: 32", "eviction_policy: arc", "offload_prompt_only: false",
 		"self_describing_kv_events: true",
 	} {
 		if !strings.Contains(s, want) {
 			t.Errorf("config missing %q:\n%s", want, s)
 		}
+	}
+	// block_size and blocks_per_chunk are mutually exclusive encodings of the same
+	// quantity; blis rejects a config carrying both. With block_size set, blocks_per_chunk
+	// must be omitted so the file is one blis accepts.
+	if strings.Contains(s, "blocks_per_chunk") {
+		t.Errorf("block_size is set, so blocks_per_chunk must be omitted (blis rejects both):\n%s", s)
+	}
+}
+
+// When only blocks_per_chunk is pinned (block_size left at 0), the file carries
+// blocks_per_chunk and omits block_size — the other arm of blis's XOR rule.
+func TestWriteKVOffloadFileBlocksPerChunkOnly(t *testing.T) {
+	dir := t.TempDir()
+	metricsPath := filepath.Join(dir, "run.json")
+	kv := &schema.KVOffload{
+		CPUBytesToUse: 1 << 30, BlocksPerChunk: 2, TokensPerHash: 32,
+		EvictionPolicy: "lru",
+	}
+	path, err := writeKVOffloadFile(kv, metricsPath)
+	if err != nil {
+		t.Fatalf("writeKVOffloadFile: %v", err)
+	}
+	body, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read %s: %v", path, err)
+	}
+	s := string(body)
+	if !strings.Contains(s, "blocks_per_chunk: 2") {
+		t.Errorf("config missing blocks_per_chunk: 2:\n%s", s)
+	}
+	if strings.Contains(s, "block_size:") {
+		t.Errorf("block_size is unset, so it must be omitted (blis rejects both):\n%s", s)
 	}
 }
 

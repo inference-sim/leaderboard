@@ -212,9 +212,10 @@ export function NewRun({
     if (name !== '') {
       // Prefill the load control from the chosen profile so it opens at that profile's own
       // load; the reader can then change it to run the profile at another load (a sweep point).
-      // A trace's load is not this control's to set, and a load we cannot read (0) is left alone.
+      // This includes a trace whose load is a `sessions` pool; a `recorded` trace reads as value
+      // 0 (no level to vary) and is left alone by the `load.value > 0` guard below.
       const profile = profiles.find((p) => p.name === name) ?? null
-      const load = profile && profile.workload.type !== 'trace' ? offeredLoad(profileToGroup(profile)) : null
+      const load = profile ? offeredLoad(profileToGroup(profile)) : null
       setValues((v) => ({
         ...v,
         workloadSel: name,
@@ -230,10 +231,24 @@ export function NewRun({
 
   const selectedProfile =
     values.workloadSel !== '' ? profiles.find((p) => p.name === values.workloadSel) ?? null : null
+  // The selected profile's load: rate/concurrency for a synthetic workload, `sessions` for a
+  // session-pool trace, `recorded` for a trace replayed on its own timing. A recorded trace has
+  // no level to vary, so the per-run load control is shown for every other kind.
+  const selectedLoad = selectedProfile ? offeredLoad(profileToGroup(selectedProfile)) : null
+  const selectedLoadIsSweepable = selectedLoad != null && selectedLoad.kind !== 'recorded'
   const presets = profiles.filter((p) => p.builtin)
   const saved = profiles.filter((p) => !p.builtin)
   const issueFor = (field: keyof FormValues) => issues.find((i) => i.field === field)
   const loadIsRate = values.loadKind === 'rate'
+  // The per-run load control's label and the noun the note uses, by kind.
+  const loadLevelLabel =
+    values.loadKind === 'rate'
+      ? 'Offered rate (req/s)'
+      : values.loadKind === 'sessions'
+        ? 'Concurrent sessions'
+        : 'Concurrency (users)'
+  const loadNoun =
+    values.loadKind === 'rate' ? 'rate' : values.loadKind === 'sessions' ? 'session count' : 'concurrency'
   // The expert-parallel and MoE-comm-backend knobs are always shown so the candidate box keeps
   // a stable shape; a dense model disables them rather than hiding them (blis rejects them on a
   // dense model, and switching to one already clears them to off/empty).
@@ -426,19 +441,19 @@ export function NewRun({
                 )}
                 {/* Load is a dimension of the profile, not part of its shape: it is configured
                     here per run, seeded from the profile, so the same profile can be run across
-                    load levels (a sweep). A trace's load comes from its replay knobs, not here. */}
-                {selectedProfile && selectedProfile.workload.type !== 'trace' && (
+                    load levels (a sweep). This covers a session-pool trace (kind `sessions`, the
+                    replay's concurrent_sessions) as well as synthetic rate/concurrency; a trace
+                    replayed on its own recorded timing has no level to vary, so it shows nothing. */}
+                {selectedLoadIsSweepable && (
                   <div className="nrload">
                     <label className="nrrow">
-                      {/* The profile fixes the load kind (rate or concurrency); only the level is
-                          set here. The kind is shown, not switchable — to change it, define a
-                          different workload. */}
-                      <span className="nrlabel">
-                        {loadIsRate ? 'Offered rate (req/s)' : 'Concurrency (users)'}
-                      </span>
+                      {/* The profile fixes the load kind (rate, concurrency, or a trace's session
+                          pool); only the level is set here. The kind is shown, not switchable — to
+                          change it, define a different workload. */}
+                      <span className="nrlabel">{loadLevelLabel}</span>
                       <input
                         type="text"
-                        inputMode="decimal"
+                        inputMode={values.loadKind === 'rate' ? 'decimal' : 'numeric'}
                         value={values.loadValue}
                         spellCheck={false}
                         onChange={(e) => set('loadValue', e.target.value)}
@@ -448,9 +463,11 @@ export function NewRun({
                     {issueFor('loadValue') && <p className="nrerr">{issueFor('loadValue')!.message}</p>}
                     <p className="nrnote">
                       The load to run this profile at, seeded from the profile. Change it to run the
-                      same workload at another {loadIsRate ? 'rate' : 'concurrency'}; running several
-                      levels builds a sweep on the board. To vary the shape or switch rate and
-                      concurrency, define a workload.
+                      same workload at another {loadNoun}; running several levels builds a sweep on
+                      the board.{' '}
+                      {values.loadKind === 'sessions'
+                        ? 'This replays the same trace corpus with a larger or smaller pool of concurrent sessions.'
+                        : 'To vary the shape or switch rate and concurrency, define a workload.'}
                     </p>
                   </div>
                 )}

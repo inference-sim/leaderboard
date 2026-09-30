@@ -31,11 +31,11 @@ import { numeric } from './format'
 export type Group = RunRecord['group']
 type TraceMeta = NonNullable<RunRecord['trace_meta']>
 export type Deployment = RunRecord['deployment']
-// The custom card is a distribution/spec load, so its selectable kinds are the synthetic
-// two only. The trace loads (recorded, sessions) are derived from a trace's own knobs, not
-// chosen in this form, so they are excluded here via Extract (which still ties the type to
-// the schema, so a renamed synthetic kind is caught).
-export type LoadKind = Extract<Group['workload']['load']['kind'], 'rate' | 'concurrency'>
+// The load levels this form sets per run: the synthetic `rate`/`concurrency`, plus a trace's
+// `sessions` (the closed-loop pool size, set on a selected trace profile the way rate/concurrency
+// are set on a distribution/spec). `recorded` is excluded — a trace whose arrivals come from its
+// own timing has no level to vary. Extract ties the type to the schema, so a renamed kind is caught.
+export type LoadKind = Extract<Group['workload']['load']['kind'], 'rate' | 'concurrency' | 'sessions'>
 export type ArrivalProcess = Group['workload']['arrival_process']
 
 /** Mirrors internal/spec.runIDPattern: a run_id is also a filename. */
@@ -759,20 +759,28 @@ export function interpret(
   // The load control is authoritative for the run's load level. A custom workload already builds
   // its load in (customGroup), but a selected profile's baked load is a starting point the
   // control overrides — so one profile can be run across load levels (a sweep). The profile
-  // fixes the *kind* (a rate profile stays rate); only the level is the reader's to change here.
-  // A trace's load is derived from its own replay knobs, not this control, so it is left alone.
-  if (values.workloadSel !== '' && group && group.workload.type !== 'trace') {
-    const kind = offeredLoad(group).kind as LoadKind
-    const loadValue = Number(values.loadValue)
-    if (!Number.isFinite(loadValue) || loadValue <= 0) {
-      push(
-        'loadValue',
-        kind === 'rate'
-          ? 'Offered rate is a positive number of requests per second.'
-          : 'Concurrency is a positive number of in-flight sessions.',
-      )
-    } else {
-      group = withOfferedLoad(group, kind, loadValue)
+  // fixes the *kind* (a rate profile stays rate; a session-pool trace stays sessions); only the
+  // level is the reader's to change here. A `recorded` trace has no level to vary, so it is left
+  // alone; every other kind (rate, concurrency, a trace's sessions) is set from the control.
+  if (values.workloadSel !== '' && group) {
+    const kind = offeredLoad(group).kind
+    if (kind !== 'recorded') {
+      const loadValue = Number(values.loadValue)
+      // Sessions and concurrency are whole in-flight counts; a rate may be fractional.
+      const ok =
+        kind === 'rate' ? Number.isFinite(loadValue) && loadValue > 0 : Number.isInteger(loadValue) && loadValue > 0
+      if (!ok) {
+        push(
+          'loadValue',
+          kind === 'rate'
+            ? 'Offered rate is a positive number of requests per second.'
+            : kind === 'sessions'
+              ? 'Concurrent sessions is a whole number of sessions, 1 or more.'
+              : 'Concurrency is a positive number of in-flight sessions.',
+        )
+      } else {
+        group = withOfferedLoad(group, kind as LoadKind, loadValue)
+      }
     }
   }
 
@@ -955,13 +963,22 @@ export function interpret(
  * run at a load other than the one it was saved with. Where the load lives depends on the type:
  * a distribution's is `group.workload.load`; a workload-spec's is inside the spec (a client's
  * `concurrency` for closed-loop, else the top-level `aggregate_rate`), cleared and reset the way
- * gaussianSpec writes it. The arrival process follows the kind. A trace is returned unchanged —
- * its load is a property of the replay, not this control. Mirrors load.offeredLoad, the reader.
+ * gaussianSpec writes it. A trace's is the replay's `concurrent_sessions` pool (kind `sessions`),
+ * mirrored onto `group.workload.load` so the reader and the key agree. The arrival process follows
+ * the kind. Mirrors load.offeredLoad, the reader.
  */
 export function withOfferedLoad(group: Group, kind: LoadKind, value: number): Group {
   const g = JSON.parse(JSON.stringify(group)) as Group
-  const w = g.workload as Group['workload'] & { spec?: Record<string, unknown> }
-  if (w.type === 'workload-spec' && w.spec) {
+  const w = g.workload as Group['workload'] & {
+    spec?: Record<string, unknown>
+    trace?: { concurrent_sessions?: number }
+  }
+  if (w.type === 'trace') {
+    // The pool size is the replay's own knob; mirror it onto load so offeredLoad and workloadKey
+    // (which strips it) read the same value. arrival_process stays the trace placeholder.
+    if (w.trace) w.trace.concurrent_sessions = value
+    w.load = { kind: 'sessions', value }
+  } else if (w.type === 'workload-spec' && w.spec) {
     const spec = w.spec
     delete spec.aggregate_rate
     if (Array.isArray(spec.clients)) {
@@ -1084,7 +1101,10 @@ function customGroup(
   // same workload-spec shape profileToGroup produces, so findTarget and the argv/runs.yaml
   // writers treat a custom run exactly like a selected spec workload. The flat
   // distribution fields are the not-applicable placeholder zeros a spec record carries.
-  const spec = gaussianSpec({ numRequests, load: { kind: values.loadKind, value: loadValue }, input, output })
+  // The custom card offers only the synthetic kinds (its radios are rate/concurrency); `sessions`
+  // belongs to a selected trace, never to the card, so it is narrowed away here.
+  const cardKind = values.loadKind === 'rate' ? 'rate' : 'concurrency'
+  const spec = gaussianSpec({ numRequests, load: { kind: cardKind, value: loadValue }, input, output })
   return {
     seed,
     horizon_ticks: null,

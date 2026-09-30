@@ -230,6 +230,60 @@ describe('offeredLoad (the single offered-load reading across workload types)', 
   it('reads a workload-spec load from its aggregate rate', () => {
     expect(offeredLoad(specRecord().group)).toEqual({ kind: 'rate', value: 10 })
   })
+
+  it('reads a trace sessions load from its concurrent-sessions pool', () => {
+    expect(offeredLoad(traceRecord(8).group)).toEqual({ kind: 'sessions', value: 8 })
+  })
+})
+
+// A trace-backed run: a session-pool replay. The flat fields are placeholder zeros; the load is
+// the `sessions` pool, mirrored onto group.workload.load and carried on the trace block.
+function traceRecord(sessions: number, overrides: Partial<RunRecord> = {}): RunRecord {
+  const base = JSON.parse(JSON.stringify(records.find((r) => r.group_id === MAIN)!)) as RunRecord
+  base.group_id = `trace-${sessions}`
+  base.run_id = 'weka'
+  base.workload_name = 'weka-jsonl'
+  base.group.workload = {
+    type: 'trace',
+    arrival_process: 'constant',
+    num_requests: 0,
+    load: { kind: 'sessions', value: sessions },
+    prompt_tokens: 0,
+    prompt_tokens_stdev: 0,
+    output_tokens: 0,
+    output_tokens_stdev: 0,
+    spec_file: null,
+    spec_sha256: null,
+    trace: {
+      sha256: 'weka-abc',
+      session_mode: 'closed-loop',
+      concurrent_sessions: sessions,
+      total_sessions: 183,
+      shuffle_corpus: true,
+      think_time_ms: 30,
+      think_time_dist: '',
+      source_format: 'weka',
+      records: 26648,
+      sessions: 183,
+      session_context_growth: 'accumulate',
+    },
+  } as RunRecord['group']['workload']
+  return { ...base, ...overrides }
+}
+
+describe('trace workloads offer a sessions load that sweeps', () => {
+  it('collapses trace runs that differ only in concurrent-sessions into one sweep table', () => {
+    const ws = loadWorkloads([traceRecord(8), traceRecord(32)])
+    expect(ws).toHaveLength(1)
+    expect(ws[0]!.loadAxis).toEqual({ kind: 'sessions', values: [8, 32] })
+  })
+
+  it('does not collapse traces that differ in a replay knob other than the pool', () => {
+    const other = traceRecord(32)
+    ;(other.group.workload.trace as { think_time_ms: number }).think_time_ms = 999
+    const ws = loadWorkloads([traceRecord(8), other])
+    expect(ws).toHaveLength(2)
+  })
 })
 
 // A spec-backed run (a preset or saved profile): the flat num_requests/load are

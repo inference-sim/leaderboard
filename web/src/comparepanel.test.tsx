@@ -67,10 +67,12 @@ describe('ComparePanel (cards)', () => {
     expect(html).toMatch(/Hide identical fields/i)
     expect(html).toMatch(/type="checkbox"[^>]*checked/)
     // max_num_seqs differs -> shown, and the non-control card highlights its changed value;
-    // scheduler is identical everywhere -> hidden.
-    expect(html).toContain('max_num_seqs')
-    expect(html).toMatch(/class="chg"/)
-    expect(html).not.toContain('scheduler')
+    // scheduler is identical everywhere -> hidden. Scope the "hidden" check to the cards, above
+    // the plot: the plot's constant-fields footnote names every identical field on purpose.
+    const cards = html.split('class="cmpplot"')[0]!
+    expect(cards).toContain('max_num_seqs')
+    expect(cards).toMatch(/class="chg"/)
+    expect(cards).not.toContain('scheduler')
   })
 
   it('shows a green/red delta chip on a non-control latency metric', () => {

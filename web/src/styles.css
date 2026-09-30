@@ -42,6 +42,16 @@
   --mode: #b8770c;
   --mode-ink: #6b4508;
   --mode-soft: #f6e8ca;
+  /* Compare-plot series ramp — a fixed, never-cycled categorical order drawn from the tag hue
+   * families (accent teal, alt indigo, mode amber, load rose) and validated for colourblind
+   * separation. --plot-other is the neutral bucket when groups outnumber the ramp. */
+  --plot-s1: #0e8f6b;
+  --plot-s2: #4a4fb0;
+  --plot-s3: #b5730a;
+  --plot-s4: #b1467e;
+  --plot-other: #8a938a;
+  --plot-grid: #eef1ec;
+  --plot-axis: #a8b0a5;
   --shadow: none;
   --font-sans: 'IBM Plex Sans', -apple-system, 'Segoe UI', system-ui, sans-serif;
   --font-mono: 'IBM Plex Mono', 'SFMono-Regular', ui-monospace, Menlo, monospace;
@@ -1188,16 +1198,18 @@ table.readout tbody tr:not(.reprorow) {
   padding: 12px 0 0;
 }
 
-/* ---------- DqBand ----------
- * A disqualified run is shown, never filtered — but it must never be mistaken
- * for a ranked row. The band sits below `.tscroll` (position already says
- * "not ranked here") and is set off by a dashed rule plus a change of ground
- * (a diagonal hatch, not just a plain panel) so "this region is excluded from
- * the ranking above" does not depend on noticing a color.
+/* ---------- Disqualified runs, inline ----------
+ * A disqualified run is shown, never filtered — but it must never be mistaken for a ranked
+ * row. It renders inside the table, grouped beneath the ranked complete rows under a divider
+ * (.dqsub) and set on muted ground (.dqline), so "excluded from the ranking above" does not
+ * depend on noticing a color: the dashed divider, the hatch, the ⚠ flag and the shading are
+ * four independent signals. Expanding a row shows the why-block (.dqwhybox) before the command.
  */
-.dqband {
-  margin-top: 28px;
-  padding: 20px 20px 4px;
+
+/* The divider row that opens the disqualified group: a full-width band with a dashed top rule
+ * and a diagonal hatch, so it reads as a boundary in the table body, not another data row. */
+.dqsub td {
+  padding: 10px 12px;
   border-top: 2px dashed var(--line-strong);
   background-image: repeating-linear-gradient(
     135deg,
@@ -1206,30 +1218,30 @@ table.readout tbody tr:not(.reprorow) {
     var(--paper) 10px,
     var(--paper) 20px
   );
-  border-radius: 3px;
-}
-
-.dqband h3 {
-  margin: 0 0 8px;
-  font-size: 15px;
-  font-weight: 600;
-  letter-spacing: -0.01em;
-}
-
-.dqintro {
-  margin: 0 0 18px;
-  max-width: 68ch;
   color: var(--muted);
-  font-size: 13px;
+  font-size: 12px;
+  white-space: normal;
 }
 
-.dqrow {
-  margin-bottom: 16px;
-  padding: 14px 16px;
+/* A disqualified data row: muted ground so it sits back from the ranked rows above it. The
+ * selector out-specifies `table.readout td` and the hover rule keeps working on top. */
+table.readout tbody tr.dqline td {
   background: var(--panel);
-  border: 1px solid var(--line-strong);
-  border-left: 4px solid var(--crit-line);
-  border-radius: 3px;
+  color: var(--muted);
+}
+
+/* The ⚠ flag leading a disqualified row's deployment cell — the row's non-color marker; the
+ * reason codes themselves live in the expanded why-block. */
+.dqflag {
+  color: var(--crit-ink);
+  font-size: 12px;
+  margin-right: 5px;
+}
+
+/* The why-block inside a disqualified row's expanded panel: reason chips, the shedding prose,
+ * and the numbers, above the blis command. Padded because the drawer cell itself has none. */
+.dqwhybox {
+  padding: 12px 14px 4px;
 }
 
 .dqtop {
@@ -4965,14 +4977,25 @@ button.danger {
   cursor: default;
 }
 
-/* A row or DQ card highlighted for comparison. */
-tr.cmphl > td,
-tr.cmphl > td.lft {
+/* A row highlighted for comparison. The cells of a disqualified row (muted) and every sticky
+ * left column (deployment, in a load sweep) set their own background at higher specificity, so
+ * the highlight is scoped tightly enough — including the .lft columns — to win over all of them
+ * for both ranked and disqualified rows. */
+table.readout tbody tr.cmphl td,
+table.readout tbody tr.cmphl td.lft,
+table.readout tbody tr.dqline.cmphl td,
+table.readout tbody tr.dqline.cmphl td.lft {
   background: var(--accent-soft);
 }
-.dqrow.cmphl {
+/* an SLO-banded run is selectable for comparison like any other row */
+.slohidden.selectable {
+  cursor: pointer;
+}
+.slohidden.cmphl {
+  background: var(--accent-soft);
   outline: 2px solid var(--accent);
   outline-offset: 2px;
+  border-radius: 6px;
 }
 
 /* Compare mode draws an indigo frame around the whole viewport with a corner flag - an
@@ -5001,3 +5024,602 @@ tr.cmphl > td.lft {
   box-shadow: 0 3px 10px rgba(0, 0, 0, 0.25);
 }
 
+
+/* ============================================================================
+ * Compare-mode plot (ComparePlot.tsx). A compact figure below the comparison cards: the axis
+ * assignment reads as a sentence of dropdowns, one-click Views set common shapes, and the
+ * legend toggles series. Series colours are the --plot-* tokens; the hollow subset marks and
+ * confound advisory mirror the board's honesty rules.
+ * ========================================================================== */
+.cmpplot {
+  margin-top: 1.75rem;
+  padding-top: 1.25rem;
+  border-top: 1px solid var(--line);
+  display: flex;
+  flex-direction: column;
+  gap: 1.1rem;
+}
+
+/* header: title left, chart-wide toggles right */
+.cmpplot-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+.cmpplot-head h3 {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+}
+.plot-toggles {
+  display: flex;
+  gap: 1rem;
+  align-items: center;
+}
+.plot-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.78rem;
+  color: var(--muted);
+  cursor: pointer;
+  user-select: none;
+}
+.plot-toggle input {
+  accent-color: var(--accent);
+}
+
+/* per-plot Views: one-click starting shapes, with the drag grip at the row's head */
+/* a small, quiet helper strip: separated from the readout dropdowns by a hairline and set in
+ * muted tones so it never competes with the primary (teal) axis controls below it. */
+.plot-views {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem 0.55rem;
+  flex-wrap: wrap;
+  margin-bottom: 0.7rem;
+  padding: 0 3.4rem 0.6rem 0; /* right pad clears the corner action icons */
+  border-bottom: 1px solid var(--line);
+}
+.plot-views-label {
+  font-size: 0.62rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  color: var(--muted);
+}
+.plot-views-list {
+  display: flex;
+  gap: 0.3rem;
+  flex-wrap: wrap;
+}
+.plot-view-btn {
+  font-family: var(--font-sans);
+  font-size: 0.71rem;
+  cursor: pointer;
+  border: 1px solid var(--line);
+  background: transparent;
+  color: var(--muted);
+  border-radius: 999px;
+  padding: 0.1rem 0.55rem;
+}
+.plot-view-btn:hover {
+  border-color: var(--accent);
+  color: var(--accent-ink);
+}
+.plot-view-btn[aria-pressed='true'] {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+  color: var(--accent-ink);
+  font-weight: 600;
+}
+
+/* the chart figure: compact and self-contained */
+/* small-multiple grid: fills the full content width; one chart spans it, two or more lay out
+ * two to a row (wrapping to the next row), dropping to one column on a phone. */
+.plot-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 1rem;
+}
+.plot-grid.multi {
+  grid-template-columns: 1fr 1fr;
+}
+@media (max-width: 680px) {
+  .plot-grid.multi {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* the "Add plot" control */
+.plot-add {
+  font: inherit;
+  font-size: 0.8rem;
+  cursor: pointer;
+  border: 1px solid var(--line-strong);
+  background: var(--paper);
+  color: var(--accent-ink);
+  border-radius: 7px;
+  padding: 0.28rem 0.7rem;
+}
+.plot-add:hover {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+
+/* the chart figure: compact and self-contained; fills its grid cell */
+.plot-figure {
+  position: relative;
+  margin: 0;
+  min-width: 0;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--panel);
+  padding: 0.9rem 1rem 0.85rem;
+}
+.plot-figure.dragging {
+  opacity: 0.5;
+}
+.plot-figure.over {
+  outline: 2px dashed var(--accent);
+  outline-offset: 2px;
+}
+.plot-figure-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+  margin-bottom: 0.7rem;
+}
+.plot-grip {
+  cursor: grab;
+  color: var(--line-strong);
+  font-size: 0.85rem;
+  line-height: 1;
+  user-select: none;
+  padding: 0 0.1rem;
+}
+.plot-grip:hover {
+  color: var(--muted);
+}
+.plot-grip:active {
+  cursor: grabbing;
+}
+.plot-chart-controls {
+  display: flex;
+  align-items: center;
+  gap: 0.9rem;
+}
+/* action icons (enlarge, remove) pinned to the plot's upper-right corner */
+.plot-actions {
+  position: absolute;
+  top: 0.55rem;
+  right: 0.55rem;
+  z-index: 2;
+  display: flex;
+  gap: 0.1rem;
+}
+.plot-act {
+  display: inline-flex;
+  align-items: center;
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  line-height: 1;
+  padding: 0.2rem;
+  border-radius: 5px;
+}
+.plot-act svg {
+  stroke: currentColor;
+  fill: none;
+  stroke-width: 1.6;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.plot-act:hover {
+  color: var(--accent-ink);
+  background: var(--accent-soft);
+}
+.plot-act.danger:hover {
+  color: var(--crit-ink);
+  background: var(--crit-bg);
+}
+
+/* enlarge modal */
+.plot-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  background: rgba(23, 28, 26, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+}
+.plot-modal {
+  position: relative;
+  width: min(1100px, 94vw);
+  max-height: 92vh;
+  overflow: auto;
+}
+.plot-modal .plot-figure {
+  box-shadow: 0 18px 50px rgba(0, 0, 0, 0.3);
+}
+.plot-modal-close {
+  position: absolute;
+  top: 0.5rem;
+  right: 0.5rem;
+  z-index: 3;
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 1.4rem;
+  line-height: 1;
+  padding: 0.1rem 0.4rem;
+  border-radius: 6px;
+}
+.plot-modal-close:hover {
+  color: var(--ink);
+  background: var(--line);
+}
+
+/* run detail modal (opened by clicking a point) */
+.rundetail {
+  position: relative;
+  width: min(820px, 94vw);
+  max-height: 92vh;
+  overflow: auto;
+  background: var(--panel);
+  border: 1px solid var(--line-strong);
+  border-radius: 12px;
+  box-shadow: 0 18px 50px rgba(0, 0, 0, 0.3);
+  padding: 1.1rem 1.2rem 1.2rem;
+}
+.rundetail-head {
+  margin-bottom: 1rem;
+  padding-right: 2rem;
+}
+.rundetail-head h3 {
+  margin: 0 0 2px;
+  font-size: 0.95rem;
+  font-weight: 600;
+}
+.rundetail-head p {
+  margin: 0;
+  font-size: 0.82rem;
+  color: var(--muted);
+}
+.rundetail-dq {
+  margin-left: 0.5rem;
+  color: var(--crit-ink);
+}
+.rundetail-cols {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 1.1rem 2rem;
+}
+@media (min-width: 640px) {
+  .rundetail-cols {
+    grid-template-columns: 1fr 1fr;
+    align-items: start;
+  }
+}
+.rundetail-sec h4 {
+  margin: 0 0 0.5rem;
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--muted);
+}
+.rundetail-sec h4:not(:first-child) {
+  margin-top: 1rem;
+}
+.rundetail-kv {
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.rundetail-kv .kvrow {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.18rem 0;
+  border-bottom: 1px solid var(--line);
+  font-size: 0.82rem;
+}
+.rundetail-kv dt {
+  color: var(--muted);
+  font-family: var(--font-mono);
+  font-size: 0.78rem;
+  overflow-wrap: anywhere;
+}
+.rundetail-kv dd {
+  margin: 0;
+  text-align: right;
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+}
+.rundetail-grouplabel {
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: var(--accent-ink);
+  margin: 0.6rem 0 0.2rem;
+}
+.rundetail-metricgroup:first-of-type .rundetail-grouplabel {
+  margin-top: 0;
+}
+.rundetail-unit,
+.rundetail-star {
+  color: var(--muted);
+  font-weight: 400;
+}
+.rundetail .repro {
+  margin-top: 1.2rem;
+}
+
+/* the axis assignment as a sentence of dropdowns */
+.plot-readout {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+  font-size: 0.9rem;
+  color: var(--muted);
+}
+.plot-readout .op {
+  color: var(--muted);
+}
+.plot-term-wrap {
+  position: relative;
+  display: inline-block;
+}
+.plot-term {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+  color: var(--accent-ink);
+  background: var(--paper);
+  border: 1px solid var(--line-strong);
+  border-radius: 7px;
+  padding: 0.2rem 0.45rem;
+  line-height: 1.2;
+}
+.plot-term:hover {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+.plot-term.add {
+  color: var(--muted);
+  font-weight: 500;
+  border-style: dashed;
+  background: transparent;
+}
+.plot-term .u {
+  font-weight: 500;
+  font-size: 0.82em;
+  color: var(--muted);
+  margin-left: 0.2rem;
+}
+.plot-term .caret {
+  font-size: 0.7em;
+  color: var(--muted);
+  margin-left: 0.1rem;
+}
+
+.plot-svgbox {
+  position: relative;
+}
+.plotchart {
+  width: 100%;
+  height: auto;
+  display: block;
+}
+.plotchart text {
+  fill: var(--muted);
+  font-family: var(--font-sans);
+}
+.plotchart .axtitle {
+  fill: var(--ink);
+  font-weight: 600;
+}
+.plotchart .tick {
+  font-variant-numeric: tabular-nums;
+}
+.plotchart .endlabel {
+  fill: var(--ink);
+  font-weight: 600;
+}
+.plotmark {
+  cursor: pointer;
+}
+.plotmark:focus {
+  outline: none;
+}
+.plotmark:focus circle,
+.plotmark:hover circle {
+  stroke: var(--ink);
+}
+
+/* legend under the chart: each entry toggles its series */
+.plot-legend {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  align-items: center;
+  margin-top: 0.5rem;
+}
+.lgd {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  font: inherit;
+  font-size: 0.8rem;
+  color: var(--ink);
+  cursor: pointer;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  padding: 0.15rem 0.5rem;
+}
+.lgd:hover {
+  border-color: var(--line-strong);
+}
+.lgd.off {
+  color: var(--muted);
+  text-decoration: line-through;
+  opacity: 0.65;
+}
+.lgd.off .plot-swatch {
+  filter: grayscale(1);
+  opacity: 0.6;
+}
+.plot-swatch {
+  width: 10px;
+  height: 10px;
+  border-radius: 3px;
+  flex: none;
+}
+
+/* notes: footnotes below the chart, set off by a hairline */
+.plot-notes {
+  margin: 0.8rem 0 0;
+  padding-top: 0.7rem;
+  border-top: 1px solid var(--line);
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+}
+.plot-note {
+  font-size: 0.78rem;
+  line-height: 1.5;
+  display: flex;
+  gap: 0.5rem;
+  align-items: flex-start;
+  color: var(--muted);
+}
+.plot-note .ic {
+  flex: none;
+  margin-top: 0.05rem;
+}
+.plot-note.confound {
+  color: var(--warn-ink);
+  background: var(--warn-bg);
+  border: 1px solid var(--warn-line);
+  border-radius: 8px;
+  padding: 0.5rem 0.65rem;
+}
+.plot-ring {
+  display: inline-block;
+  width: 11px;
+  height: 11px;
+  border-radius: 50%;
+  border: 2px dashed var(--crit-line);
+  vertical-align: -1px;
+}
+
+/* the field / axis menu (opened from a readout dropdown) */
+.plot-menu {
+  position: absolute;
+  z-index: 20;
+  top: calc(100% + 5px);
+  left: 0;
+  min-width: 190px;
+  max-height: 260px;
+  overflow: auto;
+  background: var(--panel);
+  border: 1px solid var(--line-strong);
+  border-radius: 9px;
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.16);
+  padding: 5px;
+}
+.plot-menu-item {
+  display: block;
+  width: 100%;
+  text-align: left;
+  font: inherit;
+  font-size: 0.82rem;
+  border: 0;
+  background: transparent;
+  color: var(--ink);
+  border-radius: 6px;
+  padding: 0.34rem 0.55rem;
+  cursor: pointer;
+}
+.plot-menu-item:hover,
+.plot-menu-item[aria-selected='true'] {
+  background: var(--accent-soft);
+}
+
+/* per-point tooltip */
+.plot-tip {
+  position: absolute;
+  z-index: 10;
+  pointer-events: none;
+  min-width: 185px;
+  max-width: 240px;
+  transform: translate(12px, -50%);
+  background: var(--panel);
+  border: 1px solid var(--line-strong);
+  border-radius: 9px;
+  box-shadow: 0 6px 22px rgba(0, 0, 0, 0.14);
+  padding: 0.55rem 0.7rem;
+  font-size: 0.8rem;
+}
+.plot-tip .tid {
+  font-family: var(--font-mono);
+  font-weight: 600;
+  font-size: 0.82rem;
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+.plot-tip .tsub {
+  color: var(--muted);
+  font-size: 0.72rem;
+  margin-bottom: 0.4rem;
+}
+.plot-tip dl {
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.plot-tip .tr {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+}
+.plot-tip dt {
+  color: var(--muted);
+  font-size: 0.76rem;
+}
+.plot-tip dd {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: 0.78rem;
+}
+.plot-tip dd.yhot {
+  color: var(--accent-ink);
+  font-weight: 600;
+}
+.plot-tip .subtag {
+  margin-top: 0.4rem;
+  font-size: 0.72rem;
+  color: var(--crit-ink);
+  background: var(--crit-bg);
+  border-radius: 5px;
+  padding: 0.2rem 0.4rem;
+  display: inline-block;
+}
