@@ -46,6 +46,19 @@ function twoModelWorkload(): ReturnType<typeof loadWorkloads>[number] {
   return loadWorkloads([...only, ...llama])[0]!
 }
 
+/** The unbounded fixture workload swept across a second offered load (rate 10 added to the
+ *  existing rate 6). One profile, two comparability groups. */
+function twoLoadWorkload(): ReturnType<typeof loadWorkloads>[number] {
+  const at6 = records.filter((r) => r.group_id === MAIN)
+  const at10 = (JSON.parse(JSON.stringify(at6)) as RunRecord[]).map((r) => {
+    r.group.workload.load = { ...r.group.workload.load, value: 10 }
+    r.group_id = `l10-${r.group_id}`
+    r.run_id = `l10-${r.run_id}`
+    return r
+  })
+  return loadWorkloads([...at6, ...at10])[0]!
+}
+
 /** Splits a row's HTML into its <td> cells. Cells never nest, so non-greedy works. */
 function cellsOfRow(rowHtml: string): string[] {
   return rowHtml.match(/<td[^>]*>[\s\S]*?<\/td>/g) ?? []
@@ -189,6 +202,28 @@ describe('ReadoutTable, single-model workload (mainW: one model, three accelerat
     expect(first).not.toContain('scheduler')
     // model is a prominent field with its own slot, so it never lands in the collapsed rest.
     expect(first).not.toContain('qwen/qwen3-14b')
+  })
+})
+
+describe('ReadoutTable, a load sweep (one profile, two offered loads)', () => {
+  const w = twoLoadWorkload()
+  const html = renderToStaticMarkup(<ReadoutTable workload={w} models={[]} />)
+
+  it('shows a load column named for the kind (rate here), before Deployment, and sortable', () => {
+    expect(html).toContain('>Arrival rate<')
+    expect(html.indexOf('>Arrival rate<')).toBeLessThan(html.indexOf('Deployment'))
+    // The column is a sort button keyed on load, like every metric column.
+    expect(html).toMatch(/<button[^>]*class="sortbtn"[^>]*aria-label="Sort by Arrival rate"/)
+  })
+
+  it('renders each row at its offered load level', () => {
+    expect(html).toContain('6.0')
+    expect(html).toContain('10.0')
+  })
+
+  it('omits the load column when the reader narrows to a single load level', () => {
+    const one = renderToStaticMarkup(<ReadoutTable workload={w} models={[]} loads={[6]} />)
+    expect(one).not.toContain('>Arrival rate<')
   })
 })
 
@@ -485,9 +520,24 @@ describe('ReproPanel (what an opened row reveals)', () => {
 describe('WorkloadHeader', () => {
   const html = renderToStaticMarkup(<WorkloadHeader workload={mainW} />)
 
-  it('titles the section by the work offered, without a model clause', () => {
-    expect(html).toContain('500 requests at 6.0 req/s')
+  it('titles the section by the work offered, without a model or load clause', () => {
+    // Load is a dimension of the profile now, so the title is the shape alone; the level
+    // shows in the field grid (and, across a sweep, in the Load filter and column).
+    expect(html).toContain('<h2>500 requests</h2>')
     expect(html).not.toContain(' on qwen/qwen3-14b')
+  })
+
+  it('names the single offered rate for a one-level profile', () => {
+    expect(html).toContain('Offered rate')
+    expect(html).toContain('6.0')
+  })
+
+  it('names the load levels, not a single rate, for a sweep', () => {
+    const sweepHtml = renderToStaticMarkup(<WorkloadHeader workload={twoLoadWorkload()} />)
+    expect(sweepHtml).toContain('Load levels')
+    expect(sweepHtml).toContain('6.0')
+    expect(sweepHtml).toContain('10.0')
+    expect(sweepHtml).not.toContain('Offered rate')
   })
 
   it('describes the work alone, without listing the models run against it', () => {

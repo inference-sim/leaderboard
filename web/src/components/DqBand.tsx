@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import type { RunGroup, RunRecord } from '../load'
+import { runKey } from '../load'
 import { formatCount, formatMs, formatNumber } from '../format'
 import { rowId } from '../liverun'
 import { distinctModels, dqSummary } from '../model'
@@ -84,19 +85,19 @@ export function DqBand({
       </p>
 
       {entries.map((e) => {
-        const record = group.disqualified.find((r) => r.run_id === e.runId)!
+        const record = group.disqualified.find((r) => runKey(r) === e.key)!
         return (
           <article
-            key={e.runId}
+            key={e.key}
             id={rowId(record)}
-            className={`dqrow${compareMode && selectedIds.includes(e.runId) ? ' cmphl' : ''}`}
+            className={`dqrow${compareMode && selectedIds.includes(e.key) ? ' cmphl' : ''}`}
             onClick={
               compareMode && onToggleHighlight
                 ? (ev) => {
                     // Let the reproduce toggle and the delete button do their own thing; a
                     // click anywhere else on the card toggles the run's highlight.
                     if ((ev.target as HTMLElement).closest('button, a')) return
-                    onToggleHighlight(e.runId)
+                    onToggleHighlight(e.key)
                   }
                 : undefined
             }

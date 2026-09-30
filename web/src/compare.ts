@@ -1,13 +1,26 @@
 import type { RunRecord } from './load'
+import { runKey } from './load'
 import type { Column } from './model'
 import { COLUMNS, fieldDisplay, servedFraction, varyingDeploymentFields } from './model'
 import { formatCount, formatMs, formatNumber } from './format'
 import { FIELD_GROUPS, SEPARATELY_RENDERED } from './fieldgroups'
 
 /** Add an unselected run to the comparison, or remove it if already selected. Insertion
- *  order is preserved, so the first-highlighted run seeds the control slot. */
+ *  order is preserved. Selection order no longer drives the panel — see selectionInDisplayOrder. */
 export function toggleSelection(ids: string[], id: string): string[] {
   return ids.includes(id) ? ids.filter((x) => x !== id) : [...ids, id]
+}
+
+/**
+ * The selected runs in the board's own order rather than the order they were clicked: the
+ * comparison opens with the same columns, top to bottom, as the rows read down the table — the
+ * first (top) row is the control, the second column the second row, and so on. `displayOrder` is
+ * the table's rows in the order shown (ranked rows, then the disqualified band); the reader can
+ * still drag columns to re-order or re-pick the control afterwards.
+ */
+export function selectionInDisplayOrder(displayOrder: RunRecord[], selectedIds: string[]): RunRecord[] {
+  const set = new Set(selectedIds)
+  return displayOrder.filter((r) => set.has(runKey(r)))
 }
 
 /**
@@ -120,9 +133,19 @@ export interface ConfigGroup {
  */
 const COMPARE_HIDDEN_GROUPS = new Set<string>(['Simulation model'])
 
-/** Look records up by run id, in column order; ids with no record are skipped. */
+/**
+ * Look records up in column order, by either identifier: the board-wide runKey
+ * (group_id/run_id) the panel keys on so run_id twins across load levels stay distinct, or a
+ * bare run_id (what the unit tests pass, unique within their fixtures). Ids with no record are
+ * skipped. When a run_id repeats, its runKey entries stay distinct; the bare-run_id entry maps
+ * to the last, which only direct run_id callers reach and never with a repeat.
+ */
 function inOrder(records: RunRecord[], order: string[]): RunRecord[] {
-  const byId = new Map(records.map((r) => [r.run_id, r]))
+  const byId = new Map<string, RunRecord>()
+  for (const r of records) {
+    byId.set(r.run_id, r)
+    byId.set(runKey(r), r)
+  }
   return order.map((id) => byId.get(id)).filter((r): r is RunRecord => r != null)
 }
 

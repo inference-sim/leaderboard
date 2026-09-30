@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { ModelFilter } from './components/ModelFilter'
 import { HardwareFilter } from './components/HardwareFilter'
+import { LoadFilter } from './components/LoadFilter'
 import { EmptyFilterNote } from './components/EmptyFilterNote'
 import { emptyFilterNoun, keptByFilters, nextSelection } from './filter'
 import type { RunRecord } from './load'
@@ -12,6 +13,14 @@ const hardware = ['A100-SXM', 'H100', 'L40S']
 /** A minimal record carrying just the fields the filter reads. */
 function rec(model: string, hw: string): RunRecord {
   return { deployment: { model, hardware: hw } } as unknown as RunRecord
+}
+
+/** As `rec`, plus the offered-load value the load filter reads. */
+function recL(model: string, hw: string, load: number): RunRecord {
+  return {
+    deployment: { model, hardware: hw },
+    group: { workload: { load: { kind: 'rate', value: load } } },
+  } as unknown as RunRecord
 }
 
 /** The selectable bubbles, i.e. everything but the Clear button. */
@@ -79,6 +88,60 @@ describe('keptByFilters (the model + hardware row predicate the table and Select
 
   it('reads an empty hardware selection as "all hardware"', () => {
     expect(keptByFilters(rec('qwen/qwen3-14b', 'L40S'), models, models, [])).toBe(true)
+  })
+
+  it('keeps a record whose offered load is in the selected load levels', () => {
+    expect(keptByFilters(recL('qwen/qwen3-14b', 'H100', 10), models, models, hardware, [6, 10])).toBe(true)
+  })
+
+  it('drops a record whose load level was filtered out', () => {
+    expect(keptByFilters(recL('qwen/qwen3-14b', 'H100', 20), models, models, hardware, [6, 10])).toBe(false)
+  })
+
+  it('reads an empty load selection as "all loads"', () => {
+    expect(keptByFilters(recL('qwen/qwen3-14b', 'H100', 20), models, models, hardware, [])).toBe(true)
+  })
+})
+
+describe('emptyFilterNoun — load levels', () => {
+  it('names load levels when the load filter is shown and emptied', () => {
+    expect(emptyFilterNoun(true, models, true, hardware, true, [])).toBe('load levels')
+  })
+
+  it('ignores an empty load array when the load filter is not shown', () => {
+    expect(emptyFilterNoun(true, models, true, hardware, false, [])).toBeNull()
+  })
+})
+
+describe('LoadFilter', () => {
+  it('renders one bubble per rate level, labelled with one decimal, and names the rate axis', () => {
+    const html = renderToStaticMarkup(
+      <LoadFilter kind="rate" options={[6, 10]} selected={[6, 10]} onChange={() => {}} />,
+    )
+    expect(tags(html)).toHaveLength(2)
+    expect(html).toContain('6.0')
+    expect(html).toContain('10.0')
+    expect(html.toLowerCase()).toContain('rate')
+    expect(html).not.toContain('type="checkbox"')
+  })
+
+  it('labels a concurrency axis with integers and names concurrency', () => {
+    const html = renderToStaticMarkup(
+      <LoadFilter kind="concurrency" options={[16, 32]} selected={[16, 32]} onChange={() => {}} />,
+    )
+    expect(html).toContain('>16<')
+    expect(html).toContain('>32<')
+    expect(html.toLowerCase()).toContain('concurrency')
+  })
+
+  it('presses only the selected levels', () => {
+    const html = renderToStaticMarkup(
+      <LoadFilter kind="rate" options={[6, 10]} selected={[10]} onChange={() => {}} />,
+    )
+    const six = html.match(/<button[^>]*value="6.0"[^>]*>/)?.[0]
+    const ten = html.match(/<button[^>]*value="10.0"[^>]*>/)?.[0]
+    expect(six).toContain('aria-pressed="false"')
+    expect(ten).toContain('aria-pressed="true"')
   })
 })
 

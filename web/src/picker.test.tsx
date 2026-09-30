@@ -33,4 +33,39 @@ describe('WorkloadPicker', () => {
     )
     expect(html).not.toContain('qwen/qwen3-14b')
   })
+
+  // The MAIN profile swept across a second offered load: one card, two levels.
+  function sweep() {
+    const at6 = records.filter((r) => r.group_id === '5063e40dceb2')
+    const at10 = (JSON.parse(JSON.stringify(at6)) as RunRecord[]).map((r) => {
+      r.group.workload.load = { ...r.group.workload.load, value: 10 }
+      r.group_id = `l10-${r.group_id}`
+      r.run_id = `l10-${r.run_id}`
+      return r
+    })
+    return loadWorkloads([...at6, ...at10])
+  }
+
+  it('counts the load levels of a sweep on its card', () => {
+    const w = sweep()
+    const html = renderToStaticMarkup(
+      <WorkloadPicker workloads={w} selected={w[0]!.workloadKey} onSelect={() => {}} />,
+    )
+    expect(html).toContain('2 load levels')
+  })
+
+  it('tags the card with the load kind being varied', () => {
+    const html = renderToStaticMarkup(
+      <WorkloadPicker workloads={workloads} selected={workloads[0]!.workloadKey} onSelect={() => {}} />,
+    )
+    expect(html).toContain('tag-load')
+    expect(html).toContain('>rate<') // the fixture workloads are rate distributions
+  })
+
+  it('omits the load-levels count for a single-load workload', () => {
+    const html = renderToStaticMarkup(
+      <WorkloadPicker workloads={workloads} selected={workloads[0]!.workloadKey} onSelect={() => {}} />,
+    )
+    expect(html).not.toContain('load levels')
+  })
 })

@@ -1,5 +1,11 @@
 import type { WorkloadGroup } from '../load'
 
+/** Whether the load axis is one the load tag names — a synthetic rate or concurrency, as
+ *  opposed to a trace's recorded/sessions load. */
+function isLoadKind(kind: string): boolean {
+  return kind === 'rate' || kind === 'concurrency'
+}
+
 interface Props {
   workloads: WorkloadGroup[]
   /** The workloadKey of the selected workload. */
@@ -31,8 +37,13 @@ export function WorkloadPicker({ workloads, selected, onSelect }: Props) {
                 onClick={() => onSelect(workload.workloadKey)}
               >
                 <span className="wtitle">{workload.title}</span>
-                {workload.tags.length > 0 && (
+                {(workload.tags.length > 0 || isLoadKind(workload.loadAxis.kind)) && (
                   <span className="wtags">
+                    {/* The load kind being varied (rate / concurrency), so the reader knows what
+                        the sweep's axis measures before opening the table. */}
+                    {isLoadKind(workload.loadAxis.kind) && (
+                      <span className="spec-tag tag-load">{workload.loadAxis.kind}</span>
+                    )}
                     {workload.tags.map((tag) => (
                       <span key={tag} className={`spec-tag tag-${tag}`}>
                         {tag}
@@ -41,6 +52,9 @@ export function WorkloadPicker({ workloads, selected, onSelect }: Props) {
                   </span>
                 )}
                 <span className="gcount">
+                  {workload.loadAxis.values.length > 1 && (
+                    <span className="loadlevels">{workload.loadAxis.values.length} load levels</span>
+                  )}
                   <span className="ranked">{workload.complete.length} ranked</span>
                   {dq > 0 && <span className="dq">{dq} disqualified</span>}
                 </span>

@@ -5,6 +5,7 @@ import type { RunRecord } from './load'
 import {
   COLUMNS,
   KEY_SPEC_FIELDS,
+  LOAD_COLUMN,
   deploymentSpec,
   distinctHardware,
   distinctModels,
@@ -283,6 +284,27 @@ describe('sortRecords', () => {
     const models = asc.map((r) => r.deployment.model)
     // Not "all of one model then all of the other": the sort crosses the boundary.
     expect(new Set(models.slice(0, 5)).size).toBeGreaterThan(1)
+  })
+})
+
+describe('LOAD_COLUMN (the offered-load column of a sweep)', () => {
+  const at = (value: number, id: string): RunRecord => {
+    const r = JSON.parse(JSON.stringify(main.complete[0]!)) as RunRecord
+    r.run_id = id
+    r.group.workload.load = { ...r.group.workload.load, value }
+    return r
+  }
+
+  it('reads the offered-load value off the group', () => {
+    expect(LOAD_COLUMN.value(main.records[0]!)).toBe(6)
+  })
+
+  it('is sortable through sortRecords by its key', () => {
+    const rows = [at(20, 'a'), at(6, 'b'), at(10, 'c')]
+    const asc = sortRecords(rows, [{ key: 'load', dir: 1 }]).map((r) => r.group.workload.load.value)
+    const desc = sortRecords(rows, [{ key: 'load', dir: -1 }]).map((r) => r.group.workload.load.value)
+    expect(asc).toEqual([6, 10, 20])
+    expect(desc).toEqual([20, 10, 6])
   })
 })
 

@@ -39,7 +39,7 @@ func deployment() schema.Deployment {
 }
 
 func TestArgvIsExactAndComplete(t *testing.T) {
-	got := Argv("./blis", group(), deployment(), "/tmp/m.json", "")
+	got := Argv("./blis", group(), deployment(), "/tmp/m.json", "", "")
 	want := []string{
 		"./blis", "run",
 		"--model", "qwen/qwen3-14b",
@@ -77,7 +77,7 @@ func TestArgvIsExactAndComplete(t *testing.T) {
 // The deprecated spelling must not come back: upstream marks
 // --max-num-scheduled-tokens deprecated in favour of --max-num-batched-tokens.
 func TestArgvUsesTheUndeprecatedBatchedTokensFlag(t *testing.T) {
-	got := strings.Join(Argv("./blis", group(), deployment(), "/tmp/m.json", ""), " ")
+	got := strings.Join(Argv("./blis", group(), deployment(), "/tmp/m.json", "", ""), " ")
 	if strings.Contains(got, "--max-num-scheduled-tokens") {
 		t.Error("argv uses the deprecated --max-num-scheduled-tokens spelling")
 	}
@@ -89,7 +89,7 @@ func TestArgvUsesTheUndeprecatedBatchedTokensFlag(t *testing.T) {
 // --metrics-path is not optional: cache_hit_rate and requests[] are written only to
 // the file branch of EmitOutput, so a stdout capture is a lesser record.
 func TestArgvAlwaysCarriesMetricsPath(t *testing.T) {
-	got := Argv("./blis", group(), deployment(), "/tmp/m.json", "")
+	got := Argv("./blis", group(), deployment(), "/tmp/m.json", "", "")
 	if got[len(got)-2] != "--metrics-path" || got[len(got)-1] != "/tmp/m.json" {
 		t.Errorf("argv must end with --metrics-path <path>, got %v", got[len(got)-2:])
 	}
@@ -98,7 +98,7 @@ func TestArgvAlwaysCarriesMetricsPath(t *testing.T) {
 func TestArgvConcurrencyModeReplacesRate(t *testing.T) {
 	g := group()
 	g.Workload.Load = schema.Load{Kind: "concurrency", Value: 32}
-	joined := strings.Join(Argv("./blis", g, deployment(), "/tmp/m.json", ""), " ")
+	joined := strings.Join(Argv("./blis", g, deployment(), "/tmp/m.json", "", ""), " ")
 	if !strings.Contains(joined, "--concurrency 32") {
 		t.Errorf("missing --concurrency: %s", joined)
 	}
@@ -108,14 +108,14 @@ func TestArgvConcurrencyModeReplacesRate(t *testing.T) {
 }
 
 func TestArgvEmitsHorizonOnlyWhenSet(t *testing.T) {
-	joined := strings.Join(Argv("./blis", group(), deployment(), "/tmp/m.json", ""), " ")
+	joined := strings.Join(Argv("./blis", group(), deployment(), "/tmp/m.json", "", ""), " ")
 	if strings.Contains(joined, "--horizon") {
 		t.Errorf("unset horizon must not appear: %s", joined)
 	}
 	g := group()
 	h := int64(20000000)
 	g.HorizonTicks = &h
-	joined = strings.Join(Argv("./blis", g, deployment(), "/tmp/m.json", ""), " ")
+	joined = strings.Join(Argv("./blis", g, deployment(), "/tmp/m.json", "", ""), " ")
 	if !strings.Contains(joined, "--horizon 20000000") {
 		t.Errorf("missing --horizon: %s", joined)
 	}
@@ -133,7 +133,7 @@ func TestArgvWorkloadSpecReplacesDistributionFlags(t *testing.T) {
 		SpecSHA256: &sha,
 		Spec:       map[string]any{"version": "2", "aggregate_rate": 20},
 	}
-	got := Argv("./blis", g, deployment(), "/tmp/m.json", "/tmp/spec.yaml")
+	got := Argv("./blis", g, deployment(), "/tmp/m.json", "/tmp/spec.yaml", "")
 	joined := strings.Join(got, " ")
 
 	if !strings.Contains(joined, "--workload-spec /tmp/spec.yaml") {
@@ -166,7 +166,7 @@ func TestArgvEmitsGPUMemAndLongPrefillAlways(t *testing.T) {
 	d := deployment()
 	d.GPUMemoryUtilization = 0.8
 	d.LongPrefillTokenThreshold = 2048
-	joined := strings.Join(Argv("./blis", group(), d, "/tmp/m.json", ""), " ")
+	joined := strings.Join(Argv("./blis", group(), d, "/tmp/m.json", "", ""), " ")
 	for _, want := range []string{"--gpu-memory-utilization 0.8", "--long-prefill-token-threshold 2048"} {
 		if !strings.Contains(joined, want) {
 			t.Errorf("missing %q: %s", want, joined)
@@ -179,7 +179,7 @@ func TestArgvEmitsGPUMemAndLongPrefillAlways(t *testing.T) {
 // --speculative-acceptance-rate 0. On (K>0), the acceptance rate is required and the
 // method is passed only when set.
 func TestArgvSpeculativeOnlyWhenEnabled(t *testing.T) {
-	off := strings.Join(Argv("./blis", group(), deployment(), "/tmp/m.json", ""), " ")
+	off := strings.Join(Argv("./blis", group(), deployment(), "/tmp/m.json", "", ""), " ")
 	for _, flag := range []string{"--num-speculative-tokens", "--speculative-acceptance-rate", "--speculative-method"} {
 		if strings.Contains(off, flag) {
 			t.Errorf("K==0 must not emit %q: %s", flag, off)
@@ -189,7 +189,7 @@ func TestArgvSpeculativeOnlyWhenEnabled(t *testing.T) {
 	d := deployment()
 	d.NumSpeculativeTokens = 4
 	d.SpeculativeAcceptanceRate = 0.7
-	on := strings.Join(Argv("./blis", group(), d, "/tmp/m.json", ""), " ")
+	on := strings.Join(Argv("./blis", group(), d, "/tmp/m.json", "", ""), " ")
 	if !strings.Contains(on, "--num-speculative-tokens 4") || !strings.Contains(on, "--speculative-acceptance-rate 0.7") {
 		t.Errorf("K>0 must emit the draft count and acceptance rate: %s", on)
 	}
@@ -198,7 +198,7 @@ func TestArgvSpeculativeOnlyWhenEnabled(t *testing.T) {
 	}
 
 	d.SpeculativeMethod = "eagle"
-	withMethod := strings.Join(Argv("./blis", group(), d, "/tmp/m.json", ""), " ")
+	withMethod := strings.Join(Argv("./blis", group(), d, "/tmp/m.json", "", ""), " ")
 	if !strings.Contains(withMethod, "--speculative-method eagle") {
 		t.Errorf("a set method must be emitted when K>0: %s", withMethod)
 	}
@@ -212,7 +212,7 @@ func TestArgvRoutingScorersOnlyWhenWeighted(t *testing.T) {
 	// somehow rode along on the record: blis ignores --routing-scorers for it.
 	d := deployment()
 	d.RoutingScorers = []schema.ScorerConfig{{Name: "queue-depth", Weight: 1}}
-	off := strings.Join(Argv("./blis", group(), d, "/tmp/m.json", ""), " ")
+	off := strings.Join(Argv("./blis", group(), d, "/tmp/m.json", "", ""), " ")
 	if strings.Contains(off, "--routing-scorers") {
 		t.Errorf("a non-weighted policy must not emit --routing-scorers: %s", off)
 	}
@@ -220,7 +220,7 @@ func TestArgvRoutingScorersOnlyWhenWeighted(t *testing.T) {
 	// weighted with no profile emits nothing, so blis falls back to its own default.
 	w := deployment()
 	w.RoutingPolicy = "weighted"
-	none := strings.Join(Argv("./blis", group(), w, "/tmp/m.json", ""), " ")
+	none := strings.Join(Argv("./blis", group(), w, "/tmp/m.json", "", ""), " ")
 	if strings.Contains(none, "--routing-scorers") {
 		t.Errorf("weighted with an empty profile must not emit the flag: %s", none)
 	}
@@ -234,7 +234,7 @@ func TestArgvRoutingScorersOnlyWhenWeighted(t *testing.T) {
 		{Name: "queue-depth", Weight: 1},
 		{Name: "kv-utilization", Weight: 1.5},
 	}
-	on := Argv("./blis", group(), w, "/tmp/m.json", "")
+	on := Argv("./blis", group(), w, "/tmp/m.json", "", "")
 	joined := strings.Join(on, " ")
 	if !strings.Contains(joined, "--routing-scorers precise-prefix-cache:2,queue-depth:1,kv-utilization:1.5") {
 		t.Errorf("weighted profile not spelled out as name:weight pairs: %s", joined)
@@ -260,7 +260,7 @@ func indexOf(a []string, s string) int {
 // flag, --moe-comm-backend is left off when unset, and both sit between --dp and
 // --num-instances so the sharding block reads together.
 func TestArgvMoEKnobsOnlyWhenSet(t *testing.T) {
-	off := strings.Join(Argv("./blis", group(), deployment(), "/tmp/m.json", ""), " ")
+	off := strings.Join(Argv("./blis", group(), deployment(), "/tmp/m.json", "", ""), " ")
 	for _, flag := range []string{"--enable-expert-parallel", "--moe-comm-backend"} {
 		if strings.Contains(off, flag) {
 			t.Errorf("a dense/default deployment must not emit %q: %s", flag, off)
@@ -270,7 +270,7 @@ func TestArgvMoEKnobsOnlyWhenSet(t *testing.T) {
 	d := deployment()
 	d.EnableExpertParallel = true
 	d.MoECommBackend = "deepep_high_throughput"
-	got := Argv("./blis", group(), d, "/tmp/m.json", "")
+	got := Argv("./blis", group(), d, "/tmp/m.json", "", "")
 	joined := strings.Join(got, " ")
 	// --enable-expert-parallel is valueless: it must appear alone, not followed by a value.
 	iEP := indexOf(got, "--enable-expert-parallel")
@@ -295,7 +295,7 @@ func TestArgvMoEKnobsOnlyWhenSet(t *testing.T) {
 // only at a non-default value; the transfer physics stay off the argv at blis's defaults.
 func TestArgvDisaggregationEmission(t *testing.T) {
 	// No object → none of it appears.
-	plain := strings.Join(Argv("./blis", group(), deployment(), "/tmp/m.json", ""), " ")
+	plain := strings.Join(Argv("./blis", group(), deployment(), "/tmp/m.json", "", ""), " ")
 	for _, flag := range []string{"--prefill-instances", "--decode-instances", "--pd-decider", "--pd-transfer-bandwidth", "--pd-transfer-contention"} {
 		if strings.Contains(plain, flag) {
 			t.Errorf("a non-disaggregated deployment must not emit %q: %s", flag, plain)
@@ -312,7 +312,7 @@ func TestArgvDisaggregationEmission(t *testing.T) {
 		TransferBandwidth:   defaultPDTransferBandwidth,
 		TransferBaseLatency: defaultPDTransferBaseLatency,
 	}
-	got := strings.Join(Argv("./blis", group(), d, "/tmp/m.json", ""), " ")
+	got := strings.Join(Argv("./blis", group(), d, "/tmp/m.json", "", ""), " ")
 	for _, want := range []string{"--prefill-instances 1", "--decode-instances 1", "--pd-decider always"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("missing %q: %s", want, got)
@@ -335,7 +335,7 @@ func TestArgvDisaggregationEmission(t *testing.T) {
 		TransferBaseLatency:    0.1,
 		TransferContention:     true,
 	}
-	got2 := strings.Join(Argv("./blis", group(), d2, "/tmp/m.json", ""), " ")
+	got2 := strings.Join(Argv("./blis", group(), d2, "/tmp/m.json", "", ""), " ")
 	for _, want := range []string{
 		"--prefill-decode-instances 2", "--pd-decider prefix-threshold", "--pd-prefix-threshold 128",
 		"--pd-transfer-bandwidth 50", "--pd-transfer-base-latency 0.1", "--pd-transfer-contention",
@@ -346,16 +346,46 @@ func TestArgvDisaggregationEmission(t *testing.T) {
 	}
 }
 
+// KV-cache CPU offloading emits --kv-offload-config with the given path only when the
+// deployment carries a kv_offload block, following the "emit when the capability is on"
+// rule. The path is a pass-through (the caller materializes the config file), so it is
+// spelled verbatim, and it rides just before --metrics-path like the workload-spec path.
+func TestArgvKVOffloadConfig(t *testing.T) {
+	// No block → the flag never appears, even when a path is threaded through.
+	off := strings.Join(Argv("./blis", group(), deployment(), "/tmp/m.json", "", "/tmp/o.yaml"), " ")
+	if strings.Contains(off, "--kv-offload-config") {
+		t.Errorf("a non-offloading deployment must not emit --kv-offload-config: %s", off)
+	}
+
+	d := deployment()
+	d.KVOffload = &schema.KVOffload{
+		CPUBytesToUse: 1 << 30, BlockSize: 16, BlocksPerChunk: 1, TokensPerHash: 16,
+		EvictionPolicy: "lru", OffloadPromptOnly: true,
+	}
+	got := Argv("./blis", group(), d, "/tmp/m.json", "", "/tmp/o.yaml")
+	joined := strings.Join(got, " ")
+	if !strings.Contains(joined, "--kv-offload-config /tmp/o.yaml") {
+		t.Errorf("missing --kv-offload-config with its path: %s", joined)
+	}
+	i := indexOf(got, "--kv-offload-config")
+	if i < 0 || got[i+1] != "/tmp/o.yaml" {
+		t.Errorf("--kv-offload-config must be followed by its path: %v", got)
+	}
+	if got[len(got)-2] != "--metrics-path" {
+		t.Errorf("--metrics-path must remain last: %v", got[len(got)-2:])
+	}
+}
+
 // --dp is MoE-only upstream and rejects unsupported combinations, so the default of
 // 1 is left off rather than asserted.
 func TestArgvOmitsDefaultDataParallelism(t *testing.T) {
-	joined := strings.Join(Argv("./blis", group(), deployment(), "/tmp/m.json", ""), " ")
+	joined := strings.Join(Argv("./blis", group(), deployment(), "/tmp/m.json", "", ""), " ")
 	if strings.Contains(joined, "--dp") {
 		t.Errorf("dp=1 must not be emitted: %s", joined)
 	}
 	d := deployment()
 	d.DP = 2
-	joined = strings.Join(Argv("./blis", group(), d, "/tmp/m.json", ""), " ")
+	joined = strings.Join(Argv("./blis", group(), d, "/tmp/m.json", "", ""), " ")
 	if !strings.Contains(joined, "--dp 2") {
 		t.Errorf("missing --dp 2: %s", joined)
 	}
@@ -366,7 +396,7 @@ func TestArgvOmitsDefaultDataParallelism(t *testing.T) {
 func TestArgvAppendsExtraFlagsSorted(t *testing.T) {
 	d := deployment()
 	d.ExtraFlags = map[string]string{"prefix-tokens": "64", "enforce-eager": "true"}
-	got := Argv("./blis", group(), d, "/tmp/m.json", "")
+	got := Argv("./blis", group(), d, "/tmp/m.json", "", "")
 	joined := strings.Join(got, " ")
 	iEager := strings.Index(joined, "--enforce-eager true")
 	iPrefix := strings.Index(joined, "--prefix-tokens 64")
@@ -386,9 +416,9 @@ func TestArgvAppendsExtraFlagsSorted(t *testing.T) {
 func TestArgvIsDeterministic(t *testing.T) {
 	d := deployment()
 	d.ExtraFlags = map[string]string{"a": "1", "b": "2", "c": "3"}
-	first := Argv("./blis", group(), d, "/tmp/m.json", "")
+	first := Argv("./blis", group(), d, "/tmp/m.json", "", "")
 	for i := 0; i < 20; i++ {
-		if got := Argv("./blis", group(), d, "/tmp/m.json", ""); !reflect.DeepEqual(got, first) {
+		if got := Argv("./blis", group(), d, "/tmp/m.json", "", ""); !reflect.DeepEqual(got, first) {
 			t.Fatalf("argv varied between calls:\n%v\n%v", first, got)
 		}
 	}

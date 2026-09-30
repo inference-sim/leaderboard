@@ -1,6 +1,8 @@
 import { useState, type CSSProperties, type DragEvent } from 'react'
 import type { RunRecord } from '../load'
+import { offeredLoad, runKey } from '../load'
 import { buildConfigRows, buildMetricRows, reconcileOrder, removeColumn, reorder } from '../compare'
+import { formatNumber } from '../format'
 
 interface ComparePanelProps {
   /** The highlighted records, in selection order. Fewer than two shows the prompt. */
@@ -47,8 +49,8 @@ export function ComparePanel({ records, onRemove }: ComparePanelProps) {
     )
   }
 
-  const view = reconcileOrder(order, records.map((r) => r.run_id))
-  const byId = new Map(records.map((r) => [r.run_id, r]))
+  const view = reconcileOrder(order, records.map((r) => runKey(r)))
+  const byId = new Map(records.map((r) => [runKey(r), r]))
   const cols = view.map((id) => byId.get(id)).filter((r): r is RunRecord => r != null)
   const anyDq = cols.some((r) => !r.status.complete)
   const configGroups = buildConfigRows(records, view, !hideIdentical)
@@ -69,11 +71,30 @@ export function ComparePanel({ records, onRemove }: ComparePanelProps) {
   )
   const noConfig = configLines.length === 0
 
-  // Cards and the label bar are subgrids over these shared rows: header, optional status, the
-  // Configuration divider + its fields (or one "identical" row), the Performance divider + its
-  // metrics.
+  // The workload section surfaces the one work-side field that can vary across a highlighted
+  // set drawn from a single profile: the offered load. Compare stays control-relative, so
+  // showing load as its own labelled, tinted row spells out what a column changed (load,
+  // configuration, or both) rather than hiding it. Omitted when every run shares one load.
+  const loadDigits = offeredLoad(cols[0]!.group).kind === 'rate' ? 1 : 0
+  const loadVaries = new Set(cols.map((r) => offeredLoad(r.group).value)).size > 1
+  const workloadLines: ConfigLine[] = loadVaries
+    ? [
+        {
+          label: 'offered load',
+          cells: cols.map((r) => ({
+            runId: r.run_id,
+            display: formatNumber(offeredLoad(r.group).value, loadDigits),
+          })),
+        },
+      ]
+    : []
+
+  // Cards and the label bar are subgrids over these shared rows: header, optional status, an
+  // optional Workload divider + its rows, the Configuration divider + its fields (or one
+  // "identical" row), the Performance divider + its metrics.
   const configRows = noConfig ? 1 : configLines.length
-  const rowCount = 1 + (anyDq ? 1 : 0) + 1 + configRows + 1 + metricLines.length
+  const workloadBlock = workloadLines.length > 0 ? 1 + workloadLines.length : 0
+  const rowCount = 1 + (anyDq ? 1 : 0) + workloadBlock + 1 + configRows + 1 + metricLines.length
 
   const endDrag = () => {
     setDragId(null)
@@ -129,6 +150,16 @@ export function ComparePanel({ records, onRemove }: ComparePanelProps) {
         <div className="cmpgutter">
           <div className="cmpg head" />
           {anyDq && <div className="cmpg status" />}
+          {workloadLines.length > 0 && (
+            <>
+              <div className="cmpg sec">Workload</div>
+              {workloadLines.map((l) => (
+                <div key={l.label} className="cmpg label">
+                  {l.label}
+                </div>
+              ))}
+            </>
+          )}
           <div className="cmpg sec">Configuration</div>
           {noConfig ? (
             <div className="cmpg label muted">All identical</div>
@@ -163,7 +194,7 @@ export function ComparePanel({ records, onRemove }: ComparePanelProps) {
             .filter(Boolean)
             .join(' ')
           return (
-            <article key={r.run_id} className={cardCls} {...dragProps(r.run_id, ci)}>
+            <article key={runKey(r)} className={cardCls} {...dragProps(runKey(r), ci)}>
               <div className="cmpchead">
                 <span className="cmpgrip" aria-hidden="true" title="Drag to reorder; drop first to make it the control">
                   ⠿
@@ -185,8 +216,8 @@ export function ComparePanel({ records, onRemove }: ComparePanelProps) {
                   className="cmpx"
                   aria-label={`Remove ${r.run_id} from the comparison`}
                   onClick={() => {
-                    setOrder(removeColumn(view, r.run_id))
-                    onRemove(r.run_id)
+                    setOrder(removeColumn(view, runKey(r)))
+                    onRemove(runKey(r))
                   }}
                 >
                   ✕
@@ -200,6 +231,21 @@ export function ComparePanel({ records, onRemove }: ComparePanelProps) {
                     </span>
                   )}
                 </div>
+              )}
+
+              {workloadLines.length > 0 && (
+                <>
+                  <div className="cmpcarddiv" />
+                  {workloadLines.map((l) => {
+                    const cell = l.cells[ci]!
+                    const changed = !isControl && cell.display !== l.cells[0]!.display
+                    return (
+                      <div key={l.label} className="cmpv">
+                        <span className={changed ? 'chg' : undefined}>{cell.display}</span>
+                      </div>
+                    )
+                  })}
+                </>
               )}
 
               <div className="cmpcarddiv" />

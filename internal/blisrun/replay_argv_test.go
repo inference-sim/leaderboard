@@ -25,7 +25,7 @@ func traceGroup() schema.Group {
 }
 
 func TestReplayArgvStructure(t *testing.T) {
-	got := ReplayArgv("./blis", traceGroup(), deployment(), "/tmp/m.json", "/store/3f9a/header.yaml", "/store/3f9a/data.csv")
+	got := ReplayArgv("./blis", traceGroup(), deployment(), "/tmp/m.json", "/store/3f9a/header.yaml", "/store/3f9a/data.csv", "")
 	want := []string{
 		"./blis", "replay",
 		"--trace-header", "/store/3f9a/header.yaml",
@@ -60,7 +60,7 @@ func TestReplayArgvStructure(t *testing.T) {
 // from the trace, not a CLI flag). Emitting it makes cobra reject the whole command with
 // a usage dump, so ReplayArgv must never include it.
 func TestReplayArgvOmitsTimeout(t *testing.T) {
-	joined := strings.Join(ReplayArgv("./blis", traceGroup(), deployment(), "/tmp/m.json", "h", "d"), " ")
+	joined := strings.Join(ReplayArgv("./blis", traceGroup(), deployment(), "/tmp/m.json", "h", "d", ""), " ")
 	if strings.Contains(joined, "--timeout") {
 		t.Errorf("replay argv emitted --timeout, which blis replay does not accept: %s", joined)
 	}
@@ -69,7 +69,7 @@ func TestReplayArgvOmitsTimeout(t *testing.T) {
 // The synthetic-distribution flags are never emitted for a replay: the request stream is
 // the trace, and blis replay does not register --workload/--num-requests/--rate/--prompt-tokens.
 func TestReplayArgvOmitsSyntheticFlags(t *testing.T) {
-	joined := strings.Join(ReplayArgv("./blis", traceGroup(), deployment(), "/tmp/m.json", "h", "d"), " ")
+	joined := strings.Join(ReplayArgv("./blis", traceGroup(), deployment(), "/tmp/m.json", "h", "d", ""), " ")
 	for _, forbidden := range []string{"--workload ", "--num-requests", "--rate", "--concurrency", "--prompt-tokens", "--output-tokens"} {
 		if strings.Contains(joined, forbidden) {
 			t.Errorf("replay argv emitted synthetic flag %q: %s", forbidden, joined)
@@ -82,7 +82,7 @@ func TestReplayArgvThinkTimeAndPoolKnobs(t *testing.T) {
 	g.Workload.Trace.TotalSessions = 100
 	g.Workload.Trace.ShuffleCorpus = true
 	g.Workload.Trace.ThinkTimeDist = "constant:value=500ms"
-	joined := strings.Join(ReplayArgv("./blis", g, deployment(), "/tmp/m.json", "h", "d"), " ")
+	joined := strings.Join(ReplayArgv("./blis", g, deployment(), "/tmp/m.json", "h", "d", ""), " ")
 	for _, want := range []string{
 		"--total-sessions 100", "--shuffle-corpus", "--think-time-dist constant:value=500ms",
 	} {
@@ -96,7 +96,7 @@ func TestReplayArgvThinkTimeMs(t *testing.T) {
 	g := traceGroup()
 	g.Workload.Trace.ConcurrentSessions = 0
 	g.Workload.Trace.ThinkTimeMs = 500
-	joined := strings.Join(ReplayArgv("./blis", g, deployment(), "/tmp/m.json", "h", "d"), " ")
+	joined := strings.Join(ReplayArgv("./blis", g, deployment(), "/tmp/m.json", "h", "d", ""), " ")
 	if !strings.Contains(joined, "--think-time-ms 500") {
 		t.Errorf("replay argv missing --think-time-ms 500: %s", joined)
 	}
@@ -109,7 +109,7 @@ func TestReplayArgvHorizon(t *testing.T) {
 	g := traceGroup()
 	h := int64(2_000_000)
 	g.HorizonTicks = &h
-	joined := strings.Join(ReplayArgv("./blis", g, deployment(), "/tmp/m.json", "h", "d"), " ")
+	joined := strings.Join(ReplayArgv("./blis", g, deployment(), "/tmp/m.json", "h", "d", ""), " ")
 	if !strings.Contains(joined, "--horizon 2000000") {
 		t.Errorf("replay argv missing --horizon: %s", joined)
 	}
@@ -120,8 +120,8 @@ func TestReplayArgvHorizon(t *testing.T) {
 // commands cannot drift in how a candidate is spelled.
 func TestReplayArgvSharesDeploymentBlock(t *testing.T) {
 	d := deployment()
-	runArgv := Argv("./blis", group(), d, "/tmp/m.json", "")
-	replayArgv := ReplayArgv("./blis", traceGroup(), d, "/tmp/m.json", "h", "d")
+	runArgv := Argv("./blis", group(), d, "/tmp/m.json", "", "")
+	replayArgv := ReplayArgv("./blis", traceGroup(), d, "/tmp/m.json", "h", "d", "")
 	if runDep, replayDep := deploymentFlagsOf(runArgv), deploymentFlagsOf(replayArgv); !reflect.DeepEqual(runDep, replayDep) {
 		t.Errorf("deployment flags differ between run and replay\n run: %v\n rep: %v", runDep, replayDep)
 	}

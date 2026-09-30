@@ -11,8 +11,10 @@ import {
   reconcileOrder,
   removeColumn,
   reorder,
+  selectionInDisplayOrder,
   toggleSelection,
 } from './compare'
+import { runKey } from './load'
 
 const records = fixture as unknown as RunRecord[]
 const col = (key: string) => COLUMNS.find((c) => c.key === key)!
@@ -31,6 +33,18 @@ describe('toggleSelection', () => {
   })
   it('removes an already-selected id', () => {
     expect(toggleSelection(['a', 'b', 'c'], 'b')).toEqual(['a', 'c'])
+  })
+})
+
+describe('selectionInDisplayOrder', () => {
+  it('returns the selected runs in board order, not click order', () => {
+    const { a, b, dq } = trio() // three distinct runs
+    const displayOrder = [a, b, dq]
+    // Clicked in the order dq, then a (reverse-ish of the table).
+    const picked = [runKey(dq), runKey(a)]
+    const ordered = selectionInDisplayOrder(displayOrder, picked)
+    // Comes back in table order (a before dq): a is the control, dq the second column.
+    expect(ordered.map((r) => r.run_id)).toEqual(['A', 'D'])
   })
 })
 

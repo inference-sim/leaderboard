@@ -82,6 +82,12 @@ export const KV_CACHE_DTYPES = ['auto', 'fp8', 'fp8_e4m3', 'fp8_e5m2', 'fp8_inc'
 export const LATENCY_MODELS = ['trained-physics', 'roofline']
 
 /**
+ * KV-cache CPU-offload eviction policies (kv_offload.eviction_policy). blis defaults to
+ * lru and also accepts arc (sim/kv_offload_config.go).
+ */
+export const KV_OFFLOAD_EVICTION_POLICIES = ['lru', 'arc']
+
+/**
  * MoE all-to-all comm backends (--moe-comm-backend). '' means unset (blis default,
  * allgather_reducescatter). blis charges the dispatch/combine cost only for a MoE model on
  * trained-physics with dp>1 or expert parallelism, and fatally rejects a non-empty backend

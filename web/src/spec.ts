@@ -232,15 +232,16 @@ export function firstClientPath(root: SpecObject): Path | null {
 }
 
 /**
- * summarizeSpec is the one-line work summary for the catalog, mirroring the server's
- * summarize: a spec is named by its aggregate rate when it declares a positive one,
- * else simply spec-backed. It never invents numbers a spec does not state.
+ * summarizeSpec is the one-line work summary for the catalog. It names a spec by its request
+ * count (the job size, part of the work) when it declares one, else simply spec-backed. It does
+ * not name the offered load: rate and concurrency are set per run and varied to sweep a profile,
+ * so they are not part of the profile's description. It never invents numbers a spec does not state.
  */
 export function summarizeSpec(obj: SpecObject | null): string {
   if (obj) {
-    const rate = getPath(obj, ['aggregate_rate'])
-    if (typeof rate === 'number' && rate > 0) {
-      return `spec-backed workload at ${String(rate)} req/s aggregate`
+    const requests = getPath(obj, ['num_requests'])
+    if (typeof requests === 'number' && requests > 0) {
+      return `spec-backed workload, ${requests.toLocaleString('en-US')} requests`
     }
   }
   return 'spec-backed workload'

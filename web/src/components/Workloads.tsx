@@ -154,7 +154,9 @@ export function Workloads({ boardWorkloads }: Props) {
   return (
     <>
       <p className="dek tab-intro">
-        A workload profile is a reusable definition of the work offered to a run, without the model.
+        A workload profile is a reusable definition of the work offered to a run, without the model
+        or the offered load. Model and load are chosen per run, and varying the load runs one
+        profile across rates or concurrency to compare how it scales.
       </p>
       <WorkloadEditor
         values={editing.values}

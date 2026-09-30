@@ -111,6 +111,21 @@ func (r *Runner) Run(g schema.Group, c RunSpec, metricsPath string) (schema.Reco
 	// cleaned up with everything else. blis resolves the path relative to its own cwd,
 	// so an absolute path is used.
 	var argv []string
+
+	// KV-cache CPU offloading, when enabled, needs its config on disk for
+	// --kv-offload-config. Like the workload spec it is written beside the metrics file in
+	// the caller-owned temp dir, so cleanup is free, and an absolute path is used because
+	// blis resolves it relative to its own cwd. It is deployment-side, independent of the
+	// workload type, so it is resolved once here and passed to every argv branch.
+	var kvOffloadPath string
+	if c.Deployment.KVOffload != nil {
+		p, err := writeKVOffloadFile(c.Deployment.KVOffload, metricsPath)
+		if err != nil {
+			return schema.Record{}, fmt.Errorf("blisrun: %s: %w", c.RunID, err)
+		}
+		kvOffloadPath = p
+	}
+
 	switch g.Workload.Type {
 	case "trace":
 		// A trace runs `blis replay` against its stored blob. The blob must be present, or
@@ -124,7 +139,7 @@ func (r *Runner) Run(g schema.Group, c RunSpec, metricsPath string) (schema.Reco
 				"blisrun: %s: trace %s is not in the store; ingest it before replaying", c.RunID, sha)
 		}
 		header, data := r.TraceStore.Paths(sha)
-		argv = ReplayArgv(r.Binary, g, c.Deployment, metricsPath, header, data)
+		argv = ReplayArgv(r.Binary, g, c.Deployment, metricsPath, header, data, kvOffloadPath)
 	case "workload-spec":
 		// A workload-spec run needs its inline spec on disk for --workload-spec. It is
 		// written next to the metrics file (a per-run temp dir the caller owns), so it is
@@ -145,9 +160,9 @@ func (r *Runner) Run(g schema.Group, c RunSpec, metricsPath string) (schema.Reco
 			return schema.Record{}, fmt.Errorf("blisrun: %s: spec_sha256: %w", c.RunID, err)
 		}
 		g.Workload.SpecSHA256 = &sha
-		argv = Argv(r.Binary, g, c.Deployment, metricsPath, specPath)
+		argv = Argv(r.Binary, g, c.Deployment, metricsPath, specPath, kvOffloadPath)
 	default:
-		argv = Argv(r.Binary, g, c.Deployment, metricsPath, "")
+		argv = Argv(r.Binary, g, c.Deployment, metricsPath, "", kvOffloadPath)
 	}
 
 	cmd := exec.Command(argv[0], argv[1:]...)
@@ -277,6 +292,38 @@ func writeSpecFile(spec map[string]any, metricsPath string) (string, error) {
 	}
 	if err := os.WriteFile(abs, body, 0o644); err != nil {
 		return "", fmt.Errorf("write workload spec %s: %w", abs, err)
+	}
+	return abs, nil
+}
+
+// writeKVOffloadFile materializes a KV-cache CPU-offload config to a YAML file beside
+// metricsPath and returns its absolute path, so --kv-offload-config (resolved relative to
+// blis's cwd) finds it. It writes a top-level kv_offload: block with only the CPU-tier
+// keys — blis strict-parses it (cmd/kv_offload.go, KnownFields), so an unknown key would
+// be rejected, and secondary_tiers are not modelled here. Every field is written
+// explicitly so the config on disk is the full record, not blis's defaults.
+func writeKVOffloadFile(kv *schema.KVOffload, metricsPath string) (string, error) {
+	body, err := yaml.Marshal(map[string]any{
+		"kv_offload": map[string]any{
+			"cpu_bytes_to_use":          kv.CPUBytesToUse,
+			"block_size":                kv.BlockSize,
+			"blocks_per_chunk":          kv.BlocksPerChunk,
+			"tokens_per_hash":           kv.TokensPerHash,
+			"eviction_policy":           kv.EvictionPolicy,
+			"offload_prompt_only":       kv.OffloadPromptOnly,
+			"self_describing_kv_events": kv.SelfDescribingKVEvents,
+		},
+	})
+	if err != nil {
+		return "", fmt.Errorf("encode kv offload config: %w", err)
+	}
+	path := strings.TrimSuffix(metricsPath, filepath.Ext(metricsPath)) + ".kv-offload.yaml"
+	abs, err := filepath.Abs(path)
+	if err != nil {
+		return "", fmt.Errorf("resolve kv offload path: %w", err)
+	}
+	if err := os.WriteFile(abs, body, 0o644); err != nil {
+		return "", fmt.Errorf("write kv offload config %s: %w", abs, err)
 	}
 	return abs, nil
 }

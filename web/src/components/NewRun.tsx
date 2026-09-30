@@ -5,6 +5,7 @@ import {
   ADMISSION_POLICIES,
   DEFAULT_ROUTING_SCORERS,
   KV_CACHE_DTYPES,
+  KV_OFFLOAD_EVICTION_POLICIES,
   LATENCY_MODELS,
   MOE_COMM_BACKENDS,
   PD_DECIDERS,
@@ -22,8 +23,10 @@ import type { ModelInfo } from '../models'
 import { collapseHardwareAliases, listHardware } from '../hardware'
 import type { HardwareInfo } from '../hardware'
 import { workloadParam, workloadsHref } from '../route'
-import { listWorkloads, profileKnobs, profileSummary } from '../workloads'
+import { listWorkloads, profileKnobs, profileSummary, profileToGroup } from '../workloads'
 import type { ProfileBody } from '../workloads'
+import { offeredLoad } from '../load'
+import { numeric } from '../format'
 import { shellLines } from '../repro'
 import { CopyBlock } from './CopyBlock'
 import { Select } from './Select'
@@ -207,7 +210,18 @@ export function NewRun({
   // the flat fallback; the card cannot represent a spec, so it never pretends to.
   const onSelectWorkload = (name: string) => {
     if (name !== '') {
-      set('workloadSel', name)
+      // Prefill the load control from the chosen profile so it opens at that profile's own
+      // load; the reader can then change it to run the profile at another load (a sweep point).
+      // A trace's load is not this control's to set, and a load we cannot read (0) is left alone.
+      const profile = profiles.find((p) => p.name === name) ?? null
+      const load = profile && profile.workload.type !== 'trace' ? offeredLoad(profileToGroup(profile)) : null
+      setValues((v) => ({
+        ...v,
+        workloadSel: name,
+        ...(load && load.value > 0
+          ? { loadKind: load.kind as FormValues['loadKind'], loadValue: numeric(load.value) }
+          : {}),
+      }))
       return
     }
     const prev = profiles.find((p) => p.name === values.workloadSel) ?? null
@@ -409,6 +423,36 @@ export function NewRun({
                     </p>
                   </div>
                 )}
+                {/* Load is a dimension of the profile, not part of its shape: it is configured
+                    here per run, seeded from the profile, so the same profile can be run across
+                    load levels (a sweep). A trace's load comes from its replay knobs, not here. */}
+                {selectedProfile && selectedProfile.workload.type !== 'trace' && (
+                  <div className="nrload">
+                    <label className="nrrow">
+                      {/* The profile fixes the load kind (rate or concurrency); only the level is
+                          set here. The kind is shown, not switchable — to change it, define a
+                          different workload. */}
+                      <span className="nrlabel">
+                        {loadIsRate ? 'Offered rate (req/s)' : 'Concurrency (users)'}
+                      </span>
+                      <input
+                        type="text"
+                        inputMode="decimal"
+                        value={values.loadValue}
+                        spellCheck={false}
+                        onChange={(e) => set('loadValue', e.target.value)}
+                        aria-invalid={issueFor('loadValue') != null}
+                      />
+                    </label>
+                    {issueFor('loadValue') && <p className="nrerr">{issueFor('loadValue')!.message}</p>}
+                    <p className="nrnote">
+                      The load to run this profile at, seeded from the profile. Change it to run the
+                      same workload at another {loadIsRate ? 'rate' : 'concurrency'}; running several
+                      levels builds a sweep on the board. To vary the shape or switch rate and
+                      concurrency, define a workload.
+                    </p>
+                  </div>
+                )}
               </>
             )}
           </fieldset>
@@ -558,6 +602,7 @@ export function NewRun({
                 {knobSel('kvCacheDtype', 'KV cache dtype', KV_CACHE_DTYPES)}
                 {knobNum('blockSize', 'KV block size (tokens)')}
                 {knobNum('gpuMemoryUtilization', 'GPU memory utilization', '0', '0.05')}
+                <KvOffloadCard values={values} set={set} issueFor={issueFor} />
               </>,
             )}
 
@@ -898,6 +943,104 @@ function PdCard({
         latency are the KV handoff physics between pools; they reach the run only when changed
         from blis's defaults (25 GB/s, 0.05 ms).
       </p>
+    </>
+  )
+}
+
+/**
+ * KV-cache CPU offloading (--kv-offload-config): the single host-CPU tier that spills KV
+ * blocks off the GPU. Off by default; turning it on reveals the CPU-tier knobs and declares
+ * a kv_offload block on the candidate. Every field is written out, so the generated config
+ * is fully spelled rather than leaning on blis defaults.
+ */
+function KvOffloadCard({
+  values,
+  set,
+  issueFor,
+}: {
+  values: FormValues
+  set: <K extends keyof FormValues>(key: K, value: FormValues[K]) => void
+  issueFor: (field: keyof FormValues) => { message: string } | undefined
+}) {
+  const num = (field: keyof FormValues, label: string, step = '1', min = '0') => (
+    <>
+      <label className="nrrow">
+        <span className="nrlabel">{label}</span>
+        <input
+          type="number"
+          min={min}
+          step={step}
+          value={String(values[field])}
+          onChange={(e) => set(field, e.target.value as FormValues[typeof field])}
+          aria-invalid={issueFor(field) != null}
+        />
+      </label>
+      {issueFor(field) && <p className="nrerr">{issueFor(field)!.message}</p>}
+    </>
+  )
+  // A two-state off/on segmented control for one of the 'off' | 'on' string fields.
+  const toggle = (field: 'kvCpuOffload' | 'offloadPromptOnly' | 'selfDescribingKvEvents', label: string) => (
+    <div className="nrrow">
+      <span className="nrlabel" id={`${field}-label`}>
+        {label}
+      </span>
+      <div className="seg" role="radiogroup" aria-labelledby={`${field}-label`}>
+        {(['off', 'on'] as const).map((opt) => (
+          <label key={opt} className={values[field] === opt ? 'on' : undefined}>
+            <input
+              type="radio"
+              name={field}
+              checked={values[field] === opt}
+              onChange={() => set(field, opt)}
+            />
+            {opt}
+          </label>
+        ))}
+      </div>
+    </div>
+  )
+  const on = values.kvCpuOffload === 'on'
+  return (
+    <>
+      {toggle('kvCpuOffload', 'CPU offloading')}
+      {on && (
+        <>
+          {num('cpuBytesToUse', 'CPU offload budget (bytes)', '1', '1')}
+          {num('offloadBlockSize', 'Offload block size (tokens)', '1', '1')}
+          {num('blocksPerChunk', 'Blocks per chunk', '1', '1')}
+          {num('tokensPerHash', 'Tokens per hash', '1', '1')}
+
+          <div className="nrrow">
+            <span className="nrlabel" id="evictionPolicy-label">
+              Eviction policy
+            </span>
+            <div className="seg" role="radiogroup" aria-labelledby="evictionPolicy-label">
+              {KV_OFFLOAD_EVICTION_POLICIES.map((p) => (
+                <label key={p} className={values.evictionPolicy === p ? 'on' : undefined}>
+                  <input
+                    type="radio"
+                    name="evictionPolicy"
+                    value={p}
+                    checked={values.evictionPolicy === p}
+                    onChange={() => set('evictionPolicy', p)}
+                  />
+                  {p}
+                </label>
+              ))}
+            </div>
+          </div>
+
+          {toggle('offloadPromptOnly', 'Offload prompt only')}
+          {toggle('selfDescribingKvEvents', 'Self-describing KV events')}
+
+          <p className="nrnote">
+            The offload budget is the host CPU memory given to the tier, in bytes. Block size
+            and tokens per hash default to the GPU block size. Note that blis parses and
+            validates this config but its offload subsystem is inert at the pinned upstream
+            commit, so these knobs are plumbed ahead and do not change the simulated numbers yet.
+          </p>
+        </>
+      )}
     </>
   )
 }

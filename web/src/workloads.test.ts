@@ -164,9 +164,9 @@ describe('variantOf', () => {
 })
 
 describe('profileSummary', () => {
-  it('summarizes a spec profile by its aggregate rate', () => {
+  it('summarizes a spec profile by its request count, not its offered load', () => {
     const body = interpret(form()).body!
-    expect(profileSummary(body)).toBe('spec-backed workload at 10 req/s aggregate')
+    expect(profileSummary(body)).toBe('spec-backed workload, 500 requests')
   })
 
   it('names a rate-less spec simply spec-backed, inventing no numbers', () => {

@@ -271,6 +271,39 @@ export interface Deployment {
    */
   gpu_memory_utilization: number;
   /**
+   * KV-cache CPU offloading (--kv-offload-config): the single host-CPU tier that spills KV blocks off the GPU. Present only when offloading is on, so a record without it is canonically unchanged (cf. disaggregation, routing_scorers). Materialized at run time to a YAML file with a top-level kv_offload: block. NOTE: at the pinned upstream HEAD the offload subsystem is inert (blis parses and validates the config but no mechanism consumes it yet), so these knobs are plumbed ahead and do not move metrics. Secondary spill tiers (secondary_tiers) are a deliberate follow-up, not modelled here.
+   */
+  kv_offload?: {
+    /**
+     * cpu_bytes_to_use. Host CPU memory budget for the offload tier, in bytes (per GPU / per TP rank). Required and > 0; CPU-tier block capacity is this divided by the per-block byte size.
+     */
+    cpu_bytes_to_use: number;
+    /**
+     * block_size. Offload block size in tokens. blis defaults it to the GPU block size (block_size_in_tokens).
+     */
+    block_size: number;
+    /**
+     * blocks_per_chunk. Blocks transferred per chunk (blis default 1).
+     */
+    blocks_per_chunk: number;
+    /**
+     * tokens_per_hash. Tokens per prefix-cache hash; blis defaults it to the GPU block size.
+     */
+    tokens_per_hash: number;
+    /**
+     * eviction_policy. CPU-tier eviction policy (blis default lru).
+     */
+    eviction_policy: "lru" | "arc";
+    /**
+     * offload_prompt_only. When true, only prompt (prefill) KV is offloaded, not decode KV. vLLM default true.
+     */
+    offload_prompt_only: boolean;
+    /**
+     * self_describing_kv_events. Emit self-describing KV events (blis default false).
+     */
+    self_describing_kv_events: boolean;
+  };
+  /**
    * --num-speculative-tokens (K). 0 = speculative decoding off. Emitted only when > 0.
    */
   num_speculative_tokens: number;

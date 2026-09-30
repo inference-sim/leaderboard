@@ -17,7 +17,8 @@
  */
 
 import type { RunGroup, RunRecord } from './load'
-import { SPECULATIVE_METHODS } from './catalog'
+import { offeredLoad } from './load'
+import { KV_OFFLOAD_EVICTION_POLICIES, SPECULATIVE_METHODS } from './catalog'
 import { hardwareAliases } from './hardware'
 import type { HardwareInfo } from './hardware'
 import { isMoE } from './models'
@@ -136,6 +137,17 @@ export interface FormValues {
   kvCacheDtype: string
   latencyModel: string
   gpuMemoryUtilization: string
+  // --- KV-cache CPU offloading (--kv-offload-config). Read only when kvCpuOffload === 'on';
+  // when off the candidate declares no kv_offload block. The subsystem is inert upstream at
+  // the pinned HEAD, so these are plumbed ahead and do not move metrics. ---
+  kvCpuOffload: 'off' | 'on'
+  cpuBytesToUse: string
+  offloadBlockSize: string
+  blocksPerChunk: string
+  tokensPerHash: string
+  evictionPolicy: string
+  offloadPromptOnly: 'off' | 'on'
+  selfDescribingKvEvents: 'off' | 'on'
   numSpeculativeTokens: string
   speculativeAcceptanceRate: string
   speculativeMethod: string
@@ -413,6 +425,15 @@ export function suggestWorkloadName(profiles: ProfileBody[]): string {
 }
 
 /**
+ * The default CPU-offload budget (cpu_bytes_to_use) the form seeds when offloading is turned
+ * on: 4 GiB. blis requires the field and gives it no default, so the form supplies a modest,
+ * clearly-illustrative host budget as a starting point rather than opening on a blank, invalid
+ * field. The reader tunes it; the value does not move metrics while the offload subsystem is
+ * inert upstream.
+ */
+const DEFAULT_CPU_OFFLOAD_BYTES = 4 * 1024 * 1024 * 1024
+
+/**
  * Default form state: the custom card, seeded from the fallback. The component upgrades
  * this to the first catalog entry once profiles load (R2); with no server the page stays
  * here, which is exactly today's offline authoring capability (R8). The run id opens on
@@ -454,6 +475,20 @@ export function initialValues(): FormValues {
     kvCacheDtype: d.kv_cache_dtype,
     latencyModel: d.latency_model,
     gpuMemoryUtilization: String(d.gpu_memory_utilization),
+    // KV CPU offloading off by default (no kv_offload block); the knobs carry blis's
+    // defaults so the card opens on a valid, runnable config when it is turned on.
+    // cpu_bytes_to_use is required and > 0 with no blis default, so it seeds to a modest
+    // 4 GiB host budget (a starting point the reader tunes). block_size and tokens_per_hash
+    // default to the GPU block size, as blis does; blocks_per_chunk, eviction_policy and the
+    // two booleans carry blis's own defaults.
+    kvCpuOffload: 'off',
+    cpuBytesToUse: String(DEFAULT_CPU_OFFLOAD_BYTES),
+    offloadBlockSize: String(d.block_size_in_tokens),
+    blocksPerChunk: '1',
+    tokensPerHash: String(d.block_size_in_tokens),
+    evictionPolicy: 'lru',
+    offloadPromptOnly: 'on',
+    selfDescribingKvEvents: 'off',
     numSpeculativeTokens: String(d.num_speculative_tokens),
     speculativeAcceptanceRate: String(d.speculative_acceptance_rate),
     speculativeMethod: d.speculative_method,
@@ -636,6 +671,35 @@ export function interpret(
     }
   }
 
+  // KV-cache CPU offloading. Read only when turned on; when off the candidate declares no
+  // kv_offload block, so a non-offloading candidate is canonically unchanged. When on,
+  // cpu_bytes_to_use is required and > 0 (blis's enable trigger), block_size and
+  // tokens_per_hash are whole tokens > 0, blocks_per_chunk is >= 1, and eviction_policy is
+  // one blis accepts. Validated the way blis parses the config (cmd/kv_offload.go); the
+  // subsystem is inert upstream at the pinned HEAD, so these are plumbed ahead.
+  const kvOffloadActive = values.kvCpuOffload === 'on'
+  const cpuBytesToUse = Number(values.cpuBytesToUse)
+  const offloadBlockSize = Number(values.offloadBlockSize)
+  const blocksPerChunk = Number(values.blocksPerChunk)
+  const tokensPerHash = Number(values.tokensPerHash)
+  if (kvOffloadActive) {
+    if (!Number.isInteger(cpuBytesToUse) || cpuBytesToUse <= 0) {
+      push('cpuBytesToUse', 'CPU offload budget is a whole number of bytes, greater than 0.')
+    }
+    if (!Number.isInteger(offloadBlockSize) || offloadBlockSize <= 0) {
+      push('offloadBlockSize', 'Offload block size is a whole number of tokens, 1 or more.')
+    }
+    if (!Number.isInteger(blocksPerChunk) || blocksPerChunk < 1) {
+      push('blocksPerChunk', 'Blocks per chunk is a whole number, 1 or more.')
+    }
+    if (!Number.isInteger(tokensPerHash) || tokensPerHash <= 0) {
+      push('tokensPerHash', 'Tokens per hash is a whole number, 1 or more.')
+    }
+    if (!KV_OFFLOAD_EVICTION_POLICIES.includes(values.evictionPolicy)) {
+      push('evictionPolicy', `Eviction policy must be one of ${KV_OFFLOAD_EVICTION_POLICIES.join(', ')}.`)
+    }
+  }
+
   // The hardware catalogue is fetched from the server (GET /api/hardware, read from the
   // upstream hardware_config.json), so an empty list means it has not loaded yet or could
   // not be reached: with none in hand the form cannot judge the accelerator and skips the
@@ -667,10 +731,30 @@ export function interpret(
   // a group field (E1) — it rides on the candidate — so the group is model-free either way.
   // notes collects non-blocking warnings (a clamped custom distribution, a reused twin).
   const notes: string[] = []
-  const group =
+  let group =
     values.workloadSel === ''
       ? customGroup(values, push, (m) => notes.push(m))
       : profileGroup(values, profiles, push)
+
+  // The load control is authoritative for the run's load level. A custom workload already builds
+  // its load in (customGroup), but a selected profile's baked load is a starting point the
+  // control overrides — so one profile can be run across load levels (a sweep). The profile
+  // fixes the *kind* (a rate profile stays rate); only the level is the reader's to change here.
+  // A trace's load is derived from its own replay knobs, not this control, so it is left alone.
+  if (values.workloadSel !== '' && group && group.workload.type !== 'trace') {
+    const kind = offeredLoad(group).kind as LoadKind
+    const loadValue = Number(values.loadValue)
+    if (!Number.isFinite(loadValue) || loadValue <= 0) {
+      push(
+        'loadValue',
+        kind === 'rate'
+          ? 'Offered rate is a positive number of requests per second.'
+          : 'Concurrency is a positive number of in-flight sessions.',
+      )
+    } else {
+      group = withOfferedLoad(group, kind, loadValue)
+    }
+  }
 
   // The two workload types the page offers: a chosen catalog workload (a preset or saved
   // profile, named by workloadSel), or a custom workload defined below. A custom workload
@@ -740,6 +824,22 @@ export function interpret(
       kv_cache_dtype: values.kvCacheDtype as Deployment['kv_cache_dtype'],
       latency_model: values.latencyModel as Deployment['latency_model'],
       gpu_memory_utilization: gpuMemoryUtilization,
+      // The kv_offload block is present only when offloading is on, so a non-offloading
+      // candidate omits it and stays canonically identical to a stored record. Every field
+      // is written (the "always emit all" rule), so the config on disk is fully spelled out.
+      ...(kvOffloadActive
+        ? {
+            kv_offload: {
+              cpu_bytes_to_use: cpuBytesToUse,
+              block_size: offloadBlockSize,
+              blocks_per_chunk: blocksPerChunk,
+              tokens_per_hash: tokensPerHash,
+              eviction_policy: values.evictionPolicy as NonNullable<Deployment['kv_offload']>['eviction_policy'],
+              offload_prompt_only: values.offloadPromptOnly === 'on',
+              self_describing_kv_events: values.selfDescribingKvEvents === 'on',
+            } as Deployment['kv_offload'],
+          }
+        : {}),
       num_speculative_tokens: numSpeculativeTokens,
       speculative_acceptance_rate: speculativeAcceptanceRate,
       speculative_method: values.speculativeMethod as Deployment['speculative_method'],
@@ -801,6 +901,9 @@ export function interpret(
   }
 
   const specPath = `/tmp/${runId || 'run'}.workload.yaml`
+  // A placeholder path for the generated kv_offload config, mirroring specPath: the real
+  // path is a per-run temp file the server writes, so the preview argv shows a stable stand-in.
+  const kvOffloadPath = `/tmp/${runId || 'run'}.kv-offload.yaml`
   return {
     issues,
     target,
@@ -817,10 +920,44 @@ export function interpret(
       target,
       yamlFile: yamlFile(group, deployment, runId),
       yamlRow: yamlRow(deployment, baseDeployment, runId),
-      argv: argvFor('./blis', group, deployment, `/tmp/${runId}.json`, specPath),
+      argv: argvFor('./blis', group, deployment, `/tmp/${runId}.json`, specPath, kvOffloadPath),
       resultPath: target.group ? `results/${target.group.groupId}/${runId}.json` : null,
     },
   }
+}
+
+/**
+ * Overrides a group's offered load with the load control's value, so a selected profile can be
+ * run at a load other than the one it was saved with. Where the load lives depends on the type:
+ * a distribution's is `group.workload.load`; a workload-spec's is inside the spec (a client's
+ * `concurrency` for closed-loop, else the top-level `aggregate_rate`), cleared and reset the way
+ * gaussianSpec writes it. The arrival process follows the kind. A trace is returned unchanged —
+ * its load is a property of the replay, not this control. Mirrors load.offeredLoad, the reader.
+ */
+export function withOfferedLoad(group: Group, kind: LoadKind, value: number): Group {
+  const g = JSON.parse(JSON.stringify(group)) as Group
+  const w = g.workload as Group['workload'] & { spec?: Record<string, unknown> }
+  if (w.type === 'workload-spec' && w.spec) {
+    const spec = w.spec
+    delete spec.aggregate_rate
+    if (Array.isArray(spec.clients)) {
+      for (const c of spec.clients) {
+        if (c && typeof c === 'object') delete (c as { concurrency?: unknown }).concurrency
+      }
+    }
+    if (kind === 'concurrency') {
+      if (!Array.isArray(spec.clients) || spec.clients.length === 0) spec.clients = [{}]
+      const first = (spec.clients as unknown[])[0]
+      if (first && typeof first === 'object') (first as { concurrency?: number }).concurrency = value
+    } else {
+      spec.aggregate_rate = value
+    }
+    w.arrival_process = arrivalProcess(kind)
+  } else if (w.type === 'distribution') {
+    w.load = { kind, value }
+    w.arrival_process = arrivalProcess(kind)
+  }
+  return g
 }
 
 /** The group for a selected catalog profile: the profile's work (spec or distribution),
@@ -1133,6 +1270,8 @@ export function yamlFile(group: Group, deployment: Deployment, runId: string): s
     `  kv_cache_dtype: ${deployment.kv_cache_dtype}`,
     `  latency_model: ${deployment.latency_model}`,
     `  gpu_memory_utilization: ${deployment.gpu_memory_utilization}`,
+    // Written only when offloading is on — the same rule the record and the argv follow.
+    ...(deployment.kv_offload ? [`  kv_offload: ${kvOffloadFlow(deployment.kv_offload)}`] : []),
     `  num_speculative_tokens: ${deployment.num_speculative_tokens}`,
     `  speculative_acceptance_rate: ${deployment.speculative_acceptance_rate}`,
     `  speculative_method: ${deployment.speculative_method === '' ? "''" : deployment.speculative_method}`,
@@ -1172,6 +1311,12 @@ export function yamlRow(deployment: Deployment, basis: Deployment, runId: string
       fields.push(`disaggregation: ${disaggregationFlow(value as NonNullable<Deployment['disaggregation']>)}`)
       continue
     }
+    // kv_offload is an object; String() would render "[object Object]", so spell it out as
+    // the inline-flow map the full file uses.
+    if (key === 'kv_offload') {
+      fields.push(`kv_offload: ${kvOffloadFlow(value as NonNullable<Deployment['kv_offload']>)}`)
+      continue
+    }
     fields.push(`${key}: ${String(value)}`)
   }
   return `- {${fields.join(', ')}}`
@@ -1196,6 +1341,17 @@ function disaggregationFlow(pd: NonNullable<Deployment['disaggregation']>): stri
   )
 }
 
+/** A kv_offload block as inline-flow YAML, so it fits the full file and the one-line
+ * runs.yaml row and round-trips through the spec loader's JSON decode. */
+function kvOffloadFlow(kv: NonNullable<Deployment['kv_offload']>): string {
+  return (
+    `{cpu_bytes_to_use: ${kv.cpu_bytes_to_use}, block_size: ${kv.block_size}, ` +
+    `blocks_per_chunk: ${kv.blocks_per_chunk}, tokens_per_hash: ${kv.tokens_per_hash}, ` +
+    `eviction_policy: ${kv.eviction_policy}, offload_prompt_only: ${kv.offload_prompt_only}, ` +
+    `self_describing_kv_events: ${kv.self_describing_kv_events}}`
+  )
+}
+
 /**
  * The blis command line this declaration produces. A port of
  * internal/blisrun.Argv, pinned to it by a test over every committed record's
@@ -1208,6 +1364,7 @@ export function argvFor(
   d: Deployment,
   metricsPath: string,
   specPath = '',
+  kvOffloadPath = '',
 ): string[] {
   const a: string[] = [binary, 'run']
   const add = (flag: string, value: string | number) => a.push(flag, String(value))
@@ -1296,6 +1453,10 @@ export function argvFor(
   for (const flag of Object.keys(d.extra_flags ?? {}).sort()) {
     add(`--${flag}`, (d.extra_flags ?? {})[flag] ?? '')
   }
+
+  // KV-cache CPU offloading, emitted only when on — a generated config file, so its path is
+  // a pass-through like specPath. Mirrors internal/blisrun.Argv, which emits it here too.
+  if (d.kv_offload) add('--kv-offload-config', kvOffloadPath)
 
   add('--metrics-path', metricsPath)
   return a

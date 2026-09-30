@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import fixture from '../../prototypes/results.json'
-import { loadGroups, loadWorkloads } from './load'
+import { loadGroups, loadWorkloads, offeredLoad } from './load'
 import type { RunRecord } from './load'
 
 const records = fixture as unknown as RunRecord[]
@@ -108,11 +108,13 @@ describe('loadWorkloads', () => {
     expect(differBySeed).toHaveLength(2)
   })
 
-  it('titles the workload without a model clause, since one table spans many models', () => {
+  it('titles the workload without a model or load clause, since one profile spans both', () => {
     const w = loadWorkloads(records).find((w) => w.title.startsWith('500 requests'))!
-    expect(w.title).toBe('500 requests at 6.0 req/s')
+    // Load is a dimension of the profile now, so the rate leaves the title.
+    expect(w.title).toBe('500 requests')
     expect(w.title).not.toContain('qwen')
     expect(w.title).not.toContain(' on ')
+    expect(w.title).not.toMatch(/req\/s/)
   })
 
   it('merges every model’s complete and disqualified runs, none hidden', () => {
@@ -133,6 +135,100 @@ describe('loadWorkloads', () => {
     const broken = JSON.parse(JSON.stringify(records.slice(0, 2))) as RunRecord[]
     broken[1]!.group.seed = 999
     expect(() => loadWorkloads(broken)).toThrow(/group/i)
+  })
+})
+
+describe('load as a workload dimension', () => {
+  // The MAIN group at a second offered load: identical work but for the rate. A distinct
+  // group_id per load (a real comparability group each), same profile.
+  function twoLoads(): RunRecord[] {
+    const at6 = records.filter((r) => r.group_id === MAIN)
+    const at10 = (JSON.parse(JSON.stringify(at6)) as RunRecord[]).map((r) => {
+      r.group.workload.load = { ...r.group.workload.load, value: 10 }
+      r.group_id = `load10-${r.group_id}`
+      r.run_id = `${r.run_id}-l10`
+      return r
+    })
+    return [...at6, ...at10]
+  }
+
+  it('groups distribution runs that differ only in offered load into one workload', () => {
+    const workloads = loadWorkloads(twoLoads())
+    expect(workloads).toHaveLength(1)
+    const w = workloads[0]!
+    expect(w.groups).toHaveLength(2) // one comparability group per load level
+    expect(w.records).toHaveLength(22) // 11 per load level
+  })
+
+  it('exposes the offered-load axis, sorted ascending, on the workload', () => {
+    const w = loadWorkloads(twoLoads())[0]!
+    expect(w.loadAxis.kind).toBe('rate')
+    expect(w.loadAxis.values).toEqual([6, 10])
+  })
+
+  it('drops the load clause from a distribution workload title, since load now varies within it', () => {
+    const w = loadWorkloads(twoLoads())[0]!
+    expect(w.title).toBe('500 requests')
+    expect(w.title).not.toMatch(/req\/s/)
+  })
+
+  it('still separates workloads that differ in a non-load field such as horizon', () => {
+    // MAIN (unbounded) and HORIZON (bounded window) differ in horizon, not load.
+    expect(loadWorkloads(records)).toHaveLength(2)
+  })
+
+  it('gives a single-load distribution workload a one-value axis, so it is not a sweep', () => {
+    const w = loadWorkloads(records.filter((r) => r.group_id === MAIN))[0]!
+    expect(w.loadAxis.values).toEqual([6])
+  })
+
+  it('orders a sweep by configuration by default, not pre-sorted by load', () => {
+    // The comparability groups concatenate load-ascending; regrouping by config puts each
+    // config's load levels adjacent, so the default is not load-sorted and the Load column
+    // reorders on the first click.
+    const w = loadWorkloads(twoLoads())[0]!
+    const seq = w.complete.map((r) => offeredLoad(r.group).value)
+    // First config's two levels sit together (6 then 10), not all-6-then-all-10.
+    expect(seq.slice(0, 2)).toEqual([6, 10])
+    expect(new Set(seq)).toEqual(new Set([6, 10]))
+  })
+
+  it('keeps the per-group summary naming its single load level', () => {
+    const g = loadGroups(records).find((g) => g.groupId === MAIN)!
+    expect(g.summary).toBe('500 requests at 6.0 req/s')
+  })
+
+  // A workload-spec carries its offered load inside the spec (aggregate_rate), so a spec
+  // profile swept across load must group by the spec minus that rate.
+  function specAt(rate: number, groupId: string): RunRecord {
+    const r = specRecord({ group_id: groupId })
+    r.group = JSON.parse(JSON.stringify(r.group)) as RunRecord['group']
+    ;(r.group.workload.spec as Record<string, unknown>).aggregate_rate = rate
+    r.group.workload.spec_sha256 = `sha-${rate}`
+    return r
+  }
+
+  it('groups workload-spec runs that differ only in aggregate rate into one profile', () => {
+    const ws = loadWorkloads([specAt(10, 'sg-10'), specAt(20, 'sg-20')])
+    expect(ws).toHaveLength(1)
+    expect(ws[0]!.groups).toHaveLength(2)
+    expect(ws[0]!.loadAxis).toEqual({ kind: 'rate', values: [10, 20] })
+  })
+
+  it('reads a single spec profile as a one-level axis at its aggregate rate', () => {
+    const ws = loadWorkloads([specRecord()])
+    expect(ws[0]!.loadAxis.values).toEqual([10])
+  })
+})
+
+describe('offeredLoad (the single offered-load reading across workload types)', () => {
+  it('reads a distribution load from the group', () => {
+    const g = loadGroups(records).find((g) => g.groupId === MAIN)!.group
+    expect(offeredLoad(g)).toEqual({ kind: 'rate', value: 6 })
+  })
+
+  it('reads a workload-spec load from its aggregate rate', () => {
+    expect(offeredLoad(specRecord().group)).toEqual({ kind: 'rate', value: 10 })
   })
 })
 

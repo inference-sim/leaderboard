@@ -157,8 +157,11 @@ describe('argvFor', () => {
       // same one Go used, so this pins the spec branch as tightly as the distribution one.
       const specIdx = stored.indexOf('--workload-spec')
       const specPath = specIdx >= 0 ? stored[specIdx + 1]! : ''
+      // Likewise for the generated --kv-offload-config path when offloading is on.
+      const kvIdx = stored.indexOf('--kv-offload-config')
+      const kvOffloadPath = kvIdx >= 0 ? stored[kvIdx + 1]! : ''
       expect(
-        argvFor(stored[0]!, record.group, record.deployment, metricsPath, specPath),
+        argvFor(stored[0]!, record.group, record.deployment, metricsPath, specPath, kvOffloadPath),
         path,
       ).toEqual(stored)
     }
@@ -296,16 +299,45 @@ describe('interpret: a selected profile', () => {
     expect(output?.target.group?.groupId).toBe('5063e40dceb2')
   })
 
-  it('carries a spec profile’s spec and spec_sha256 into the group, model onto the candidate', () => {
-    const { output } = interpret(valid({ workloadSel: 'burst' }), groups, [specProfile()])
+  it('carries a spec profile’s spec into the group, model onto the candidate', () => {
+    // The load control is authoritative for the run and prefills from the profile, so a
+    // selection that keeps burst's own rate (20) carries its spec through unchanged.
+    const { output } = interpret(valid({ workloadSel: 'burst', loadValue: '20' }), groups, [specProfile()])
     expect(output?.group.workload.type).toBe('workload-spec')
-    expect(output?.group.workload.spec_sha256).toBe('deadbeef')
-    expect((output?.group.workload as { spec?: unknown }).spec).toEqual({
+    expect((output?.group.workload as { spec?: { aggregate_rate?: number; num_requests?: number } }).spec).toMatchObject({
       version: '2',
       aggregate_rate: 20,
       num_requests: 100,
     })
     expect(output?.deployment.model).toBe('qwen/qwen3-14b')
+  })
+
+  it('overrides a distribution profile’s load with the form’s load control', () => {
+    // main-clone is a rate-6 profile; running it at rate 10 is a different point on the same
+    // profile's sweep, so the offered load becomes 10.
+    const { output } = interpret(
+      valid({ workloadSel: 'main-clone', loadKind: 'rate', loadValue: '10' }),
+      groups,
+      [mainClone()],
+    )
+    expect(output).not.toBeNull()
+    expect(output!.group.workload.load).toEqual({ kind: 'rate', value: 10 })
+  })
+
+  it('overrides a spec profile’s load inside the spec (aggregate_rate)', () => {
+    const { output } = interpret(valid({ workloadSel: 'burst', loadValue: '30' }), groups, [specProfile()])
+    expect(output).not.toBeNull()
+    expect((output!.group.workload.spec as { aggregate_rate?: number }).aggregate_rate).toBe(30)
+  })
+
+  it('rejects a non-positive load for a selected profile', () => {
+    const { issues, output } = interpret(
+      valid({ workloadSel: 'main-clone', loadValue: '0' }),
+      groups,
+      [mainClone()],
+    )
+    expect(issues.some((i) => i.field === 'loadValue')).toBe(true)
+    expect(output).toBeNull()
   })
 
   it('flags a workload that is no longer in the catalog', () => {
@@ -816,6 +848,74 @@ describe('interpret: prefill/decode disaggregation', () => {
   })
 })
 
+describe('interpret: KV-cache CPU offloading', () => {
+  const on = (over = {}) =>
+    valid({ kvCpuOffload: 'on', cpuBytesToUse: '1073741824', runId: 'kv', ...over })
+
+  it('writes the kv_offload block, the argv flag and the inline-flow YAML when on', () => {
+    const out = interpret(on(), groups, []).output!
+    expect(out.deployment.kv_offload).toMatchObject({
+      cpu_bytes_to_use: 1073741824,
+      block_size: 16,
+      blocks_per_chunk: 1,
+      tokens_per_hash: 16,
+      eviction_policy: 'lru',
+      offload_prompt_only: true,
+      self_describing_kv_events: false,
+    })
+    // The argv carries --kv-offload-config with the run's placeholder path, just before
+    // --metrics-path, like the workload-spec path.
+    const i = out.argv.indexOf('--kv-offload-config')
+    expect(i).toBeGreaterThan(-1)
+    expect(out.argv[out.argv.length - 2]).toBe('--metrics-path')
+    expect(out.yamlFile).toContain('kv_offload: {cpu_bytes_to_use: 1073741824, block_size: 16')
+  })
+
+  it('omits kv_offload entirely when offloading is off', () => {
+    const out = interpret(valid({ runId: 'kv' }), groups, []).output!
+    expect(out.deployment.kv_offload).toBeUndefined()
+    expect(out.argv).not.toContain('--kv-offload-config')
+    // Canonically identical to a candidate that never touched offloading.
+    const plain = interpret(valid({ runId: 'kv' }), groups, []).output!
+    expect(canonical(out.deployment)).toBe(canonical(plain.deployment))
+  })
+
+  it('carries non-default knobs through, including the two booleans', () => {
+    const out = interpret(
+      on({
+        offloadBlockSize: '32',
+        blocksPerChunk: '4',
+        tokensPerHash: '64',
+        evictionPolicy: 'arc',
+        offloadPromptOnly: 'off',
+        selfDescribingKvEvents: 'on',
+      }),
+      groups,
+      [],
+    ).output!
+    expect(out.deployment.kv_offload).toMatchObject({
+      block_size: 32,
+      blocks_per_chunk: 4,
+      tokens_per_hash: 64,
+      eviction_policy: 'arc',
+      offload_prompt_only: false,
+      self_describing_kv_events: true,
+    })
+  })
+
+  it('rejects offloading with a non-positive CPU budget', () => {
+    const { issues, output } = interpret(on({ cpuBytesToUse: '0' }), groups, [])
+    expect(output).toBeNull()
+    expect(issues.some((i) => i.field === 'cpuBytesToUse')).toBe(true)
+  })
+
+  it('rejects an unrecognized eviction policy', () => {
+    const { issues, output } = interpret(on({ evictionPolicy: 'fifo' }), groups, [])
+    expect(output).toBeNull()
+    expect(issues.some((i) => i.field === 'evictionPolicy')).toBe(true)
+  })
+})
+
 describe('interpret: the declaration it writes', () => {
   const output = interpret(valid(), groups, []).output!
 
@@ -844,7 +944,8 @@ describe('interpret: the declaration it writes', () => {
   })
 
   it('writes the inline spec for a spec workload, and does not claim leaderboard run can consume it', () => {
-    const out = interpret(valid({ workloadSel: 'burst' }), groups, [specProfile()]).output!
+    // The load control prefills from the profile, so keeping burst's own rate (20) writes it through.
+    const out = interpret(valid({ workloadSel: 'burst', loadValue: '20' }), groups, [specProfile()]).output!
     expect(out.yamlFile).toContain('type: workload-spec')
     expect(out.yamlFile).toContain('aggregate_rate: 20')
     // The CLI runs.yaml path (internal/spec.Load) rejects a workload-spec, so the file

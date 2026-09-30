@@ -1,25 +1,23 @@
 import { useEffect, useMemo, useState, type MouseEvent as ReactMouseEvent } from 'react'
 import type { RunGroup, RunRecord, WorkloadGroup } from '../load'
+import { offeredLoad, runKey } from '../load'
 import { rowId } from '../liverun'
 import type { RevealTarget } from '../liverun'
 import { formatCount, formatMs, formatNumber } from '../format'
 import {
   COLUMNS,
+  LOAD_COLUMN,
   NUMERIC_COLUMNS,
   deploymentSpec,
   distinctHardware,
   distinctModels,
   gpuCount,
-  nextSort,
-  removeSort,
   servedFraction,
-  sortRecords,
   varyingDeploymentFields,
 } from '../model'
 import type { Column, SortSpec } from '../model'
-import { splitBySlo } from '../slo'
 import type { SloTargets } from '../slo'
-import { keptByFilters } from '../filter'
+import { visibleRows } from '../rows'
 import { Derived } from './Derived'
 import { DeleteRunButton } from './DeleteRunButton'
 import { Knob } from './Knob'
@@ -43,6 +41,13 @@ interface Props {
    * nothing about the table is ranked automatically (E4, E5).
    */
   hardware?: string[]
+  /**
+   * The offered-load levels to show — the literal selected set of the profile's load axis,
+   * empty read as all. Like model and hardware it only narrows rows. When more than one level
+   * is on screen the table grows a Load column (before Deployment) so a load is never a hidden
+   * difference; a single level omits it. Defaults to [] (all) for callers with no load axis.
+   */
+  loads?: number[]
   /**
    * A row to scroll to and highlight, set when a freshly run candidate lands and the reader
    * clicks "View the run" (§7). Acted on only when the target belongs to this table; the
@@ -77,6 +82,16 @@ interface Props {
   selectedIds?: string[]
   /** Toggle a run's highlight membership. Required for compare mode to do anything. */
   onToggleHighlight?: (runId: string) => void
+  /**
+   * The active sort, owned by the section so the Compare panel can open its columns in the very
+   * order the table renders. Empty means declared/board order — nothing is ordered by load until
+   * the reader clicks (D3). Defaults to [] for direct callers and tests.
+   */
+  sort?: SortSpec[]
+  /** Cycle a column's sort on a header click (ascending → descending → off). */
+  onSort?: (key: string) => void
+  /** Drop one sort tier via its chip in the sort note. */
+  onRemoveSort?: (key: string) => void
 }
 
 /**
@@ -96,46 +111,57 @@ export function ReadoutTable({
   canDelete = false,
   onDelete,
   sloTargets = {},
+  loads = [],
   compareMode = false,
   selectedIds = [],
   onToggleHighlight,
+  sort = [],
+  onSort,
+  onRemoveSort,
 }: Props) {
   const showDelete = canDelete && onDelete != null
-  const group = workload.groups[0]! // one comparability group per workload since E1
-  const [sort, setSort] = useState<SortSpec[]>([])
+  // A profile may span several offered-load levels (a sweep), so the table reads across all of
+  // the workload's comparability groups. baseGroup is kept only as the base for the synthesised
+  // RunGroup the disqualified band takes.
+  const baseGroup = workload.groups[0]!
   // The run_id of the row currently pulsing from a reveal, or null. Local to the table so
   // the highlight lives and dies with the row, not with App's reveal request.
   const [revealedKey, setRevealedKey] = useState<string | null>(null)
 
-  const keep = useMemo(
-    () => (r: RunRecord) => keptByFilters(r, models, workload.models, hardware),
-    [models, workload.models, hardware],
+  // The rows as displayed, from the single shared source, so the Compare panel opens its columns
+  // in the very order the table renders — the same filter, SLO split, and sort.
+  const { complete, records, ranked: rows, slobanded: hidden, disqualified } = useMemo(
+    () => visibleRows(workload, models, hardware, loads, sloTargets, sort),
+    [workload, models, hardware, loads, sloTargets, sort],
   )
-  const complete = useMemo(() => group.complete.filter(keep), [group.complete, keep])
-  const disqualified = useMemo(() => group.disqualified.filter(keep), [group.disqualified, keep])
-  const records = useMemo(() => group.records.filter(keep), [group.records, keep])
 
   const varying = useMemo(() => varyingDeploymentFields(records), [records])
   // Only label the model or GPU type when the table holds more than one: a single-model
   // or single-accelerator table already names it in its filter card.
   const showModel = useMemo(() => distinctModels(complete).length > 1, [complete])
   const showHardware = useMemo(() => distinctHardware(complete).length > 1, [complete])
-  // The SLO targets split the model/hardware-kept complete runs into the ranked (passing)
-  // rows and the ones a target pulled out. The table ranks only the passing rows; the rest
-  // go to the SloBand beneath it. With no targets set, passing is the whole set and hidden
-  // is empty, so the table is unchanged.
-  const { passing, hidden } = useMemo(() => splitBySlo(complete, sloTargets), [complete, sloTargets])
-  const rows = useMemo(() => sortRecords(passing, sort), [passing, sort])
+  // Show the Load column only when more than one offered-load level is on screen; a single
+  // level names itself in the Load filter, so a constant column would be noise.
+  const showLoad = useMemo(
+    () => new Set(records.map((r) => offeredLoad(r.group).value)).size > 1,
+    [records],
+  )
+  // The Load column is named for what it varies: "Arrival rate" for a rate sweep, "Concurrency"
+  // for a concurrency one. Same key ('load') so it sorts through sortRecords like any column.
+  const loadCol = useMemo(
+    () => ({ ...LOAD_COLUMN, label: workload.loadAxis.kind === 'concurrency' ? 'Concurrency' : 'Arrival rate' }),
+    [workload.loadAxis.kind],
+  )
   const repro = useReproToggles(rows)
   // The table is replaced by a short note only when a target removed every row, not when the
   // group simply has no complete runs, which renders the empty table as before.
-  const allHiddenBySlo = passing.length === 0 && hidden.length > 0
+  const allHiddenBySlo = rows.length === 0 && hidden.length > 0
 
   // The disqualified band works over the same filtered rows, so its would-be rank is
   // computed against exactly the complete runs on screen.
   const filtered: RunGroup = useMemo(
-    () => ({ ...group, complete, disqualified, records }),
-    [group, complete, disqualified, records],
+    () => ({ ...baseGroup, complete, disqualified, records }),
+    [baseGroup, complete, disqualified, records],
   )
 
   // The reveal: once a target row belonging to this table is on screen, scroll it into
@@ -150,7 +176,7 @@ export function ReadoutTable({
     if (!target) return
     const el = typeof document !== 'undefined' ? document.getElementById(rowId(target)) : null
     el?.scrollIntoView({ block: 'center' })
-    setRevealedKey(target.run_id)
+    setRevealedKey(runKey(target))
     const timer = setTimeout(() => {
       setRevealedKey(null)
       onRevealed?.()
@@ -158,8 +184,10 @@ export function ReadoutTable({
     return () => clearTimeout(timer)
   }, [revealTarget, records, onRevealed])
 
-  const toggle = (key: string) => setSort(nextSort(sort, key))
-  const headerGroups = groupedHeaders()
+  // Sorting is owned by the section (so Compare can mirror it); a direct caller/test that passes
+  // no handler simply cannot sort, which is fine for the static render tests.
+  const toggle = onSort ?? (() => {})
+  const headerGroups = groupedHeaders(showLoad)
 
   return (
     <>
@@ -172,13 +200,16 @@ export function ReadoutTable({
         <>
           <TableTools
             sort={sort}
-            onRemoveSort={(key) => setSort(removeSort(sort, key))}
+            onRemoveSort={onRemoveSort ?? (() => {})}
             repro={repro}
             showControls={true}
           />
 
+          {/* With a Load column present the frozen first column is dropped (noloadfreeze):
+              two stacked sticky columns would fight, and the Load column is narrow enough that
+              the whole row reads without freezing. */}
           <div className="tscroll">
-            <table className="readout">
+            <table className={showLoad ? 'readout noloadfreeze' : 'readout'}>
               <thead>
                 <tr className="grp">
                   {headerGroups.map((h, i) => (
@@ -193,6 +224,7 @@ export function ReadoutTable({
                   ))}
                 </tr>
                 <tr>
+                  {showLoad && <HeaderCell col={loadCol} sort={sort} onSort={toggle} />}
                   {COLUMNS.map((col) => (
                     <HeaderCell key={col.key} col={col} sort={sort} onSort={toggle} />
                   ))}
@@ -201,17 +233,18 @@ export function ReadoutTable({
               <tbody>
                 {rows.map((record) => (
                   <DataRow
-                    key={record.run_id}
+                    key={runKey(record)}
                     record={record}
                     varying={varying}
                     showModel={showModel}
                     showHardware={showHardware}
+                    showLoad={showLoad}
                     open={repro.isOpen(record)}
                     onToggleRepro={() => repro.toggle(record)}
-                    revealed={revealedKey === record.run_id}
+                    revealed={revealedKey === runKey(record)}
                     onDelete={showDelete ? onDelete : undefined}
                     compareMode={compareMode}
-                    highlighted={selectedIds.includes(record.run_id)}
+                    highlighted={selectedIds.includes(runKey(record))}
                     onToggleHighlight={onToggleHighlight}
                   />
                 ))}
@@ -364,15 +397,16 @@ function sepClass(key: string): string | undefined {
   return GROUP_START_KEYS.has(key) ? 'gsep' : undefined
 }
 
-/** The grouped top header row's colspans, built from COLUMNS' `group` runs. */
-function groupedHeaders(): { group: string; span: number }[] {
+/** The grouped top header row's colspans, built from COLUMNS' `group` runs. With a Load column
+ *  present, a blank leading group cell spans it (its own label sits in the column header below). */
+function groupedHeaders(showLoad: boolean): { group: string; span: number }[] {
   const headerGroups: { group: string; span: number }[] = []
   for (const col of COLUMNS) {
     const last = headerGroups[headerGroups.length - 1]
     if (last && last.group === col.group) last.span += 1
     else headerGroups.push({ group: col.group, span: 1 })
   }
-  return headerGroups
+  return showLoad ? [{ group: '', span: 1 }, ...headerGroups] : headerGroups
 }
 
 function HeaderCell({
@@ -441,6 +475,7 @@ function DataRow({
   varying,
   showModel,
   showHardware,
+  showLoad,
   open,
   onToggleRepro,
   revealed,
@@ -453,6 +488,8 @@ function DataRow({
   varying: string[]
   showModel: boolean
   showHardware: boolean
+  /** Whether the Load column is present (the profile spans more than one offered load). */
+  showLoad: boolean
   /** Whether this row's reproduce panel is open, and how to flip it. The state lives in
    * the table so the expand-all / collapse-all control can drive every row at once. */
   open: boolean
@@ -479,7 +516,7 @@ function DataRow({
     // rather than opening the blis command. The reproduce caret is a <button>, so it is
     // excluded above and still opens repro.
     if (compareMode && onToggleHighlight) {
-      onToggleHighlight(record.run_id)
+      onToggleHighlight(runKey(record))
       return
     }
     onToggleRepro()
@@ -490,6 +527,7 @@ function DataRow({
   return (
     <>
       <tr id={rowId(record)} className={rowClass || undefined} onClick={onRowClick}>
+        {showLoad && <LoadCell record={record} />}
         <DeploymentCell
           record={record}
           varying={varying}
@@ -506,7 +544,7 @@ function DataRow({
       </tr>
       {open && (
         <tr className="reprorow">
-          <td colSpan={COLUMNS.length} id={panelId}>
+          <td colSpan={COLUMNS.length + (showLoad ? 1 : 0)} id={panelId}>
             <ReproPanel record={record} />
           </td>
         </tr>
@@ -608,6 +646,17 @@ function DeploymentCell({
           </button>
         )}
       </div>
+    </td>
+  )
+}
+
+/** The offered-load cell of a sweep row: the rate (one decimal) or concurrency (integer) this
+ *  run was offered, in its own column before the deployment. */
+function LoadCell({ record }: { record: RunRecord }) {
+  const load = offeredLoad(record.group)
+  return (
+    <td className="loadcell">
+      <span className="val">{formatNumber(load.value, load.kind === 'rate' ? 1 : 0)}</span>
     </td>
   )
 }
