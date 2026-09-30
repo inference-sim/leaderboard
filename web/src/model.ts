@@ -1,7 +1,8 @@
 import type { RunGroup, RunRecord } from './load'
+import { offeredLoad, runKey } from './load'
 import { numeric } from './format'
 
-export type ColumnGroup = 'candidate' | 'latency' | 'throughput' | 'health'
+export type ColumnGroup = 'work' | 'candidate' | 'latency' | 'throughput' | 'health'
 
 /** One column of the readout. */
 export interface Column {
@@ -111,6 +112,20 @@ export const COLUMNS: Column[] = [
 export const NUMERIC_COLUMNS = COLUMNS.filter((c) => c.key !== 'deployment')
 
 /**
+ * The offered-load column of a sweep: the rate or concurrency a row was run at. It is not part
+ * of COLUMNS — the readout renders it specially, before the deployment cell, and only when more
+ * than one load level is in view (a single level names itself in the Load filter). Load is
+ * neither better nor worse, so it carries no `higherIsBetter`; it sorts on click like any
+ * column via {@link sortRecords}, which resolves this key alongside the numeric columns.
+ */
+export const LOAD_COLUMN: Column = {
+  key: 'load',
+  label: 'Load',
+  group: 'work',
+  value: (r) => offeredLoad(r.group).value,
+}
+
+/**
  * Deployment fields rendered in their own slot rather than as a chip. Model joined
  * hardware and tp here (E1): it leads the deployment cell as the candidate's headline
  * (shown when the table holds more than one model), so it never chips.
@@ -151,11 +166,12 @@ export interface KnobChip {
 }
 
 /**
- * The two structured deployment fields as a list of per-item tokens, or null for any
+ * The structured deployment fields as a list of per-item tokens, or null for any
  * scalar field. String() would collapse an array or object to "[object Object]"; this
  * spells out what the reader recognises from the command line — the scorer profile as
- * name ×weight, the disaggregation pools and any non-default transfer physics, gated by
- * the same "emit when on / non-default" rule as blisrun.Argv (see argvFor).
+ * name ×weight, the disaggregation pools and any non-default transfer physics, and the KV
+ * offload knobs — gated by the same "emit when on / non-default" rule as blisrun.Argv
+ * (see argvFor).
  */
 function structuredItems(field: string, value: unknown): string[] | null {
   if (field === 'routing_scorers' && Array.isArray(value)) {
@@ -175,6 +191,18 @@ function structuredItems(field: string, value: unknown): string[] | null {
     if (pd.transfer_base_latency !== 0.05) items.push(`transfer-lat ${numeric(pd.transfer_base_latency)} ms`)
     if (pd.transfer_contention) items.push('contention')
     return items
+  }
+  if (field === 'kv_offload' && value !== null && typeof value === 'object') {
+    const kv = value as NonNullable<RunRecord['deployment']['kv_offload']>
+    return [
+      `cpu-bytes ${kv.cpu_bytes_to_use}`,
+      `block-size ${kv.block_size}`,
+      `blocks/chunk ${kv.blocks_per_chunk}`,
+      `tokens/hash ${kv.tokens_per_hash}`,
+      `eviction ${kv.eviction_policy}`,
+      kv.offload_prompt_only ? 'prompt-only' : 'prompt+decode',
+      ...(kv.self_describing_kv_events ? ['kv-events'] : []),
+    ]
   }
   return null
 }
@@ -341,7 +369,7 @@ export interface SortSpec {
 export function sortRecords(records: RunRecord[], sort: SortSpec[]): RunRecord[] {
   const specs: { col: Column; dir: 1 | -1 }[] = []
   for (const s of sort) {
-    const col = NUMERIC_COLUMNS.find((c) => c.key === s.key)
+    const col = s.key === LOAD_COLUMN.key ? LOAD_COLUMN : NUMERIC_COLUMNS.find((c) => c.key === s.key)
     if (col) specs.push({ col, dir: s.dir })
   }
   if (specs.length === 0) return [...records]
@@ -429,6 +457,9 @@ export interface DqReason {
 }
 
 export interface DqSummary {
+  /** The run's board-wide identity (group_id/run_id): the Compare highlight key, unique even
+   *  when a run_id repeats across load levels. */
+  key: string
   runId: string
   model: string
   hardware: string
@@ -469,6 +500,7 @@ export function dqSummary(group: RunGroup): DqSummary[] {
       : completePerReq.reduce((a, b) => a + b, 0) / completePerReq.length
 
   return group.disqualified.map((record) => ({
+    key: runKey(record),
     runId: record.run_id,
     model: record.deployment.model,
     hardware: record.deployment.hardware,

@@ -127,8 +127,11 @@ function TraceFields({ workload }: { workload: WorkloadGroup }) {
 function DistributionFields({ workload }: { workload: WorkloadGroup }) {
   const g = workload.groups[0]!.group
   const w = g.workload
-  const loadLabel = w.load.kind === 'rate' ? 'Offered rate' : 'Concurrency'
-  const loadUnit = w.load.kind === 'rate' ? 'req/s' : 'users'
+  const axis = workload.loadAxis
+  const sweep = axis.values.length > 1
+  const loadLabel = axis.kind === 'rate' ? 'Offered rate' : 'Concurrency'
+  const loadUnit = axis.kind === 'rate' ? 'req/s' : 'users'
+  const digits = axis.kind === 'rate' ? 1 : 0
   return (
     <dl className="spec-grid">
       <div>
@@ -143,12 +146,23 @@ function DistributionFields({ workload }: { workload: WorkloadGroup }) {
         <dt>Requests</dt>
         <dd>{formatCount(w.num_requests)}</dd>
       </div>
-      <div>
-        <dt>{loadLabel}</dt>
-        <dd>
-          {formatNumber(w.load.value, 1)} <small>{loadUnit}</small>
-        </dd>
-      </div>
+      {/* A profile swept across load names its levels; a single-load profile names the one
+          offered rate/concurrency. Either way the level is not part of the title. */}
+      {sweep ? (
+        <div>
+          <dt>Load levels</dt>
+          <dd>
+            {axis.values.map((v) => formatNumber(v, digits)).join(', ')} <small>{loadUnit}</small>
+          </dd>
+        </div>
+      ) : (
+        <div>
+          <dt>{loadLabel}</dt>
+          <dd>
+            {formatNumber(w.load.value, digits)} <small>{loadUnit}</small>
+          </dd>
+        </div>
+      )}
       <div>
         <dt>Prompt tokens</dt>
         <dd>

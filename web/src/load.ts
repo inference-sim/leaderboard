@@ -6,6 +6,16 @@ import { PRESET_NAMES } from './catalog'
 export type RunRecord = BLISLeaderboardRunRecord
 
 /**
+ * A run's stable identity across the whole board: group_id and run_id together. A run_id is
+ * unique only within one comparability group, and a sweep table now spans several (one per load
+ * level), where the same deployment at different loads shares a run_id — so anything that keys a
+ * run across the table (the Compare selection and row highlight) must key on this, not run_id.
+ */
+export function runKey(r: Pick<RunRecord, 'group_id' | 'run_id'>): string {
+  return `${r.group_id}/${r.run_id}`
+}
+
+/**
  * One comparability group: one table. Every record in it was offered identical
  * work, which is structural rather than advisory — group_id is a content hash of
  * the group block, so a record whose ids do not match its own group is rejected.
@@ -97,21 +107,32 @@ export function loadGroups(records: RunRecord[]): RunGroup[] {
   return groups
 }
 
+/** The offered-load axis of a workload profile: the kind ("rate" | "concurrency") and the
+ *  distinct load values present, ascending. It is the dimension the Load filter selects and
+ *  the Load column reads; a single-value axis is not a sweep (the filter/column stay hidden). */
+export interface LoadAxis {
+  kind: string
+  values: number[]
+}
+
 /**
- * One workload: the work offered. With `model` moved out of the comparability key (E1),
- * the workload key and `group_id` are now a bijection, so a workload maps to exactly one
- * comparability group; the layer is kept because the picker and Workloads tab speak in
- * workloads, and model and hardware are filtered within one. The grouping is client-side
- * and in-memory only: the key never has to match a Go hash.
+ * One workload profile: the work offered with the offered-load value factored out. Model left
+ * the comparability key at E1; offered load leaves the workload key here, so a distribution
+ * profile spans the comparability groups (`group_id`s) that differ only in rate/concurrency —
+ * one `RunGroup` per load level. Model, hardware, and load are all filtered within one profile.
+ * The grouping is client-side and in-memory only: the key never has to match a Go hash.
  */
 export interface WorkloadGroup {
   /**
-   * Canonical JSON of the group block, keys sorted. Equal to what `group_id` hashes now
-   * that the group carries no model, so one workload is one comparability group.
+   * Canonical JSON of the group block with the offered-load value dropped (for a distribution;
+   * spec and trace keep their full group). Runs differing only in load share this key.
    */
   workloadKey: string
-  /** The comparability group(s) under this workload — exactly one since E1. */
+  /** The comparability groups under this profile — one per offered-load level for a
+   *  distribution sweep, otherwise one. */
   groups: RunGroup[]
+  /** The offered-load levels present, sorted; more than one means a sweep. */
+  loadAxis: LoadAxis
   /** The models present across the rows, sorted. Empty selection in the filter means all. */
   models: string[]
   /** Every model's complete runs, merged, ordered by model then declared order. */
@@ -141,6 +162,23 @@ export interface WorkloadGroup {
   title: string
 }
 
+/** Order rows so each configuration's load levels are adjacent, in the order the configs first
+ *  appear. Keys on the canonical deployment, so the same config at different loads groups. */
+function byConfig(rows: RunRecord[]): RunRecord[] {
+  const order: string[] = []
+  const groups = new Map<string, RunRecord[]>()
+  for (const r of rows) {
+    const key = canonicalJSON(r.deployment)
+    const g = groups.get(key)
+    if (g) g.push(r)
+    else {
+      groups.set(key, [r])
+      order.push(key)
+    }
+  }
+  return order.flatMap((k) => groups.get(k)!)
+}
+
 /**
  * Groups records into workloads (W1): buckets the comparability groups from
  * `loadGroups` — whose per-group_id integrity check still runs and still matters — by
@@ -160,15 +198,24 @@ export function loadWorkloads(records: RunRecord[]): WorkloadGroup[] {
   for (const [key, bucket] of byWorkload) {
     bucket.sort(compareGroups)
     const records = bucket.flatMap((g) => g.records)
+    const complete = bucket.flatMap((g) => g.complete)
+    const disqualified = bucket.flatMap((g) => g.disqualified)
     const name = workloadName(records)
     const summary = workloadTitle(bucket[0]!.group)
+    const loadValues = [...new Set(bucket.map((g) => offeredLoad(g.group).value))].sort((a, b) => a - b)
+    // A sweep spans several comparability groups, which flatMap concatenates low→high — so the
+    // rows arrive pre-ordered by load. Regroup them by configuration instead, each config's load
+    // levels adjacent: the natural way to read a scaling curve, and not pre-sorted by load, so
+    // the Load column reorders on the first click and nothing is ordered by load until then (D3).
+    const isSweep = loadValues.length > 1
     workloads.push({
       workloadKey: key,
       groups: bucket,
+      loadAxis: { kind: offeredLoad(bucket[0]!.group).kind, values: loadValues },
       models: [...new Set(records.map((r) => r.deployment.model))].sort(),
-      complete: bucket.flatMap((g) => g.complete),
-      disqualified: bucket.flatMap((g) => g.disqualified),
-      records,
+      complete: isSweep ? byConfig(complete) : complete,
+      disqualified: isSweep ? byConfig(disqualified) : disqualified,
+      records: isSweep ? byConfig(records) : records,
       treeDirty: bucket.some((g) => g.treeDirty),
       blisCommits: [...new Set(bucket.map((g) => g.blisCommit))].sort(),
       name,
@@ -182,14 +229,57 @@ export function loadWorkloads(records: RunRecord[]): WorkloadGroup[] {
 }
 
 /**
- * The workload key: the group block with `model` removed, canonicalised the same way
- * `internal/schema/canon.go` canonicalises for the Go hash (keys sorted, recursively)
- * — but only as a map key here, so it never has to equal that hash.
+ * The offered load of a workload, as one reading across every type. A distribution carries it
+ * in `group.workload.load`; a workload-spec carries it inside the spec (a client's
+ * `concurrency`, else the top-level `aggregate_rate`), with the flat value a placeholder; a
+ * trace uses the group value. This is the single source the profile key strips, the load axis
+ * lists, and the Load column and filter read, so the whole app agrees on what a run's load is.
+ */
+export function offeredLoad(group: RunRecord['group']): { kind: string; value: number } {
+  const w = group.workload
+  if (w.type === 'workload-spec') {
+    const spec = (w.spec ?? null) as SpecObject | null
+    const conc = spec ? getPath(spec, ['clients', 0, 'concurrency']) : undefined
+    if (typeof conc === 'number') return { kind: 'concurrency', value: conc }
+    const rate = spec ? getPath(spec, ['aggregate_rate']) : undefined
+    if (typeof rate === 'number') return { kind: 'rate', value: rate }
+  }
+  return { kind: w.load.kind, value: w.load.value }
+}
+
+/**
+ * The workload key: the group block canonicalised (keys sorted, recursively) as a map key, so
+ * it never has to equal a Go hash. The offered-load value is a dimension varied within a
+ * profile, not part of its identity, so it is stripped from the key — runs differing only in
+ * load collapse into one workload. Where the load lives differs by type: a distribution drops
+ * `load.value`; a workload-spec drops the spec's `aggregate_rate` and per-client `concurrency`
+ * (and the derived `spec_sha256` that folds them in). A trace keeps its full group.
  */
 export function workloadKey(group: RunRecord['group']): string {
-  // The group no longer carries a model (E1), so its canonical form is the workload
-  // key: equal to what group_id hashes, one workload to one comparability group.
-  return canonicalJSON(group)
+  const g = JSON.parse(JSON.stringify(group)) as {
+    workload: {
+      type: string
+      load: { value?: number }
+      spec_sha256?: unknown
+      spec?: { aggregate_rate?: unknown; clients?: unknown[] }
+    }
+  }
+  const w = g.workload
+  if (w.type === 'distribution') {
+    delete w.load.value
+  } else if (w.type === 'workload-spec') {
+    delete w.load.value
+    delete w.spec_sha256
+    if (w.spec) {
+      delete w.spec.aggregate_rate
+      if (Array.isArray(w.spec.clients)) {
+        for (const c of w.spec.clients) {
+          if (c && typeof c === 'object') delete (c as { concurrency?: unknown }).concurrency
+        }
+      }
+    }
+  }
+  return canonicalJSON(g)
 }
 
 /** Stable JSON with object keys sorted recursively. Arrays keep their order. */
@@ -259,12 +349,17 @@ export function groupTitle(group: RunRecord['group']): string {
 }
 
 /**
- * The work in one readable line, model omitted: a workload spans many models, so its
- * title names the work and leaves the model to the filter and the Model column. The
- * observation-window clause stays — a bounded window is part of the work offered.
+ * The profile title in one readable line, model omitted (a profile spans many models). For a
+ * distribution the offered load is a dimension varied within the profile, so the title names
+ * the request count and shape without a rate — the Load filter and Load column carry the level.
+ * Spec and trace profiles keep their offered load in the title, since it does not vary for them.
+ * The observation-window clause stays either way — a bounded window is part of the work offered.
  */
 export function workloadTitle(group: RunRecord['group']): string {
   const window = group.horizon_ticks == null ? '' : ', bounded window'
+  if (group.workload.type === 'distribution') {
+    return `${group.workload.num_requests.toLocaleString('en-US')} requests${window}`
+  }
   return `${workOffered(group)}${window}`
 }
 

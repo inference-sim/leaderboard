@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import type { Dispatch, ReactNode, SetStateAction } from 'react'
-import { loadCommittedRecords, loadWorkloads, mergeRecords } from './load'
+import { loadCommittedRecords, loadWorkloads, mergeRecords, runKey } from './load'
 import type { RunRecord, WorkloadGroup } from './load'
 import { deleteRun, fetchResults } from './results'
 import { ReadoutTable } from './components/ReadoutTable'
@@ -9,6 +9,7 @@ import { WorkloadHeader } from './components/SpecHeader'
 import { WorkloadPicker } from './components/WorkloadPicker'
 import { ModelFilter } from './components/ModelFilter'
 import { HardwareFilter } from './components/HardwareFilter'
+import { LoadFilter } from './components/LoadFilter'
 import { SloFilter } from './components/SloFilter'
 import { EmptyFilterNote } from './components/EmptyFilterNote'
 import { SLO_METRICS, emptyTargets, parseTargets } from './slo'
@@ -16,11 +17,14 @@ import type { RawTargets } from './slo'
 import { NewRun } from './components/NewRun'
 import { CompareBar } from './components/CompareBar'
 import { ComparePanel } from './components/ComparePanel'
-import { toggleSelection } from './compare'
+import { selectionInDisplayOrder, toggleSelection } from './compare'
+import { nextSort, removeSort } from './model'
+import type { SortSpec } from './model'
+import { visibleOrder, visibleRows } from './rows'
 import { LiveRunBanner } from './components/LiveRunBanner'
 import { Catalog } from './components/Catalog'
 import { ErrorBoundary } from './components/ErrorBoundary'
-import { emptyFilterNoun, keptByFilters } from './filter'
+import { emptyFilterNoun } from './filter'
 import { initialValues, saveThenRun } from './newrun'
 import type { FormValues, Output } from './newrun'
 import { runDeclFromOutput, workloadKeyForGroup } from './liverun'
@@ -499,13 +503,21 @@ function WorkloadSection({
   )
   const [models, setModels] = useState<string[]>(workload.models)
   const [hardware, setHardware] = useState<string[]>(hardwareTypes)
+  // The offered-load levels shown, seeded to every level in the profile. Lives in the same
+  // section state, so the reveal remount resets it alongside model and hardware. Only a sweep
+  // (more than one level) shows the Load filter and the table's Load column.
+  const [loads, setLoads] = useState<number[]>(workload.loadAxis.values)
   // The SLO targets, raw as the form holds them. They live in this same section state, so
   // the reveal remount (the key carries a nonce) resets them to empty alongside the model
   // and hardware selections, so a freshly run candidate can never be hidden behind a target
   // the reader left set. Parsed at the point they are handed to the table.
   const [sloTargets, setSloTargets] = useState<RawTargets>(emptyTargets)
-  // Compare mode and the highlighted run_ids live here, beside the filters, so they reset on
-  // the same remount boundaries (workload switch, reveal nonce). Selection is keyed by run_id
+  // The table's sort lives here, not in the table, so the Compare panel can open its columns in
+  // the very order the table shows. Resets on the section's remount (workload switch, reveal
+  // nonce) like the filters, so nothing is ordered by load until the reader clicks (D3).
+  const [sort, setSort] = useState<SortSpec[]>([])
+  // Compare mode and the highlighted run keys live here, beside the filters, so they reset on
+  // the same remount boundaries (workload switch, reveal nonce). Selection is keyed by runKey
   // over the whole workload's records, so narrowing a filter never drops a highlighted run.
   const [compareMode, setCompareMode] = useState(false)
   const [selectedIds, setSelectedIds] = useState<string[]>([])
@@ -513,12 +525,17 @@ function WorkloadSection({
     (runId: string) => setSelectedIds((cur) => toggleSelection(cur, runId)),
     [],
   )
+  // The rows as the table displays them — one shared computation the table and this section both
+  // read, so the Compare column order cannot drift from the visible table order.
+  const displayOrder = useMemo(
+    () => visibleOrder(visibleRows(workload, models, hardware, loads, parseTargets(sloTargets), sort)),
+    [workload, models, hardware, loads, sloTargets, sort],
+  )
+  // The comparison opens in exactly the table's order (ranked rows, then the SLO and disqualified
+  // bands): the top row is the control and the columns read down the table — never click order.
   const highlighted = useMemo(
-    () =>
-      selectedIds
-        .map((id) => workload.records.find((r) => r.run_id === id))
-        .filter((r): r is RunRecord => r != null),
-    [selectedIds, workload.records],
+    () => selectionInDisplayOrder(displayOrder, selectedIds),
+    [displayOrder, selectedIds],
   )
   // Show a filter whenever the workload has any option for it, not just two or more. The
   // table omits the model and hardware labels when there is only one of each (a single-
@@ -527,20 +544,18 @@ function WorkloadSection({
   // that identity from the section entirely.
   const showModels = workload.models.length > 0
   const showHardware = hardwareTypes.length > 0
-  const emptyNoun = emptyFilterNoun(showModels, models, showHardware, hardware)
+  // A single load level names itself in the header, so the Load filter (like the table's Load
+  // column) appears only for a sweep across two or more levels.
+  const showLoad = workload.loadAxis.values.length > 1
+  const emptyNoun = emptyFilterNoun(showModels, models, showHardware, hardware, showLoad, loads)
   // Select-all pulls in exactly the runs the model and hardware filters leave on screen (the
   // ranked rows, any SLO-banded ones, and the disqualified band), in declared order; Clear
   // empties the comparison. It tracks the filters so selecting all after narrowing them can
   // never reach a run that is no longer shown. When a filter is emptied outright the table is
   // replaced by a note and nothing is on screen, so the set is empty.
   const allIds = useMemo(
-    () =>
-      emptyNoun
-        ? []
-        : workload.records
-            .filter((r) => keptByFilters(r, models, workload.models, hardware))
-            .map((r) => r.run_id),
-    [emptyNoun, workload.records, workload.models, models, hardware],
+    () => (emptyNoun ? [] : displayOrder.map((r) => runKey(r))),
+    [emptyNoun, displayOrder],
   )
   const onSelectAll = useCallback(() => setSelectedIds(allIds), [allIds])
   const onClearSelection = useCallback(() => setSelectedIds([]), [])
@@ -554,6 +569,16 @@ function WorkloadSection({
         </div>
       )}
       <WorkloadHeader workload={workload} />
+      {showLoad && (
+        <div className="filters loadrow">
+          <LoadFilter
+            kind={workload.loadAxis.kind}
+            options={workload.loadAxis.values}
+            selected={loads}
+            onChange={setLoads}
+          />
+        </div>
+      )}
       {(showModels || showHardware) && (
         <div className="filters">
           {showModels && (
@@ -572,6 +597,7 @@ function WorkloadSection({
           workload={workload}
           models={models}
           hardware={hardware}
+          loads={loads}
           sloTargets={parseTargets(sloTargets)}
           revealTarget={revealTarget}
           onRevealed={onRevealed}
@@ -580,6 +606,9 @@ function WorkloadSection({
           compareMode={compareMode}
           selectedIds={selectedIds}
           onToggleHighlight={onToggleHighlight}
+          sort={sort}
+          onSort={(key) => setSort((cur) => nextSort(cur, key))}
+          onRemoveSort={(key) => setSort((cur) => removeSort(cur, key))}
         />
       )}
       {compareMode && <ComparePanel records={highlighted} onRemove={onToggleHighlight} />}

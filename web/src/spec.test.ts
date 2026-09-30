@@ -149,9 +149,11 @@ describe('clients as a list', () => {
 })
 
 describe('summarizeSpec', () => {
-  it('names a spec by its positive aggregate rate, else spec-backed', () => {
-    expect(summarizeSpec({ aggregate_rate: 10 })).toBe('spec-backed workload at 10 req/s aggregate')
-    expect(summarizeSpec({ aggregate_rate: 0 })).toBe('spec-backed workload')
+  it('names a spec by its request count, not its offered load, else spec-backed', () => {
+    expect(summarizeSpec({ num_requests: 500 })).toBe('spec-backed workload, 500 requests')
+    // The offered load is set per run and varied to sweep, so it is not named here.
+    expect(summarizeSpec({ aggregate_rate: 10 })).toBe('spec-backed workload')
+    expect(summarizeSpec({ num_requests: 0 })).toBe('spec-backed workload')
     expect(summarizeSpec(null)).toBe('spec-backed workload')
   })
 })

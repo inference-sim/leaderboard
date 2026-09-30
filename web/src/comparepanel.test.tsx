@@ -17,6 +17,29 @@ function twoRuns(): RunRecord[] {
   return [a, b]
 }
 
+/** Two runs at different offered loads (the sweep case): same profile, load 6 vs 10. */
+function twoLoads(): RunRecord[] {
+  const [a, b] = twoRuns()
+  b!.group = JSON.parse(JSON.stringify(b!.group)) as RunRecord['group']
+  b!.group.workload.load = { ...b!.group.workload.load, value: 10 }
+  return [a!, b!]
+}
+
+describe('ComparePanel workload section', () => {
+  it('surfaces the offered load when it differs across the highlighted runs', () => {
+    const html = renderToStaticMarkup(<ComparePanel records={twoLoads()} onRemove={() => {}} />)
+    expect(html).toContain('Workload')
+    expect(html).toContain('offered load')
+    expect(html).toContain('6.0')
+    expect(html).toContain('10.0')
+  })
+
+  it('omits the workload section when every highlighted run shares one load', () => {
+    const html = renderToStaticMarkup(<ComparePanel records={twoRuns()} onRemove={() => {}} />)
+    expect(html).not.toContain('offered load')
+  })
+})
+
 describe('ComparePanel (cards)', () => {
   it('prompts to highlight more when fewer than two runs are selected', () => {
     const html = renderToStaticMarkup(<ComparePanel records={[twoRuns()[0]!]} onRemove={() => {}} />)

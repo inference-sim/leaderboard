@@ -26,6 +26,45 @@ const blisOutput = `{
   "requests": [{"request_id": "r0", "e2e_ms": 1200.0}, {"request_id": "r1", "e2e_ms": 1300.0}]
 }`
 
+// writeKVOffloadFile writes a top-level kv_offload: block with every CPU-tier key, at an
+// absolute path beside the metrics file, so blis (which strict-parses the config and
+// resolves the path relative to its own cwd) accepts it.
+func TestWriteKVOffloadFile(t *testing.T) {
+	dir := t.TempDir()
+	metricsPath := filepath.Join(dir, "run.json")
+	kv := &schema.KVOffload{
+		CPUBytesToUse: 1 << 30, BlockSize: 32, BlocksPerChunk: 2, TokensPerHash: 32,
+		EvictionPolicy: "arc", OffloadPromptOnly: false, SelfDescribingKVEvents: true,
+	}
+	path, err := writeKVOffloadFile(kv, metricsPath)
+	if err != nil {
+		t.Fatalf("writeKVOffloadFile: %v", err)
+	}
+	if !filepath.IsAbs(path) {
+		t.Errorf("path must be absolute for blis's cwd: %s", path)
+	}
+	if got, want := filepath.Base(path), "run.kv-offload.yaml"; got != want {
+		t.Errorf("path basename = %q, want %q", got, want)
+	}
+	body, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read %s: %v", path, err)
+	}
+	s := string(body)
+	if !strings.HasPrefix(strings.TrimSpace(s), "kv_offload:") {
+		t.Errorf("config must have a top-level kv_offload: block:\n%s", s)
+	}
+	for _, want := range []string{
+		"cpu_bytes_to_use: 1073741824", "block_size: 32", "blocks_per_chunk: 2",
+		"tokens_per_hash: 32", "eviction_policy: arc", "offload_prompt_only: false",
+		"self_describing_kv_events: true",
+	} {
+		if !strings.Contains(s, want) {
+			t.Errorf("config missing %q:\n%s", want, s)
+		}
+	}
+}
+
 func TestSplitMetricsKeepsCoreAndStripsRequests(t *testing.T) {
 	core, raw, requests, err := SplitMetrics([]byte(blisOutput))
 	if err != nil {

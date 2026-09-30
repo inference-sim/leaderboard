@@ -34,6 +34,10 @@
   --trace-ink: #17506e;
   --trace-bg: #d3e6f2;
   --trace-line: #5c9cc6;
+  /* Rose — the load-kind tag, distinct from the teal/purple/cerulean/amber tag palette. */
+  --load-ink: #7a2f5a;
+  --load-bg: #f4d9e8;
+  --load-line: #cf7aa9;
   --focus: #1f6e5c;
   --mode: #b8770c;
   --mode-ink: #6b4508;
@@ -177,6 +181,17 @@ code {
   color: var(--trace-ink);
   background: var(--trace-bg);
   border-color: var(--trace-line);
+}
+
+/* The load-kind tag (rate / concurrency): the axis a sweep varies, in its own rose so it reads
+ * as distinct from the amber preset, teal variant, and cerulean trace tags. */
+.tag-load {
+  color: var(--load-ink);
+  background: var(--load-bg);
+  border-color: var(--load-line);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  font-size: 10.5px;
 }
 
 /* The full workload spec, collapsed by default under a spec-backed workload's readout. */
@@ -669,6 +684,24 @@ thead tr.grp th.lft {
 
 thead tr:not(.grp) th.lft {
   z-index: 3;
+}
+
+/* A load sweep adds a Load column before the deployment. Two stacked sticky columns would
+ * fight for the left edge, so the frozen behaviour is dropped for that table; the Load column
+ * is narrow enough that the row reads without it. */
+table.readout.noloadfreeze th.lft,
+table.readout.noloadfreeze td.lft {
+  position: static;
+  min-width: 0;
+}
+
+/* The offered-load column: a narrow, right-aligned numeric column leading each row. It reads as
+ * an ordinary column — not tinted — so it does not compete with the metric values. */
+.loadcell {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  font-weight: 600;
 }
 
 /* The deployment cell reads top to bottom: model, GPU type, the key spec line, the

@@ -25,7 +25,7 @@ export const FIELD_GROUPS: FieldGroup[] = [
   },
   {
     title: 'KV cache',
-    fields: ['kv_cache_dtype', 'block_size_in_tokens', 'gpu_memory_utilization'],
+    fields: ['kv_cache_dtype', 'block_size_in_tokens', 'gpu_memory_utilization', 'kv_offload'],
   },
   {
     title: 'Cluster',

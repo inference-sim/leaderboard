@@ -193,6 +193,21 @@
         "kv_cache_dtype": {"enum": ["auto", "fp8", "fp8_e4m3", "fp8_e5m2", "fp8_inc", "bf16", "fp16", "fp32"]},
         "latency_model": {"enum": ["trained-physics", "roofline"]},
         "gpu_memory_utilization": {"type": "number", "exclusiveMinimum": 0, "maximum": 1, "description": "--gpu-memory-utilization. Fraction of GPU memory for the KV cache, in (0, 1.0]. Always emitted; blis default 0.9."},
+        "kv_offload": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["cpu_bytes_to_use", "block_size", "blocks_per_chunk", "tokens_per_hash", "eviction_policy", "offload_prompt_only", "self_describing_kv_events"],
+          "description": "KV-cache CPU offloading (--kv-offload-config): the single host-CPU tier that spills KV blocks off the GPU. Present only when offloading is on, so a record without it is canonically unchanged (cf. disaggregation, routing_scorers). Materialized at run time to a YAML file with a top-level kv_offload: block. NOTE: at the pinned upstream HEAD the offload subsystem is inert (blis parses and validates the config but no mechanism consumes it yet), so these knobs are plumbed ahead and do not move metrics. Secondary spill tiers (secondary_tiers) are a deliberate follow-up, not modelled here.",
+          "properties": {
+            "cpu_bytes_to_use": {"type": "integer", "exclusiveMinimum": 0, "description": "cpu_bytes_to_use. Host CPU memory budget for the offload tier, in bytes (per GPU / per TP rank). Required and > 0; CPU-tier block capacity is this divided by the per-block byte size."},
+            "block_size": {"type": "integer", "exclusiveMinimum": 0, "description": "block_size. Offload block size in tokens. blis defaults it to the GPU block size (block_size_in_tokens)."},
+            "blocks_per_chunk": {"type": "integer", "exclusiveMinimum": 0, "description": "blocks_per_chunk. Blocks transferred per chunk (blis default 1)."},
+            "tokens_per_hash": {"type": "integer", "exclusiveMinimum": 0, "description": "tokens_per_hash. Tokens per prefix-cache hash; blis defaults it to the GPU block size."},
+            "eviction_policy": {"enum": ["lru", "arc"], "description": "eviction_policy. CPU-tier eviction policy (blis default lru)."},
+            "offload_prompt_only": {"type": "boolean", "description": "offload_prompt_only. When true, only prompt (prefill) KV is offloaded, not decode KV. vLLM default true."},
+            "self_describing_kv_events": {"type": "boolean", "description": "self_describing_kv_events. Emit self-describing KV events (blis default false)."}
+          }
+        },
         "num_speculative_tokens": {"type": "integer", "minimum": 0, "description": "--num-speculative-tokens (K). 0 = speculative decoding off. Emitted only when > 0."},
         "speculative_acceptance_rate": {"type": "number", "minimum": 0, "maximum": 1, "description": "--speculative-acceptance-rate. Mean fraction of draft tokens accepted, [0,1]. Emitted only when num_speculative_tokens > 0, where blis requires it."},
         "speculative_method": {"enum": ["", "mtp", "eagle", "medusa", "ngram", "draft"], "description": "--speculative-method. blis closes the set (sim/config.go isValidSpeculativeMethod); \"\" means unset. Emitted only when num_speculative_tokens > 0 and non-empty."},

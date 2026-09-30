@@ -238,6 +238,34 @@ type Disaggregation struct {
 	TransferContention  bool    `json:"transfer_contention"`
 }
 
+// KVOffload is the KV-cache CPU offloading config (--kv-offload-config): the single
+// host-CPU tier that spills KV blocks off the GPU. It is present on a Deployment only
+// when offloading is enabled, following the Disaggregation precedent: a pointer,
+// omitempty, so a deployment without offloading is byte-for-byte unchanged. At run time
+// it is materialized to a YAML file with a top-level kv_offload: block and passed to blis
+// via --kv-offload-config. Note: at the pinned upstream HEAD the offload subsystem is
+// inert (blis parses and validates the config but no mechanism consumes it), so these are
+// plumbed ahead and do not move metrics. Secondary spill tiers are not modelled here.
+type KVOffload struct {
+	// CPUBytesToUse is cpu_bytes_to_use: the host CPU budget in bytes (per GPU / per TP
+	// rank). Required and > 0; it is the enable trigger.
+	CPUBytesToUse int64 `json:"cpu_bytes_to_use"`
+	// BlockSize is block_size: the offload block size in tokens (blis defaults it to the
+	// GPU block size).
+	BlockSize int64 `json:"block_size"`
+	// BlocksPerChunk is blocks_per_chunk (blis default 1).
+	BlocksPerChunk int64 `json:"blocks_per_chunk"`
+	// TokensPerHash is tokens_per_hash (blis defaults it to the GPU block size).
+	TokensPerHash int64 `json:"tokens_per_hash"`
+	// EvictionPolicy is eviction_policy: lru | arc (blis default lru).
+	EvictionPolicy string `json:"eviction_policy"`
+	// OffloadPromptOnly is offload_prompt_only: only prompt KV is offloaded when true
+	// (vLLM default true).
+	OffloadPromptOnly bool `json:"offload_prompt_only"`
+	// SelfDescribingKVEvents is self_describing_kv_events (blis default false).
+	SelfDescribingKVEvents bool `json:"self_describing_kv_events"`
+}
+
 // Deployment is the candidate under test: what varies across rows.
 type Deployment struct {
 	// Model is org-prefixed (e.g. qwen/qwen3-14b) and validated against the model
@@ -295,6 +323,12 @@ type Deployment struct {
 	// GPUMemoryUtilization is --gpu-memory-utilization: the fraction of GPU memory
 	// given to the KV cache, in (0, 1.0]. Always emitted.
 	GPUMemoryUtilization float64 `json:"gpu_memory_utilization"`
+
+	// KVOffload is the KV-cache CPU offloading config. It follows the Disaggregation
+	// precedent: a pointer, omitempty, set only when offloading is enabled, so a
+	// deployment without it is canonically unchanged and twin-detection against every
+	// stored record is byte-for-byte unchanged.
+	KVOffload *KVOffload `json:"kv_offload,omitempty"`
 
 	// The speculative-decoding trio. blis treats the feature as off when
 	// NumSpeculativeTokens == 0, and requires --speculative-acceptance-rate when it is

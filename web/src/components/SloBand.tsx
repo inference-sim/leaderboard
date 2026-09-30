@@ -1,4 +1,5 @@
 import type { RunRecord } from '../load'
+import { runKey } from '../load'
 import { distinctModels, knobChips, varyingDeploymentFields } from '../model'
 import { missText, sloMisses } from '../slo'
 import type { SloTargets } from '../slo'
@@ -36,7 +37,7 @@ export function SloBand({ hidden, targets }: { hidden: RunRecord[]; targets: Slo
         const misses = sloMisses(record, targets)
         const chips = knobChips(record, varying)
         return (
-          <article key={record.run_id} className="slohidden">
+          <article key={runKey(record)} className="slohidden">
             <div className="dqtop">
               {showModel && <span className="model">{record.deployment.model}</span>}
               <span className="nm">

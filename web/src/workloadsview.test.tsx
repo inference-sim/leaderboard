@@ -22,7 +22,7 @@ describe('WorkloadCatalog', () => {
     )
     expect(html).toContain('chat-a')
     expect(html).toContain('chat-b')
-    expect(html).toContain('spec-backed workload at 10 req/s aggregate')
+    expect(html).toContain('spec-backed workload, 500 requests')
     expect(html).toContain('workload-spec')
   })
 

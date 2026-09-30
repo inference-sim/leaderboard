@@ -29,7 +29,7 @@ const (
 // workload-spec variant and ignored otherwise (a spec run's argv carries that path, so
 // it reproduces from the record's inline spec re-materialized, not from the path
 // verbatim).
-func Argv(binary string, g schema.Group, d schema.Deployment, metricsPath, specPath string) []string {
+func Argv(binary string, g schema.Group, d schema.Deployment, metricsPath, specPath, kvOffloadPath string) []string {
 	a := []string{binary, "run"}
 	add := func(flag, value string) { a = append(a, flag, value) }
 
@@ -73,6 +73,13 @@ func Argv(binary string, g schema.Group, d schema.Deployment, metricsPath, specP
 	// a replay for the same no-drift reason as the head.
 	a = appendCandidateTail(a, d)
 
+	// KV-cache CPU offloading. Path-valued (a generated config file), so it is emitted
+	// here rather than in the shared tail, which takes only the deployment. Emitted only
+	// when offloading is on, the "emit only when the capability is on" rule.
+	if d.KVOffload != nil {
+		add("--kv-offload-config", kvOffloadPath)
+	}
+
 	// Required, and last so it is easy to find in a stored argv: cache_hit_rate and
 	// requests[] are written only to the file branch of EmitOutput.
 	add("--metrics-path", metricsPath)
@@ -85,7 +92,7 @@ func Argv(binary string, g schema.Group, d schema.Deployment, metricsPath, specP
 // place of the synthetic-distribution ones. traceHeader / traceData are the resolved
 // paths into the hash-addressed store. Like Argv it is a pure function of the record, so
 // a stored replay argv reproduces the record given the trace blob is present.
-func ReplayArgv(binary string, g schema.Group, d schema.Deployment, metricsPath, traceHeader, traceData string) []string {
+func ReplayArgv(binary string, g schema.Group, d schema.Deployment, metricsPath, traceHeader, traceData, kvOffloadPath string) []string {
 	a := []string{binary, "replay"}
 	add := func(flag, value string) { a = append(a, flag, value) }
 
@@ -118,6 +125,13 @@ func ReplayArgv(binary string, g schema.Group, d schema.Deployment, metricsPath,
 
 	a = appendCandidateHead(a, d)
 	a = appendCandidateTail(a, d)
+
+	// KV-cache CPU offloading, as in Argv. blis replay registers --kv-offload-config too;
+	// the trace header is authoritative on replay, but the flag is still passed when set
+	// so a replayed candidate is spelled identically to a run candidate.
+	if d.KVOffload != nil {
+		add("--kv-offload-config", kvOffloadPath)
+	}
 
 	add("--seed", strconv.FormatInt(g.Seed, 10))
 	// No --timeout: blis replay does not register it (it is run-only; there is an upstream
