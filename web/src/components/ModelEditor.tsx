@@ -71,6 +71,26 @@ interface Props {
   onCancel: () => void
 }
 
+/** A small upload glyph (arrow into a tray) for the Upload buttons. */
+function UploadIcon() {
+  return (
+    <svg
+      width="14"
+      height="14"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <path d="M12 16V4M7 9l5-5 5 5" />
+      <path d="M4 16v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2" />
+    </svg>
+  )
+}
+
 // Qwen-model placeholder hints, so a reader sees the shape each field expects.
 const EG = {
   dir: 'qwen3-14b',
@@ -223,6 +243,7 @@ export function ModelEditor({
             </div>
           </div>
           <button type="button" className="upload-btn" onClick={() => yamlFile.current?.click()}>
+            <UploadIcon />
             Upload model.yaml
           </button>
           <input
@@ -251,6 +272,7 @@ export function ModelEditor({
             onChange={(e) => set('configJson', e.target.value)}
           />
           <button type="button" className="upload-btn" onClick={() => jsonFile.current?.click()}>
+            <UploadIcon />
             Upload config.json
           </button>
           <input
@@ -289,14 +311,14 @@ export function ModelEditor({
         {saveError && <p className="issue">{saveError}</p>}
 
         <div className="editor-actions">
-          <button type="button" onClick={onValidate} disabled={validating}>
+          <button type="button" className="ghost" onClick={onCancel}>
+            Cancel
+          </button>
+          <button type="button" className="secondary" onClick={onValidate} disabled={validating}>
             {validating ? 'Validating…' : 'Validate'}
           </button>
           <button type="button" className="primary" onClick={onSave} disabled={saveDisabled}>
             {saving ? 'Saving…' : editingName ? 'Save changes' : 'Add model'}
-          </button>
-          <button type="button" onClick={onCancel}>
-            Cancel
           </button>
         </div>
         </div>
