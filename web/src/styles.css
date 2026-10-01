@@ -4801,11 +4801,12 @@ button.danger {
 
 .modal-wide .editor-actions .ghost {
   color: var(--muted);
+  border-color: var(--line-strong);
 }
 
 .modal-wide .editor-actions .ghost:hover {
   color: var(--ink);
-  border-color: var(--line-strong);
+  border-color: var(--accent);
 }
 
 .modal-wide .editor-actions .danger-ghost {
