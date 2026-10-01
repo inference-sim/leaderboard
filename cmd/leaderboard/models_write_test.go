@@ -97,6 +97,20 @@ func TestHandleModelCreateCollisionWithBaseIs409(t *testing.T) {
 	}
 }
 
+// A different org but the same directory name still collides: the directory is the model's
+// on-disk identity, so writing it would clobber the base model's files even though the
+// canonical names differ.
+func TestHandleModelCreateDirCollisionAcrossOrgsIs409(t *testing.T) {
+	s := newModelServer(t)
+	// Base model is meta/llama-base (dir llama-base). Submit the same dir under acme.
+	body := `{"dir":"llama-base","model_yaml":"source:\n  repo: Acme/Llama-Base\n","config_json":"{}"}`
+	rr := httptest.NewRecorder()
+	s.routes().ServeHTTP(rr, modelReq(http.MethodPost, "/api/models", body))
+	if rr.Code != http.StatusConflict {
+		t.Fatalf("got %d, want 409 for a directory collision across orgs (%s)", rr.Code, rr.Body.String())
+	}
+}
+
 func TestHandleModelCreateInvalidStructureIs422(t *testing.T) {
 	s := newModelServer(t)
 	body := `{"dir":"bad","model_yaml":"source:\n  repo: Acme/Bad\n","config_json":"{not json"}`

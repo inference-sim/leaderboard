@@ -58,16 +58,20 @@ func (s *server) checkModelSubmission(b modelBody, excludeName string) modelVali
 	}
 	resp.CanonicalName, resp.MoE, resp.Provider = v.Name, v.MoE, v.Provider
 
-	if v.Name != excludeName {
+	// Collision is by directory, not canonical name: the directory is the model's on-disk
+	// identity (<catalog>/models/<dir>), so a different org under the same directory would
+	// still clobber an existing model's files. excludeName is the model being edited, whose
+	// own directory is not a collision with itself.
+	if b.Dir != modelDirOf(excludeName) {
 		models, err := modelcatalog.List(s.catalogRoot, s.userModelsDir)
 		if err != nil {
 			resp.Issues = append(resp.Issues, err.Error())
 			return resp
 		}
 		for _, m := range models {
-			if m.Name == v.Name {
-				resp.Issues = append(resp.Issues, fmt.Sprintf("a model named %q already exists in the "+
-					"catalog; choose another directory name", v.Name))
+			if modelDirOf(m.Name) == b.Dir {
+				resp.Issues = append(resp.Issues, fmt.Sprintf("a model already occupies the directory "+
+					"%q (%s); choose another directory name", b.Dir, m.Name))
 				return resp
 			}
 		}
@@ -92,7 +96,9 @@ func (s *server) handleModelValidate(w http.ResponseWriter, r *http.Request) {
 		httpError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, s.checkModelSubmission(b, ""))
+	// ?name= is the model being edited, so validating an edit in place does not report the
+	// model colliding with itself. Absent when validating a new model.
+	writeJSON(w, http.StatusOK, s.checkModelSubmission(b, r.URL.Query().Get("name")))
 }
 
 // handleModelCreate validates a submission and, if it passes, writes it to the pristine
@@ -193,7 +199,7 @@ func (s *server) resolveUserModel(name string) (dir string, status int, msg stri
 				"read-only; it cannot be edited or deleted from here", name)
 		}
 		// The directory is the model-half of the canonical name.
-		return name[strings.LastIndex(name, "/")+1:], 0, ""
+		return modelDirOf(name), 0, ""
 	}
 	return "", http.StatusNotFound, fmt.Sprintf("no model named %q in the catalog", name)
 }
@@ -202,11 +208,20 @@ func (s *server) modelStore() modelcatalog.Store {
 	return modelcatalog.Store{CatalogRoot: s.catalogRoot, UserModelsDir: s.userModelsDir}
 }
 
-// modelRejectionStatus maps a failed validation to its HTTP status: a name collision is a
-// 409 (the resource exists), everything else a 422 (the submission is unprocessable).
+// modelDirOf is the directory half of a canonical "<org>/<dir>" model name — the model's
+// on-disk identity. An empty name (no model being edited) is "".
+func modelDirOf(name string) string {
+	if name == "" {
+		return ""
+	}
+	return name[strings.LastIndex(name, "/")+1:]
+}
+
+// modelRejectionStatus maps a failed validation to its HTTP status: a directory collision is
+// a 409 (the resource exists), everything else a 422 (the submission is unprocessable).
 func modelRejectionStatus(resp modelValidateResponse) int {
 	for _, issue := range resp.Issues {
-		if strings.Contains(issue, "already exists") {
+		if strings.Contains(issue, "already occupies") {
 			return http.StatusConflict
 		}
 	}
