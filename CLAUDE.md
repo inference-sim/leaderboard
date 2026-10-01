@@ -53,6 +53,14 @@ run those two with the sandbox disabled.
   the catalog only via `BLIS_CATALOG` (or `--catalog`) pointing at a
   [`blis-catalog`](https://github.com/inference-sim/blis-catalog) clone — no default,
   no search path. The blis subprocess inherits `BLIS_CATALOG` from `leaderboard`'s env.
+- **User-added models** (the Add-a-model form, `/api/models` write endpoints) live in a
+  separate pristine store (`-user-models`, default `<out>/user-models`), not in the base
+  catalog. The store is the durable source of truth: on OpenShift the seed-data initContainer
+  re-overlays it onto `/data/blis-catalog` **last** on every boot, so a user model survives a
+  redeploy and wins over the base catalog on a name collision. A write updates both the store
+  and the live catalog (so the model is usable without a restart). The old PR #15 contract
+  still holds for base dirs: they are image-managed and a hand-edit to one is overwritten on
+  boot. A model is tagged `origin: "user"` by membership in the store.
 - BLIS is deterministic: identical flags and `--seed` give identical output. Treat
   a metrics JSON as reproducible, and treat a diff in output with no flag change as
   a bug worth chasing, not noise.
