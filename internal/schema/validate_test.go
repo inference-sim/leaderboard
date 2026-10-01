@@ -117,11 +117,11 @@ func TestFixtureValidatesAndIsSelfConsistent(t *testing.T) {
 
 	// After the C4 migration the horizon run is its own group: eleven rows in the
 	// main table, one alone. That is what makes the fixture exercise multi-group
-	// rendering.
-	if got := groups["5063e40dceb2"]; got != 11 {
+	// rendering. (The groups are the workload-spec forms the flat workloads lower to.)
+	if got := groups["86575212efc8"]; got != 11 {
 		t.Errorf("main group has %d records, want 11", got)
 	}
-	if got := groups["6beca76a8f45"]; got != 1 {
+	if got := groups["e5538d4d5107"]; got != 1 {
 		t.Errorf("horizon group has %d records, want 1", got)
 	}
 }

@@ -34,10 +34,18 @@
   --trace-ink: #17506e;
   --trace-bg: #d3e6f2;
   --trace-line: #5c9cc6;
-  /* Rose — the load-kind tag, distinct from the teal/purple/cerulean/amber tag palette. */
-  --load-ink: #7a2f5a;
-  --load-bg: #f4d9e8;
-  --load-line: #cf7aa9;
+  /* The two load-kind tags are soft chips with dark text (like the other tags, not solid fills),
+   * held at the same visual weight so neither recedes, and separated by hue: rate a rose,
+   * concurrency a violet of matching depth. Both stay clear of the disqualification red, the
+   * navy-indigo workload-spec, cerulean trace, and amber preset. Rate, the rose: */
+  --load-ink: #6e1540;
+  --load-bg: #f0b3cf;
+  --load-line: #d85f93;
+  /* Concurrency, the violet (matched to the rose's depth, kept clear of the navy-indigo
+   * workload-spec it sits beside): */
+  --conc-ink: #46197a;
+  --conc-bg: #cfa6ec;
+  --conc-line: #a35fd6;
   --focus: #1f6e5c;
   --mode: #b8770c;
   --mode-ink: #6b4508;
@@ -193,15 +201,28 @@ code {
   border-color: var(--trace-line);
 }
 
-/* The load-kind tag (rate / concurrency): the axis a sweep varies, in its own rose so it reads
- * as distinct from the amber preset, teal variant, and cerulean trace tags. */
-.tag-load {
-  color: var(--load-ink);
-  background: var(--load-bg);
-  border-color: var(--load-line);
+/* The load-kind tags: what a workload's offered load is measured in, so the two kinds read as
+ * distinct at a glance and the same colour on the leaderboard picker and the Saved workloads
+ * list. They separate by hue at a matched weight (see the --load-* and --conc-* tokens): rate a
+ * rose, concurrency a violet of the same depth, so neither recedes while both stay clear of the
+ * navy-indigo workload-spec, cerulean trace, and amber preset tags they sit beside. */
+.tag-rate,
+.tag-concurrency {
   text-transform: uppercase;
   letter-spacing: 0.03em;
   font-size: 10.5px;
+}
+
+.tag-rate {
+  color: var(--load-ink);
+  background: var(--load-bg);
+  border-color: var(--load-line);
+}
+
+.tag-concurrency {
+  color: var(--conc-ink);
+  background: var(--conc-bg);
+  border-color: var(--conc-line);
 }
 
 /* The full workload spec, collapsed by default under a spec-backed workload's readout. */
@@ -1505,6 +1526,118 @@ tr.revealed td,
   50% {
     background: var(--accent-soft);
   }
+}
+
+/* ---------- Toast (the floating "workload added to the catalog" confirmation) ---------- */
+
+/* A non-blocking card floated in the corner over whatever view the submit landed on. It
+   borrows the live-run banner's panel vocabulary (accent left bar, check mark, action and
+   dismiss) but floats rather than sitting in the column, and clears itself after a few
+   seconds. It slides in under no-preference; the global reduce rule drops the animation. */
+.toast {
+  position: fixed;
+  right: 20px;
+  bottom: 20px;
+  z-index: 60;
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  max-width: 360px;
+  padding: 14px 16px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-left: 4px solid var(--accent);
+  border-radius: 3px;
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.18);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .toast {
+    animation: toast-rise 180ms ease;
+  }
+}
+
+@keyframes toast-rise {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+}
+
+.toast-mark {
+  flex: none;
+  width: 20px;
+  height: 20px;
+  margin-top: 1px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  background: var(--accent-soft);
+  color: var(--accent-ink);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.toast-body {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.toast-head {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.toast-sub {
+  margin: 3px 0 0;
+  font-size: 12.5px;
+  color: var(--muted);
+}
+
+.toast-actions {
+  flex: none;
+  align-self: center;
+}
+
+.toast-view {
+  padding: 6px 12px;
+  background: var(--accent);
+  color: var(--panel);
+  border: 1px solid var(--accent);
+  border-radius: 3px;
+  font: inherit;
+  font-size: 12.5px;
+  font-weight: 600;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.toast-view:hover {
+  background: var(--accent-ink);
+  border-color: var(--accent-ink);
+}
+
+.toast-dismiss {
+  flex: none;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  display: grid;
+  place-items: center;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 3px;
+  color: var(--muted);
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.toast-dismiss:hover {
+  border-color: var(--line-strong);
+  color: var(--ink);
 }
 
 /* ---------- Motion & focus ---------- */
@@ -3288,6 +3421,15 @@ button.danger {
 .wrow.selected {
   background: var(--accent-soft);
   box-shadow: inset 3px 0 0 var(--accent);
+}
+
+/* A just-saved workload the reader was sent here to see, pulsed for ~2s then cleared by JS.
+   Reuses the board's reveal keyframe; the global reduce rule drops the animation, leaving
+   the selected row's static tint. */
+@media (prefers-reduced-motion: no-preference) {
+  .wrow.revealed {
+    animation: liverun-pulse 2s ease;
+  }
 }
 
 /* The row face is the selectable region: a button so the keyboard reaches it, filling the
@@ -5622,4 +5764,66 @@ table.readout tbody tr.dqline.cmphl td.lft {
   border-radius: 5px;
   padding: 0.2rem 0.4rem;
   display: inline-block;
+}
+
+/* ---------- Trace distribution charts (Saved workloads trace detail) ---------- */
+
+/* The five charts of a stored trace's shape, laid out as a responsive grid so they reflow
+   from one column on a phone to several on a wide panel. */
+.tc-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 18px 20px;
+  margin-top: 18px;
+}
+
+.tc {
+  margin: 0;
+  min-width: 0;
+}
+
+.tc-title {
+  margin: 0 0 6px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--ink);
+}
+
+/* The bars fill the width (preserveAspectRatio="none" on the SVG), with a fixed height and a
+   faint frame so an empty-ish distribution still reads as a chart. */
+.tc-svg {
+  display: block;
+  width: 100%;
+  height: 96px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 3px;
+}
+
+.tc-bar {
+  fill: var(--accent);
+}
+
+.tc-axis {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 3px;
+  font-size: 10.5px;
+  color: var(--muted);
+}
+
+.tc-stats {
+  margin: 2px 0 0;
+  font-size: 10.5px;
+  color: var(--muted);
+}
+
+.tc-empty {
+  margin: 0;
+  display: grid;
+  place-items: center;
+  height: 96px;
+  border: 1px dashed var(--line);
+  border-radius: 3px;
+  font-size: 12px;
 }

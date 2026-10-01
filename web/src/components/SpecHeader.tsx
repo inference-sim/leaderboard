@@ -1,7 +1,6 @@
 import type { WorkloadGroup } from '../load'
-import { formatCount, formatNumber } from '../format'
+import { formatCount } from '../format'
 import { distTerms, getPath, getStr, serializeSpec, singleClient, type SpecObject } from '../spec'
-import { Derived } from './Derived'
 import { CopyBlock } from './CopyBlock'
 
 const HORIZON_NOTE =
@@ -17,9 +16,9 @@ const HORIZON_NOTE =
  *
  * The title is the catalog name when the runs carry one (else the shape); the variant and
  * "preset" tags are not repeated here, since the workload picker card above already carries
- * them. Both variants get a full field grid: a distribution's fields are authoritative; a
- * workload-spec's are read from its single client where it has one, with the full spec
- * always one click away for anything richer (multi-client, cohorts, non-gaussian).
+ * them. A trace shows its replay knobs; a workload-spec reads its fields from its single
+ * client where it has one, with the full spec always one click away for anything richer
+ * (multi-client, cohorts, non-gaussian).
  */
 export function WorkloadHeader({ workload }: { workload: WorkloadGroup }) {
   const g = workload.groups[0]!.group // one comparability group per workload now (E1)
@@ -29,13 +28,7 @@ export function WorkloadHeader({ workload }: { workload: WorkloadGroup }) {
     <header className="spec">
       <h2>{workload.title}</h2>
 
-      {type === 'trace' ? (
-        <TraceFields workload={workload} />
-      ) : type === 'workload-spec' ? (
-        <SpecFields workload={workload} />
-      ) : (
-        <DistributionFields workload={workload} />
-      )}
+      {type === 'trace' ? <TraceFields workload={workload} /> : <SpecFields workload={workload} />}
     </header>
   )
 }
@@ -70,18 +63,14 @@ function TraceFields({ workload }: { workload: WorkloadGroup }) {
           <dd>{t.session_mode}</dd>
         </div>
       )}
-      <div>
-        <dt>Offered load</dt>
-        <dd>
-          {load.kind === 'sessions' ? (
-            <>
-              {formatCount(load.value)} <small>concurrent sessions</small>
-            </>
-          ) : (
-            'recorded arrivals'
-          )}
-        </dd>
-      </div>
+      {/* A session pool (concurrency) is carried by the Load filter now, so it is not repeated
+          here; a recorded-arrivals trace has no filter, so its load is named here. */}
+      {load.kind !== 'sessions' && (
+        <div>
+          <dt>Offered load</dt>
+          <dd>recorded arrivals</dd>
+        </div>
+      )}
       {meta && (
         <div>
           <dt>Corpus</dt>
@@ -121,65 +110,6 @@ function TraceFields({ workload }: { workload: WorkloadGroup }) {
   )
 }
 
-/** The flat field grid for a distribution workload — every field is authoritative. The
- * variant is the title-row tag now, so the grid leads with the arrival process (which the
- * tag cannot carry) rather than repeating the type. */
-function DistributionFields({ workload }: { workload: WorkloadGroup }) {
-  const g = workload.groups[0]!.group
-  const w = g.workload
-  const axis = workload.loadAxis
-  const sweep = axis.values.length > 1
-  const loadLabel = axis.kind === 'rate' ? 'Offered rate' : 'Concurrency'
-  const loadUnit = axis.kind === 'rate' ? 'req/s' : 'users'
-  const digits = axis.kind === 'rate' ? 1 : 0
-  return (
-    <dl className="spec-grid">
-      <div>
-        <dt>Arrival</dt>
-        <dd>
-          <Derived formula="arrival process is not reported by blis: SynthesizeFromDistribution sets ArrivalSpec{Process: 'constant'} for rate mode (sim/workload/synthesis.go:33)">
-            {w.arrival_process}
-          </Derived>
-        </dd>
-      </div>
-      <div>
-        <dt>Requests</dt>
-        <dd>{formatCount(w.num_requests)}</dd>
-      </div>
-      {/* A profile swept across load names its levels; a single-load profile names the one
-          offered rate/concurrency. Either way the level is not part of the title. */}
-      {sweep ? (
-        <div>
-          <dt>Load levels</dt>
-          <dd>
-            {axis.values.map((v) => formatNumber(v, digits)).join(', ')} <small>{loadUnit}</small>
-          </dd>
-        </div>
-      ) : (
-        <div>
-          <dt>{loadLabel}</dt>
-          <dd>
-            {formatNumber(w.load.value, digits)} <small>{loadUnit}</small>
-          </dd>
-        </div>
-      )}
-      <div>
-        <dt>Prompt tokens</dt>
-        <dd>
-          {formatCount(w.prompt_tokens)} <small>±{formatCount(w.prompt_tokens_stdev)}</small>
-        </dd>
-      </div>
-      <div>
-        <dt>Output tokens</dt>
-        <dd>
-          {formatCount(w.output_tokens)} <small>±{formatCount(w.output_tokens_stdev)}</small>
-        </dd>
-      </div>
-      <GroupKnobs workload={workload} />
-    </dl>
-  )
-}
-
 /**
  * A workload-spec's readout, brought to parity with the distribution grid where the spec
  * has a single client: arrival, request count, aggregate rate, and the input/output token
@@ -191,12 +121,13 @@ function SpecFields({ workload }: { workload: WorkloadGroup }) {
   const spec = (g.workload.spec ?? null) as SpecObject | null
   const specText = spec ? serializeSpec(spec) : ''
   const requests = spec ? getPath(spec, ['num_requests']) : undefined
-  const rate = spec ? getPath(spec, ['aggregate_rate']) : undefined
   const clients = spec ? getPath(spec, ['clients']) : undefined
   const client = singleClient(spec)
   const arrival = client ? getStr(client, ['arrival', 'process']) : ''
   const input = client ? distTerms(getPath(client, ['input_distribution']) as SpecObject | null) : null
   const output = client ? distTerms(getPath(client, ['output_distribution']) as SpecObject | null) : null
+  // The offered load is not shown here: the section's Load filter always carries it (rate or
+  // concurrency, every level), so repeating it in this card would be redundant.
   return (
     <>
       <dl className="spec-grid">
@@ -216,14 +147,6 @@ function SpecFields({ workload }: { workload: WorkloadGroup }) {
           <div>
             <dt>Requests</dt>
             <dd>{formatCount(requests)}</dd>
-          </div>
-        )}
-        {typeof rate === 'number' && (
-          <div>
-            <dt>Offered rate</dt>
-            <dd>
-              {formatNumber(rate, 1)} <small>req/s</small>
-            </dd>
           </div>
         )}
         {input && (

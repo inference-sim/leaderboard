@@ -4,8 +4,8 @@ import { ModelFilter } from './components/ModelFilter'
 import { HardwareFilter } from './components/HardwareFilter'
 import { LoadFilter } from './components/LoadFilter'
 import { EmptyFilterNote } from './components/EmptyFilterNote'
-import { emptyFilterNoun, keptByFilters, nextSelection } from './filter'
-import type { RunRecord } from './load'
+import { emptyFilterNoun, keptByFilters, nextSelection, showLoadFilter } from './filter'
+import type { LoadAxis, RunRecord } from './load'
 
 const models = ['meta/llama-3-8b', 'qwen/qwen3-14b']
 const hardware = ['A100-SXM', 'H100', 'L40S']
@@ -244,5 +244,31 @@ describe('HardwareFilter', () => {
     expect(html.toLowerCase()).toContain('no hardware')
     expect(html).toContain('Clear')
     expect(html).not.toContain('disabled')
+  })
+})
+
+describe('showLoadFilter', () => {
+  const axis = (kind: string, values: number[]): LoadAxis => ({ kind, values })
+
+  it('shows for a sweep across more than one level, whatever the kind', () => {
+    expect(showLoadFilter(axis('rate', [6, 12]))).toBe(true)
+    expect(showLoadFilter(axis('concurrency', [8, 16]))).toBe(true)
+  })
+
+  it('shows for a single-level concurrency (a trace session pool, even one session)', () => {
+    expect(showLoadFilter(axis('sessions', [1]))).toBe(true)
+    expect(showLoadFilter(axis('concurrency', [1]))).toBe(true)
+  })
+
+  it('shows for a single arrival rate too (the filter always carries the load now)', () => {
+    expect(showLoadFilter(axis('rate', [6]))).toBe(true)
+  })
+
+  it('hides for a recorded-arrivals trace (no load kind to vary)', () => {
+    expect(showLoadFilter(axis('recorded', [0]))).toBe(false)
+  })
+
+  it('hides when the only level is a placeholder 0 (a cohort spec with no scalar load)', () => {
+    expect(showLoadFilter(axis('rate', [0]))).toBe(false)
   })
 })

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { WorkloadGroup } from '../load'
 import {
+  associatedRecords,
   deleteWorkload,
   initialForm,
   interpret,
@@ -11,6 +12,7 @@ import {
   type ProfileBody,
   type ValidateResponse,
 } from '../workloads'
+import { deleteRun } from '../results'
 import { workloadParam } from '../route'
 import { ConfirmDialog } from './ConfirmDialog'
 import { WorkloadCatalog } from './WorkloadCatalog'
@@ -19,6 +21,18 @@ import { WorkloadEditor } from './WorkloadEditor'
 interface Props {
   /** The board's workloads, so the catalog can cross-reference existing runs. */
   boardWorkloads: WorkloadGroup[]
+  /** A just-saved workload to scroll to and highlight (set by the "View in catalog" toast
+   * after a run saved a new custom workload), or null. */
+  revealWorkload?: string | null
+  /** Called once the highlight has shown, so the parent clears the target and it does not
+   * re-fire on a later refresh. */
+  onWorkloadRevealed?: () => void
+  /** Called with the name when the tab's own editor saves a workload to the catalog, so the
+   * app can show the same "added to the catalog" confirmation it shows for a run's save. */
+  onWorkloadSaved?: (name: string) => void
+  /** Called after a delete has removed runs from disk, so the app can reload the board's
+   * records and the deleted workload's rows leave the leaderboard. */
+  onBoardChanged?: () => void | Promise<void>
 }
 
 interface Editing {
@@ -36,7 +50,16 @@ interface Editing {
 /** A fresh new-workload editing state, opened with BLIS's own defaults. */
 const freshNew = (): Editing => ({ values: initialForm() })
 
-export function Workloads({ boardWorkloads }: Props) {
+/** How long a revealed workload row stays highlighted, matched to the pulse keyframe. */
+const REVEAL_MS = 2000
+
+export function Workloads({
+  boardWorkloads,
+  revealWorkload = null,
+  onWorkloadRevealed,
+  onWorkloadSaved,
+  onBoardChanged,
+}: Props) {
   const [profiles, setProfiles] = useState<ProfileBody[]>([])
   const [loadError, setLoadError] = useState<string | null>(null)
   // The editor is always open on a fresh new workload, so no button gates it; Cancel or a
@@ -59,6 +82,14 @@ export function Workloads({ boardWorkloads }: Props) {
   const deepLink = useRef<string | null>(workloadParam(window.location.hash))
   // The workload the delete confirmation is open for, or null when the dialog is closed.
   const [pendingDelete, setPendingDelete] = useState<string | null>(null)
+  // The reveal pipeline. `revealName` is the workload a scroll+pulse has been requested for
+  // (from the toast's "View in catalog" via the prop, or from this tab's own Save); `revealed`
+  // is the row currently pulsing. They are separate from `selected` so the pulse runs on its
+  // own ~2s clock while the row stays selected (open) afterwards. A reveal first selects the
+  // row, so it carries the fixed wrow-selected id the scroll targets.
+  const [revealName, setRevealName] = useState<string | null>(null)
+  const [revealed, setRevealed] = useState<string | null>(null)
+  const revealTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   const refresh = useCallback(async () => {
     try {
@@ -81,6 +112,36 @@ export function Workloads({ boardWorkloads }: Props) {
     deepLink.current = null
     document.getElementById('wrow-selected')?.scrollIntoView({ block: 'center' })
   }, [profiles])
+
+  // A reveal request from the toast's "View in catalog": select the target row and request
+  // the reveal, then refresh, since the workload was saved moments ago and may not be in this
+  // tab's list yet. (An in-tab Save drives the same two states directly, below.)
+  useEffect(() => {
+    if (!revealWorkload) return
+    setSelected(revealWorkload)
+    setRevealName(revealWorkload)
+    refresh()
+  }, [revealWorkload, refresh])
+
+  // Perform the reveal once its row is both selected (so it carries the wrow-selected id) and
+  // present in the loaded list: scroll it into view and pulse it for ~2s, then clear and tell
+  // the parent (a no-op for an in-tab Save, which passes no onWorkloadRevealed). Requiring
+  // selected === revealName means the id is already in the DOM when we scroll.
+  useEffect(() => {
+    if (!revealName || selected !== revealName) return
+    if (!profiles.some((p) => p.name === revealName)) return
+    document.getElementById('wrow-selected')?.scrollIntoView({ block: 'center' })
+    setRevealed(revealName)
+    setRevealName(null)
+    if (revealTimer.current) clearTimeout(revealTimer.current)
+    revealTimer.current = setTimeout(() => {
+      setRevealed(null)
+      onWorkloadRevealed?.()
+    }, REVEAL_MS)
+  }, [revealName, selected, profiles, onWorkloadRevealed])
+
+  // Drop the pending pulse timer if the tab unmounts mid-highlight.
+  useEffect(() => () => { if (revealTimer.current) clearTimeout(revealTimer.current) }, [])
 
   // Live validation, debounced: only the last edit in a burst reaches the server, and a
   // stale response never overwrites a newer one.
@@ -126,7 +187,14 @@ export function Workloads({ boardWorkloads }: Props) {
       await saveWorkload(body, null)
       setEditing(freshNew())
       setVerdict(null)
+      // The list now holds the new workload; select it and request the reveal so the row it
+      // just dropped into the catalog scrolls into view and pulses, and confirm the save with
+      // the same toast a run's save shows (the reader is already here, so it needs no "View in
+      // catalog" action — the app passes none).
       await refresh()
+      setSelected(body.name)
+      setRevealName(body.name)
+      onWorkloadSaved?.(body.name)
     } catch (e) {
       setSaveError(e instanceof Error ? e.message : String(e))
     } finally {
@@ -142,14 +210,31 @@ export function Workloads({ boardWorkloads }: Props) {
     const name = pendingDelete
     if (name == null) return
     setPendingDelete(null)
+    const profile = profiles.find((p) => p.name === name)
+    // Every leaderboard run filed under this workload, deleted along with it so none is left
+    // stranded under a profile that no longer exists. Runs go first (then the profile), so a
+    // failure part-way leaves the profile in place and the delete is retryable rather than
+    // orphaning it. A client loop is not atomic; whatever did delete is reflected by the
+    // refresh below either way.
+    const runs = profile ? associatedRecords(profile, boardWorkloads) : []
     try {
+      for (const r of runs) await deleteRun(r.group_id, r.run_id)
       await deleteWorkload(name)
       if (selected === name) setSelected(null)
-      await refresh()
     } catch (e) {
       setLoadError(e instanceof Error ? e.message : String(e))
+    } finally {
+      // Refresh the catalog and, when runs were removed, the board, so the leaderboard drops
+      // the deleted rows without a manual reload.
+      await refresh()
+      if (runs.length > 0) await onBoardChanged?.()
     }
   }
+
+  // The runs a delete of the pending workload would also remove, for the modal's warning. It
+  // matches associatedRecords exactly, so the count shown is the count deleted.
+  const pendingProfile = pendingDelete ? profiles.find((p) => p.name === pendingDelete) : null
+  const pendingRuns = pendingProfile ? associatedRecords(pendingProfile, boardWorkloads).length : 0
 
   return (
     <>
@@ -178,6 +263,7 @@ export function Workloads({ boardWorkloads }: Props) {
         profiles={profiles}
         boardWorkloads={boardWorkloads}
         selected={selected}
+        revealed={revealed}
         onSelect={toggleSelected}
         onDelete={onDelete}
       />
@@ -188,8 +274,18 @@ export function Workloads({ boardWorkloads }: Props) {
         onConfirm={confirmDelete}
         onCancel={() => setPendingDelete(null)}
       >
-        Delete <code className="mono">{pendingDelete}</code>? This removes it from the catalog only.
-        Runs already on the board keep their own copy.
+        {pendingRuns > 0 ? (
+          <>
+            Delete <code className="mono">{pendingDelete}</code>? This also permanently deletes its{' '}
+            {pendingRuns} run{pendingRuns === 1 ? '' : 's'} from the leaderboard and removes their
+            results from disk. This cannot be undone; re-run the declaration to bring them back.
+          </>
+        ) : (
+          <>
+            Delete <code className="mono">{pendingDelete}</code>? This removes it from the catalog. It
+            has no runs on the leaderboard.
+          </>
+        )}
       </ConfirmDialog>
     </>
   )

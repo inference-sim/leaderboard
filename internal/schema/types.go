@@ -75,30 +75,36 @@ type Group struct {
 
 // Workload is the request stream offered to every candidate.
 type Workload struct {
-	// Type is the --workload value. Only "distribution" is supported.
+	// Type is the stored workload variant: "workload-spec" or "trace". The flat gaussian
+	// shorthand once spelled "distribution" is now authoring sugar only (runs.yaml and the
+	// web simple card), synthesized into a one-client gaussian workload-spec before a record
+	// is written, so it is never a stored Type.
 	Type string `json:"type"`
-	// ArrivalProcess is derived, not reported: SynthesizeFromDistribution sets
-	// ArrivalSpec{Process: "constant"} for rate mode
-	// (../inference-sim/sim/workload/synthesis.go:33). It is displayed as a
-	// derived value, never authored.
+	// ArrivalProcess is derived, not reported, and holds the placeholder "constant" for
+	// both stored variants: a spec carries its own arrival inside the spec, and a trace's
+	// arrival is its recorded stream. It is displayed as a derived value, never authored.
 	ArrivalProcess string `json:"arrival_process"`
-	NumRequests    int    `json:"num_requests"`
-	Load           Load   `json:"load"`
+	// NumRequests / Load / the token fields are not-applicable placeholder zeros both
+	// stored variants carry. They remain on the struct (rather than a discriminated union)
+	// so Workload stays a single generated type and existing readers of num_requests/load
+	// are unchanged; the real offered load lives in Spec, or is the trace's recorded stream.
+	NumRequests int  `json:"num_requests"`
+	Load        Load `json:"load"`
 
 	PromptTokens      int `json:"prompt_tokens"`
 	PromptTokensStdev int `json:"prompt_tokens_stdev"`
 	OutputTokens      int `json:"output_tokens"`
 	OutputTokensStdev int `json:"output_tokens_stdev"`
 
-	// SpecFile / SpecSHA256 reserve --workload-spec. SpecFile records provenance
+	// SpecFile / SpecSHA256 back --workload-spec. SpecFile records provenance
 	// when a spec was authored as a sibling file; a catalog-inline profile leaves it
 	// nil and carries the spec in Spec instead.
 	SpecFile   *string `json:"spec_file"`
 	SpecSHA256 *string `json:"spec_sha256"`
 
 	// Spec is the inline blis WorkloadSpec (v2) for a "workload-spec" workload,
-	// model-free. It is omitempty so a "distribution" workload's canonical form — and
-	// therefore every committed table's group_id — is byte-for-byte unchanged (P7).
+	// model-free. It is omitempty so a "trace" workload's canonical form — and therefore
+	// its committed group_id — is byte-for-byte unchanged (P7).
 	// group_id folds it in for the spec variant; SpecSHA256 is its content hash.
 	Spec map[string]any `json:"spec,omitempty"`
 
@@ -162,12 +168,11 @@ type TraceMeta struct {
 }
 
 // DeclaredRequests is the number of requests the group offered — the count a run's
-// completeness is judged against. For a "distribution" workload it is NumRequests. For
-// a "workload-spec" workload the flat NumRequests is a not-applicable placeholder zero
-// (the real load lives in Spec), so it reads Spec["num_requests"]. The bool is false
-// when the count is not a positive scalar — a spec that drives its load from cohort
-// populations or a trace declares no single num_requests — so a caller can skip a check
-// that would otherwise compare against zero.
+// completeness is judged against. For a "workload-spec" workload the flat NumRequests is
+// a not-applicable placeholder zero (the real load lives in Spec), so it reads
+// Spec["num_requests"]. The bool is false when the count is not a positive scalar — a
+// spec that drives its load from cohort populations or a trace declares no single
+// num_requests — so a caller can skip a check that would otherwise compare against zero.
 func (w Workload) DeclaredRequests() (int, bool) {
 	// A trace declares no single scalar count: closed-loop replay generates follow-up
 	// rounds, and a session pool duplicates the corpus, so the injected count is a
@@ -177,9 +182,8 @@ func (w Workload) DeclaredRequests() (int, bool) {
 	if w.Type == "trace" {
 		return 0, false
 	}
-	if w.Type != "workload-spec" {
-		return w.NumRequests, true
-	}
+	// Every other stored record is a workload-spec: the flat NumRequests is a placeholder
+	// zero, so the real count lives in the spec.
 	n, ok := asInt(w.Spec["num_requests"])
 	if !ok || n <= 0 {
 		return 0, false

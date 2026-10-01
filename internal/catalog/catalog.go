@@ -49,20 +49,15 @@ type Profile struct {
 	Builtin bool
 }
 
-// Workload is a profile's work definition in its authored (clean) form: the classic
-// distribution fields, or an inline blis WorkloadSpec. The variant is Type. Unlike
-// schema.Workload — the record shape, which carries not-applicable placeholders so it
-// can stay a single type — this holds only the fields the variant actually uses.
+// Workload is a profile's work definition in its authored (clean) form: an inline blis
+// WorkloadSpec, or a trace reference. The variant is Type ("workload-spec" or "trace").
+// Unlike schema.Workload — the record shape, which carries not-applicable placeholders so
+// it can stay a single type — this holds only the fields the variant actually uses. The
+// flat gaussian shorthand once spelled "distribution" is authoring sugar at the entry
+// points (runs.yaml and the web simple card), lowered to a one-client workload-spec before
+// it is stored, so it is never a catalog variant.
 type Workload struct {
 	Type string
-
-	// Distribution fields (Type == "distribution").
-	NumRequests       int
-	Load              schema.Load
-	PromptTokens      int
-	PromptTokensStdev int
-	OutputTokens      int
-	OutputTokensStdev int
 
 	// Spec is the inline blis WorkloadSpec (v2), model-free (Type == "workload-spec").
 	Spec map[string]any
@@ -93,27 +88,15 @@ type profileYAML struct {
 type workloadYAML struct {
 	Type string `yaml:"type"`
 
-	NumRequests       int       `yaml:"num_requests,omitempty"`
-	Load              *loadYAML `yaml:"load,omitempty"`
-	PromptTokens      int       `yaml:"prompt_tokens,omitempty"`
-	PromptTokensStdev int       `yaml:"prompt_tokens_stdev,omitempty"`
-	OutputTokens      int       `yaml:"output_tokens,omitempty"`
-	OutputTokensStdev int       `yaml:"output_tokens_stdev,omitempty"`
-
 	// SpecSHA256 is written for provenance and re-validated on read; the read value is
 	// recomputed from Spec, so a hand-edited file that disagrees is rejected.
 	SpecSHA256 *string        `yaml:"spec_sha256,omitempty"`
 	Spec       map[string]any `yaml:"spec,omitempty"`
 
 	// Trace is the nested trace block (Type == "trace"): the comparability knobs plus the
-	// display/provenance, all under one key so a distribution or spec profile's YAML is
-	// unchanged. The bytes live in the store; only the hash is here.
+	// display/provenance, all under one key so a spec profile's YAML is unchanged. The
+	// bytes live in the store; only the hash is here.
 	Trace *traceYAML `yaml:"trace,omitempty"`
-}
-
-type loadYAML struct {
-	Kind  string  `yaml:"kind"`
-	Value float64 `yaml:"value"`
 }
 
 // traceYAML is the on-disk shape of a trace workload: comparability (sha256 + replay
@@ -192,16 +175,8 @@ func (py profileYAML) toProfile() (Profile, error) {
 		timeout = *py.RequestTimeoutS
 	}
 	w := Workload{
-		Type:              py.Workload.Type,
-		NumRequests:       py.Workload.NumRequests,
-		PromptTokens:      py.Workload.PromptTokens,
-		PromptTokensStdev: py.Workload.PromptTokensStdev,
-		OutputTokens:      py.Workload.OutputTokens,
-		OutputTokensStdev: py.Workload.OutputTokensStdev,
-		Spec:              py.Workload.Spec,
-	}
-	if py.Workload.Load != nil {
-		w.Load = schema.Load{Kind: py.Workload.Load.Kind, Value: py.Workload.Load.Value}
+		Type: py.Workload.Type,
+		Spec: py.Workload.Spec,
 	}
 	if ty := py.Workload.Trace; ty != nil {
 		w.Trace = &schema.Trace{
@@ -258,13 +233,6 @@ func (c *Catalog) Write(path string) error {
 		}
 		wy := workloadYAML{Type: p.Workload.Type}
 		switch p.Workload.Type {
-		case "distribution":
-			wy.NumRequests = p.Workload.NumRequests
-			wy.Load = &loadYAML{Kind: p.Workload.Load.Kind, Value: p.Workload.Load.Value}
-			wy.PromptTokens = p.Workload.PromptTokens
-			wy.PromptTokensStdev = p.Workload.PromptTokensStdev
-			wy.OutputTokens = p.Workload.OutputTokens
-			wy.OutputTokensStdev = p.Workload.OutputTokensStdev
 		case "workload-spec":
 			sha, err := schema.SpecSHA256(p.Workload.Spec)
 			if err != nil {
@@ -331,20 +299,10 @@ func (p Profile) Group() schema.Group {
 	}
 }
 
-// schemaWorkload resolves the authored workload into the record shape. For the spec
-// variant it sets the not-applicable distribution placeholders (mirroring the schema)
-// and computes spec_sha256.
+// schemaWorkload resolves the authored workload into the record shape. Both stored
+// variants carry the not-applicable flat placeholders (mirroring the schema); the spec
+// variant additionally computes spec_sha256 and carries the inline spec.
 func (w Workload) schemaWorkload() schema.Workload {
-	if w.Type == "workload-spec" {
-		sha, _ := schema.SpecSHA256(w.Spec)
-		return schema.Workload{
-			Type:           "workload-spec",
-			ArrivalProcess: "constant",                // placeholder; arrival lives in the spec
-			Load:           schema.Load{Kind: "rate"}, // placeholder; value 0
-			SpecSHA256:     &sha,
-			Spec:           w.Spec,
-		}
-	}
 	if w.Type == "trace" {
 		// A pool offers N concurrent sessions (the offered-load analog of concurrency);
 		// every other mode offers the trace's recorded arrivals. Load is derived, not
@@ -360,26 +318,16 @@ func (w Workload) schemaWorkload() schema.Workload {
 			Trace:          w.Trace,
 		}
 	}
+	// workload-spec (the only other stored variant): the flat fields are placeholders and
+	// arrival_process holds "constant"; the real offered load lives inside the spec.
+	sha, _ := schema.SpecSHA256(w.Spec)
 	return schema.Workload{
-		Type:              "distribution",
-		ArrivalProcess:    arrivalProcess(w.Load.Kind),
-		NumRequests:       w.NumRequests,
-		Load:              w.Load,
-		PromptTokens:      w.PromptTokens,
-		PromptTokensStdev: w.PromptTokensStdev,
-		OutputTokens:      w.OutputTokens,
-		OutputTokensStdev: w.OutputTokensStdev,
+		Type:           "workload-spec",
+		ArrivalProcess: "constant",                // placeholder; arrival lives in the spec
+		Load:           schema.Load{Kind: "rate"}, // placeholder; value 0
+		SpecSHA256:     &sha,
+		Spec:           w.Spec,
 	}
-}
-
-// arrivalProcess reports the process BLIS will actually use, mirroring
-// internal/spec.arrivalProcess: rate mode synthesizes a constant process
-// (../inference-sim/sim/workload/synthesis.go:33); concurrency mode is closed-loop.
-func arrivalProcess(loadKind string) string {
-	if loadKind == "concurrency" {
-		return "closed-loop"
-	}
-	return "constant"
 }
 
 // contentKey is the profile's canonical content minus name and model: two profiles
@@ -480,23 +428,6 @@ func Validate(p Profile) error {
 	}
 
 	switch p.Workload.Type {
-	case "distribution":
-		if p.Workload.Spec != nil {
-			return fmt.Errorf("a distribution workload must not carry a spec; set type: " +
-				"workload-spec to use one")
-		}
-		if p.Workload.Load.Kind != "rate" && p.Workload.Load.Kind != "concurrency" {
-			return fmt.Errorf("load.kind %q: want \"rate\" or \"concurrency\"", p.Workload.Load.Kind)
-		}
-		if p.Workload.Load.Value <= 0 {
-			return fmt.Errorf("load.value %v: want > 0", p.Workload.Load.Value)
-		}
-		if p.Workload.NumRequests <= 0 {
-			return fmt.Errorf("num_requests %d: want > 0", p.Workload.NumRequests)
-		}
-		if p.Workload.PromptTokens <= 0 || p.Workload.OutputTokens <= 0 {
-			return fmt.Errorf("prompt_tokens and output_tokens must both be > 0")
-		}
 	case "workload-spec":
 		if len(p.Workload.Spec) == 0 {
 			return fmt.Errorf("a workload-spec workload requires a non-empty spec")
@@ -518,7 +449,9 @@ func Validate(p Profile) error {
 			return fmt.Errorf("%s", strings.Join(issues, "; "))
 		}
 	default:
-		return fmt.Errorf("workload.type %q: want \"distribution\", \"workload-spec\" or \"trace\"", p.Workload.Type)
+		return fmt.Errorf("workload.type %q: want \"workload-spec\" or \"trace\". The flat "+
+			"gaussian shorthand (once \"distribution\") is authored in runs.yaml or the web "+
+			"simple card and lowered to a one-client workload-spec before it is stored", p.Workload.Type)
 	}
 	return nil
 }

@@ -6,7 +6,7 @@ import { visibleOrder, visibleRows } from './rows'
 import { selectionInDisplayOrder } from './compare'
 
 const records = fixture as unknown as RunRecord[]
-const w = loadWorkloads(records).find((x) => x.groups.some((g) => g.groupId === '5063e40dceb2'))!
+const w = loadWorkloads(records).find((x) => x.groups.some((g) => g.groupId === '86575212efc8'))!
 
 describe('visibleRows / visibleOrder', () => {
   it('orders the ranked rows by the active sort', () => {

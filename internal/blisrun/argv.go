@@ -23,12 +23,12 @@ const (
 	defaultPDTransferBaseLatency = 0.05
 )
 
-// Argv builds the command line for one run. It is a pure function of the declared
-// inputs, so a distribution argv stored in a record reproduces the record. specPath is
-// the file the inline WorkloadSpec was materialized to; it is used only for the
-// workload-spec variant and ignored otherwise (a spec run's argv carries that path, so
-// it reproduces from the record's inline spec re-materialized, not from the path
-// verbatim).
+// Argv builds the command line for one workload-spec run. It is a pure function of the
+// declared inputs, so a spec argv stored in a record reproduces the record. specPath is
+// the file the inline WorkloadSpec was materialized to; blis reads the offered load,
+// token distributions and arrival from the spec, so no synthetic --rate/--prompt-tokens/…
+// flags are emitted (a trace run goes through ReplayArgv instead, and the flat gaussian
+// shorthand is lowered to a workload-spec before it ever reaches here).
 func Argv(binary string, g schema.Group, d schema.Deployment, metricsPath, specPath, kvOffloadPath string) []string {
 	a := []string{binary, "run"}
 	add := func(flag, value string) { a = append(a, flag, value) }
@@ -37,36 +37,16 @@ func Argv(binary string, g schema.Group, d schema.Deployment, metricsPath, specP
 	// with a replay so the two commands cannot drift in how a candidate is spelled.
 	a = appendCandidateHead(a, d)
 
-	// The workload surface: either the synthetic distribution flags, or a spec file
-	// that supersedes them (upstream: --workload-spec "overrides --workload", and the
-	// synthetic --rate/--prompt-tokens/… flags are read only on the synthesize path).
-	if g.Workload.Type == "workload-spec" {
-		add("--workload-spec", specPath)
-	} else {
-		add("--workload", g.Workload.Type)
-		add("--num-requests", strconv.Itoa(g.Workload.NumRequests))
-		// Exactly one of these: upstream rejects --rate together with --concurrency.
-		if g.Workload.Load.Kind == "concurrency" {
-			add("--concurrency", strconv.FormatFloat(g.Workload.Load.Value, 'f', -1, 64))
-		} else {
-			add("--rate", strconv.FormatFloat(g.Workload.Load.Value, 'f', -1, 64))
-		}
-	}
+	// The workload surface is the inline spec: --workload-spec supersedes the synthetic
+	// flags entirely (upstream: it "overrides --workload").
+	add("--workload-spec", specPath)
 
 	// Group-side knobs. blis lets --seed/--timeout/--horizon override the spec's own
-	// values, and these decide whether the declared work completes, so they are passed
-	// in both variants.
+	// values, and these decide whether the declared work completes.
 	add("--seed", strconv.FormatInt(g.Seed, 10))
 	add("--timeout", strconv.Itoa(g.RequestTimeoutS))
 	if g.HorizonTicks != nil {
 		add("--horizon", strconv.FormatInt(*g.HorizonTicks, 10))
-	}
-
-	if g.Workload.Type != "workload-spec" {
-		add("--prompt-tokens", strconv.Itoa(g.Workload.PromptTokens))
-		add("--prompt-tokens-stdev", strconv.Itoa(g.Workload.PromptTokensStdev))
-		add("--output-tokens", strconv.Itoa(g.Workload.OutputTokens))
-		add("--output-tokens-stdev", strconv.Itoa(g.Workload.OutputTokensStdev))
 	}
 
 	// The candidate tail (batching/scheduling/routing/speculative/extra), shared with

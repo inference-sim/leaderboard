@@ -1,15 +1,15 @@
 /* GENERATED from ../schema/run.schema.json by npm run gen:types. Do not edit. */
 
 /**
- * Two variants share this object, discriminated by `type` (§4). The base declares every field loosely; the value constraints that make a `distribution` workload well-formed live in the conditional below, so a `workload-spec` record — whose distribution fields are unused zeros — is not rejected by them. Keeping one object (rather than a oneOf) keeps the generated Workload a single type, so existing readers of `num_requests`/`load` are unchanged.
+ * Two variants share this object, discriminated by `type` (§4): `workload-spec` (an inline blis WorkloadSpec in `spec`) and `trace` (a `blis replay` against a recorded TraceV2 named in `trace`). The flat fields (`num_requests`, `load`, `prompt_tokens`…) are not-applicable placeholder zeros both variants carry: the real offered load lives inside the spec, or is the trace's recorded stream. They are kept on the object (rather than a oneOf) so the generated Workload stays a single type and existing readers of `num_requests`/`load` are unchanged. The flat gaussian shorthand once spelled `type: distribution` is now authoring sugar only (runs.yaml and the web simple card), synthesized into a one-client gaussian `workload-spec` before anything is stored; it is never a stored variant.
  */
 export type Workload = {
   /**
-   * --workload for the synthetic variants; the `trace` variant runs `blis replay` against a recorded TraceV2 named in `trace`. `distribution` is the flat synthetic shape; `workload-spec` carries an inline blis WorkloadSpec in `spec`.
+   * `workload-spec` carries an inline blis WorkloadSpec (v2) in `spec`; `trace` runs `blis replay` against a recorded TraceV2 named in `trace`.
    */
-  type: "distribution" | "workload-spec" | "trace";
+  type: "workload-spec" | "trace";
   /**
-   * DERIVED, not reported: SynthesizeFromDistribution sets ArrivalSpec{Process: "constant"} for rate mode (../inference-sim/sim/workload/synthesis.go:33). Poisson is reachable only via --workload-spec. Not applicable to the spec or trace variants (arrival lives inside the spec, or is the trace's recorded stream), where it holds the placeholder "constant".
+   * DERIVED, not reported. Not applicable to the spec or trace variants (arrival lives inside the spec, or is the trace's recorded stream), where it holds the placeholder "constant".
    */
   arrival_process: "constant" | "closed-loop";
   num_requests: number;
@@ -23,11 +23,11 @@ export type Workload = {
    */
   spec_file: string | null;
   /**
-   * Content hash of the inline `spec`, folded into group_id. Null for the distribution variant.
+   * Content hash of the inline `spec`, folded into group_id. Null for the trace variant.
    */
   spec_sha256: string | null;
   /**
-   * The inline blis WorkloadSpec (v2), model-free, for the workload-spec variant. Absent for distribution.
+   * The inline blis WorkloadSpec (v2), model-free, for the workload-spec variant. Absent for the trace variant.
    */
   spec?: {};
   trace?: Trace;
@@ -118,7 +118,7 @@ export interface Load {
    */
   kind: "rate" | "concurrency" | "recorded" | "sessions";
   /**
-   * Offered load; > 0 for the distribution variant (enforced there). 0 is the not-applicable placeholder a workload-spec or recorded-trace record carries.
+   * Offered load. 0 is the not-applicable placeholder a workload-spec or recorded-trace record carries; the real load lives in the spec, or is the trace's recorded stream or session pool size.
    */
   value: number;
 }

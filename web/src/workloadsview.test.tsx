@@ -93,25 +93,32 @@ describe('WorkloadCatalog', () => {
     expect(html).not.toContain('id="wrow-selected"')
   })
 
-  it('shows a distribution profile’s flat definition, which has no spec', () => {
-    const dist: ProfileBody = {
+  it('shows a trace profile’s replay knobs, which has no spec', () => {
+    const trace: ProfileBody = {
       name: 'legacy',
       seed: 7,
       horizon_ticks: null,
       request_timeout_s: 300,
       workload: {
-        type: 'distribution',
-        num_requests: 500,
-        load: { kind: 'rate', value: 6 },
-        prompt_tokens: 512,
-        prompt_tokens_stdev: 256,
-        output_tokens: 128,
-        output_tokens_stdev: 64,
+        type: 'trace',
+        trace: {
+          sha256: 'deadbeef',
+          session_mode: 'fixed',
+          concurrent_sessions: 0,
+          total_sessions: 0,
+          shuffle_corpus: false,
+          think_time_ms: 0,
+          think_time_dist: '',
+          source_format: 'tracev2',
+          records: 1000,
+          sessions: 50,
+          session_context_growth: '',
+        },
       },
     }
     const html = renderToStaticMarkup(
       <WorkloadCatalog
-        profiles={[dist]}
+        profiles={[trace]}
         boardWorkloads={[]}
         selected="legacy"
         onSelect={noop}
@@ -119,9 +126,10 @@ describe('WorkloadCatalog', () => {
       />,
     )
     expect(html).toContain('seed 7')
-    expect(html).toContain('500') // request count
-    expect(html).toContain('512') // prompt tokens
-    // A distribution has no WorkloadSpec YAML to show.
+    expect(html).toContain('tracev2') // source format
+    expect(html).toContain('1000 records, 50 sessions') // corpus
+    expect(html).toContain('fixed') // session mode
+    // A trace has no WorkloadSpec YAML to show.
     expect(html).not.toContain('aggregate_rate')
   })
 })

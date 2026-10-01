@@ -20,14 +20,21 @@ func catalogServer(t *testing.T) *server {
 	return s
 }
 
-func distBody(name string, rate float64) profileBody {
+// rateBody is a one-client gaussian workload-spec at the given aggregate rate — the shape
+// the flat gaussian shorthand lowers to. Content varies by rate so the twin/duplicate
+// tests get distinct profiles.
+func rateBody(name string, rate float64) profileBody {
 	return profileBody{
 		Name: name, Seed: 42,
 		Workload: workloadBody{
-			Type: "distribution", NumRequests: 500,
-			Load:         &loadBody{Kind: "rate", Value: rate},
-			PromptTokens: 512, PromptTokensStdev: 256,
-			OutputTokens: 128, OutputTokensStdev: 256,
+			Type: "workload-spec",
+			Spec: map[string]any{
+				"version": "2", "category": "language", "aggregate_rate": rate, "num_requests": 500,
+				"clients": []any{map[string]any{"id": "c0", "rate_fraction": 1.0,
+					"arrival":             map[string]any{"process": "constant"},
+					"input_distribution":  map[string]any{"type": "gaussian", "params": map[string]any{"mean": 512, "std_dev": 256, "min": 2, "max": 7000}},
+					"output_distribution": map[string]any{"type": "gaussian", "params": map[string]any{"mean": 128, "std_dev": 256, "min": 2, "max": 7000}}}},
+			},
 		},
 	}
 }
@@ -78,7 +85,7 @@ func TestWorkloadsGetReturnsPresetsWhenFileEmpty(t *testing.T) {
 
 func TestWorkloadsGetListsUserProfileAfterPresets(t *testing.T) {
 	s := catalogServer(t)
-	if rr := do(t, s, http.MethodPost, "/api/workloads", distBody("mine", 6)); rr.Code != http.StatusOK {
+	if rr := do(t, s, http.MethodPost, "/api/workloads", rateBody("mine", 6)); rr.Code != http.StatusOK {
 		t.Fatalf("create status %d: %s", rr.Code, rr.Body)
 	}
 	got := listBodies(t, s)
@@ -93,7 +100,7 @@ func TestWorkloadsGetListsUserProfileAfterPresets(t *testing.T) {
 
 func TestWorkloadsCreateRejectsNamingAPreset(t *testing.T) {
 	s := catalogServer(t)
-	rr := do(t, s, http.MethodPost, "/api/workloads", distBody("chatbot", 6))
+	rr := do(t, s, http.MethodPost, "/api/workloads", rateBody("chatbot", 6))
 	if rr.Code != http.StatusConflict {
 		t.Fatalf("want 409 naming a preset, got %d: %s", rr.Code, rr.Body)
 	}
@@ -145,7 +152,7 @@ func presetBody(t *testing.T, name string) profileBody {
 
 func TestWorkloadsCreateThenGet(t *testing.T) {
 	s := catalogServer(t)
-	if rr := do(t, s, http.MethodPost, "/api/workloads", distBody("chat-6rps", 6)); rr.Code != http.StatusOK {
+	if rr := do(t, s, http.MethodPost, "/api/workloads", rateBody("chat-6rps", 6)); rr.Code != http.StatusOK {
 		t.Fatalf("create status %d: %s", rr.Code, rr.Body)
 	}
 	// It is persisted and readable.
@@ -161,8 +168,8 @@ func TestWorkloadsCreateThenGet(t *testing.T) {
 
 func TestWorkloadsCreateRejectsDuplicateName(t *testing.T) {
 	s := catalogServer(t)
-	do(t, s, http.MethodPost, "/api/workloads", distBody("chat", 6))
-	rr := do(t, s, http.MethodPost, "/api/workloads", distBody("chat", 10))
+	do(t, s, http.MethodPost, "/api/workloads", rateBody("chat", 6))
+	rr := do(t, s, http.MethodPost, "/api/workloads", rateBody("chat", 10))
 	if rr.Code != http.StatusConflict {
 		t.Fatalf("want 409 on duplicate name, got %d: %s", rr.Code, rr.Body)
 	}
@@ -170,8 +177,8 @@ func TestWorkloadsCreateRejectsDuplicateName(t *testing.T) {
 
 func TestWorkloadsCreateRejectsTwinContent(t *testing.T) {
 	s := catalogServer(t)
-	do(t, s, http.MethodPost, "/api/workloads", distBody("chat-a", 6))
-	rr := do(t, s, http.MethodPost, "/api/workloads", distBody("chat-b", 6))
+	do(t, s, http.MethodPost, "/api/workloads", rateBody("chat-a", 6))
+	rr := do(t, s, http.MethodPost, "/api/workloads", rateBody("chat-b", 6))
 	if rr.Code != http.StatusConflict {
 		t.Fatalf("want 409 on twin content, got %d: %s", rr.Code, rr.Body)
 	}
@@ -182,7 +189,7 @@ func TestWorkloadsCreateRejectsTwinContent(t *testing.T) {
 
 func TestWorkloadsValidateDoesNotWrite(t *testing.T) {
 	s := catalogServer(t)
-	rr := do(t, s, http.MethodPost, "/api/workloads/validate", distBody("chat-6rps", 6))
+	rr := do(t, s, http.MethodPost, "/api/workloads/validate", rateBody("chat-6rps", 6))
 	if rr.Code != http.StatusOK {
 		t.Fatalf("validate status %d: %s", rr.Code, rr.Body)
 	}
@@ -190,10 +197,10 @@ func TestWorkloadsValidateDoesNotWrite(t *testing.T) {
 	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
-	if !resp.OK || resp.Variant != "distribution" {
-		t.Errorf("want ok distribution, got %+v", resp)
+	if !resp.OK || resp.Variant != "workload-spec" {
+		t.Errorf("want ok workload-spec, got %+v", resp)
 	}
-	if !strings.Contains(resp.Summary, "500 requests") {
+	if !strings.Contains(resp.Summary, "req/s aggregate") {
 		t.Errorf("summary should describe the work: %q", resp.Summary)
 	}
 	// Nothing was written.
@@ -205,8 +212,8 @@ func TestWorkloadsValidateDoesNotWrite(t *testing.T) {
 
 func TestWorkloadsValidateReportsTwin(t *testing.T) {
 	s := catalogServer(t)
-	do(t, s, http.MethodPost, "/api/workloads", distBody("chat-6rps", 6))
-	rr := do(t, s, http.MethodPost, "/api/workloads/validate", distBody("proposed", 6))
+	do(t, s, http.MethodPost, "/api/workloads", rateBody("chat-6rps", 6))
+	rr := do(t, s, http.MethodPost, "/api/workloads/validate", rateBody("proposed", 6))
 	var resp validateResponse
 	json.Unmarshal(rr.Body.Bytes(), &resp)
 	if resp.Twin == nil || *resp.Twin != "chat-6rps" {
@@ -267,8 +274,8 @@ func TestWorkloadsValidateRejectsPinnedModel(t *testing.T) {
 
 func TestWorkloadsRename(t *testing.T) {
 	s := catalogServer(t)
-	do(t, s, http.MethodPost, "/api/workloads", distBody("old-name", 6))
-	renamed := distBody("new-name", 6)
+	do(t, s, http.MethodPost, "/api/workloads", rateBody("old-name", 6))
+	renamed := rateBody("new-name", 6)
 	rr := do(t, s, http.MethodPut, "/api/workloads/old-name", renamed)
 	if rr.Code != http.StatusOK {
 		t.Fatalf("rename status %d: %s", rr.Code, rr.Body)
@@ -281,9 +288,9 @@ func TestWorkloadsRename(t *testing.T) {
 
 func TestWorkloadsEditInPlaceIsNotItsOwnTwin(t *testing.T) {
 	s := catalogServer(t)
-	do(t, s, http.MethodPost, "/api/workloads", distBody("chat", 6))
+	do(t, s, http.MethodPost, "/api/workloads", rateBody("chat", 6))
 	// Edit the rate, keep the name: must succeed (not a twin of itself).
-	rr := do(t, s, http.MethodPut, "/api/workloads/chat", distBody("chat", 12))
+	rr := do(t, s, http.MethodPut, "/api/workloads/chat", rateBody("chat", 12))
 	if rr.Code != http.StatusOK {
 		t.Fatalf("edit-in-place status %d: %s", rr.Code, rr.Body)
 	}
@@ -291,7 +298,7 @@ func TestWorkloadsEditInPlaceIsNotItsOwnTwin(t *testing.T) {
 
 func TestWorkloadsDelete(t *testing.T) {
 	s := catalogServer(t)
-	do(t, s, http.MethodPost, "/api/workloads", distBody("chat", 6))
+	do(t, s, http.MethodPost, "/api/workloads", rateBody("chat", 6))
 	rr := do(t, s, http.MethodDelete, "/api/workloads/chat", nil)
 	if rr.Code != http.StatusOK {
 		t.Fatalf("delete status %d: %s", rr.Code, rr.Body)

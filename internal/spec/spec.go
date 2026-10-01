@@ -137,12 +137,17 @@ func Load(path string) (*Plan, error) {
 }
 
 func buildGroup(g groupSpec) (schema.Group, error) {
+	// runs.yaml authors the flat gaussian shorthand only, still spelled `type:
+	// distribution` for backward compatibility. It is not a stored variant: it is lowered
+	// into a one-client workload-spec here (synthesizeGaussianSpec), exactly as blis lowers
+	// `--workload distribution` internally, so the stored record is always a workload-spec.
 	if g.Workload.Type != "distribution" {
 		return schema.Group{}, fmt.Errorf(
-			"spec: workload.type %q: runs.yaml supports only \"distribution\". The "+
-				"\"workload-spec\" and \"trace\" variants are authored and ingested in the web "+
-				"catalog (they carry an inline spec or a multi-MB trace blob that a runs.yaml "+
-				"cannot); run them with `leaderboard serve` and the Declare-a-run form", g.Workload.Type)
+			"spec: workload.type %q: runs.yaml authors the flat gaussian shorthand only, "+
+				"written as `type: distribution` (it is lowered to a one-client workload-spec "+
+				"before the run). The \"workload-spec\" and \"trace\" variants carry an inline "+
+				"spec or a multi-MB trace blob that a runs.yaml cannot; run them with "+
+				"`leaderboard serve` and the Declare-a-run form", g.Workload.Type)
 	}
 	if g.Workload.SpecFile != nil {
 		return schema.Group{}, fmt.Errorf(
@@ -158,6 +163,12 @@ func buildGroup(g groupSpec) (schema.Group, error) {
 	if g.Workload.NumRequests <= 0 {
 		return schema.Group{}, fmt.Errorf("spec: workload.num_requests %d: want > 0", g.Workload.NumRequests)
 	}
+	if g.Workload.PromptTokens <= 0 || g.Workload.OutputTokens <= 0 {
+		return schema.Group{}, fmt.Errorf("spec: prompt_tokens and output_tokens must both be > 0")
+	}
+	if g.Workload.PromptTokensStdev < 0 || g.Workload.OutputTokensStdev < 0 {
+		return schema.Group{}, fmt.Errorf("spec: prompt_tokens_stdev and output_tokens_stdev must be >= 0")
+	}
 	if g.HorizonTicks != nil && *g.HorizonTicks <= 0 {
 		return schema.Group{}, fmt.Errorf("spec: horizon_ticks %d: want > 0 or null", *g.HorizonTicks)
 	}
@@ -171,33 +182,76 @@ func buildGroup(g groupSpec) (schema.Group, error) {
 		timeout = *g.RequestTimeoutS
 	}
 
+	spec := synthesizeGaussianSpec(g.Workload)
+	sha, err := schema.SpecSHA256(spec)
+	if err != nil {
+		return schema.Group{}, fmt.Errorf("spec: hash synthesized workload-spec: %w", err)
+	}
+
 	return schema.Group{
 		Seed:            g.Seed,
 		HorizonTicks:    g.HorizonTicks,
 		RequestTimeoutS: timeout,
+		// The record is a workload-spec: the flat fields are the not-applicable placeholder
+		// zeros every spec record carries, and arrival_process holds the "constant"
+		// placeholder (the real arrival is inside the spec). This matches
+		// catalog.schemaWorkload, so a flat workload authored in runs.yaml and the same one
+		// authored in the web catalog resolve to byte-identical group_ids.
 		Workload: schema.Workload{
-			Type: g.Workload.Type,
-			// Derived, not authored: an author cannot mislabel the arrival process.
-			ArrivalProcess:    arrivalProcess(g.Workload.Load.Kind),
-			NumRequests:       g.Workload.NumRequests,
-			Load:              schema.Load{Kind: g.Workload.Load.Kind, Value: g.Workload.Load.Value},
-			PromptTokens:      g.Workload.PromptTokens,
-			PromptTokensStdev: g.Workload.PromptTokensStdev,
-			OutputTokens:      g.Workload.OutputTokens,
-			OutputTokensStdev: g.Workload.OutputTokensStdev,
+			Type:           "workload-spec",
+			ArrivalProcess: "constant",
+			Load:           schema.Load{Kind: "rate"},
+			SpecSHA256:     &sha,
+			Spec:           spec,
 		},
 	}, nil
 }
 
-// arrivalProcess reports the process BLIS will actually use.
-// SynthesizeFromDistribution sets ArrivalSpec{Process: "constant"} in both modes
-// (../inference-sim/sim/workload/synthesis.go:33); concurrency mode is closed-loop,
-// where sessions rather than a clock drive arrival.
-func arrivalProcess(loadKind string) string {
-	if loadKind == "concurrency" {
-		return "closed-loop"
+// synthesizeGaussianSpec lowers the flat gaussian shorthand into the one-client
+// WorkloadSpec blis itself builds from `--workload distribution`
+// (../inference-sim/sim/workload/synthesis.go, SynthesizeFromDistribution): a single
+// language client, constant arrival, gaussian token distributions. The token min/max are
+// blis's --prompt-tokens-min/max and --output-tokens-min/max flag defaults — 2 and 7000
+// (../inference-sim/cmd/root.go:45-50) — which the flat path used because the leaderboard
+// never passed those flags, so the synthesized spec reproduces the exact request stream
+// the flat form produced at a given seed. Mirrored, not imported: inference-sim is a
+// read-only upstream module. The client id is a label only (blis seeds per-client sampling
+// from draw order, not the id: ../inference-sim/sim/workload/generator.go:74), so "c0"
+// matches the preset and catalog convention without changing the stream.
+func synthesizeGaussianSpec(w workloadSpec) map[string]any {
+	const tokenMin, tokenMax = 2.0, 7000.0
+	gaussian := func(mean, stdev int) map[string]any {
+		return map[string]any{
+			"type": "gaussian",
+			"params": map[string]any{
+				"mean":    float64(mean),
+				"std_dev": float64(stdev),
+				"min":     tokenMin,
+				"max":     tokenMax,
+			},
+		}
 	}
-	return "constant"
+	client := map[string]any{
+		"id":                  "c0",
+		"arrival":             map[string]any{"process": "constant"},
+		"input_distribution":  gaussian(w.PromptTokens, w.PromptTokensStdev),
+		"output_distribution": gaussian(w.OutputTokens, w.OutputTokensStdev),
+	}
+	spec := map[string]any{
+		"version":      "2",
+		"category":     "language",
+		"num_requests": w.NumRequests,
+		"clients":      []any{client},
+	}
+	// Rate mode carries the open-loop rate on the spec and gives the sole client the whole
+	// of it; concurrency mode is closed-loop, the client holding the session pool size.
+	if w.Load.Kind == "concurrency" {
+		client["concurrency"] = w.Load.Value
+	} else {
+		spec["aggregate_rate"] = w.Load.Value
+		client["rate_fraction"] = 1.0
+	}
+	return spec
 }
 
 func buildCandidate(entry, defaults map[string]any) (Candidate, error) {

@@ -27,22 +27,55 @@
   "request_timeout_s": 300,
   "seed": 42,
   "workload": {
+   "type": "workload-spec",
    "arrival_process": "constant",
+   "num_requests": 0,
    "load": {
     "kind": "rate",
-    "value": 6.0
+    "value": 0
    },
-   "num_requests": 500,
-   "output_tokens": 128,
-   "output_tokens_stdev": 256,
-   "prompt_tokens": 512,
-   "prompt_tokens_stdev": 256,
+   "prompt_tokens": 0,
+   "prompt_tokens_stdev": 0,
+   "output_tokens": 0,
+   "output_tokens_stdev": 0,
    "spec_file": null,
-   "spec_sha256": null,
-   "type": "distribution"
+   "spec_sha256": "7aa7a6b03fe2a4ad54d2c291e750993e02d2e1885a6645fbfb21b3e24c1c1d7e",
+   "spec": {
+    "version": "2",
+    "category": "language",
+    "num_requests": 500,
+    "clients": [
+     {
+      "id": "c0",
+      "arrival": {
+       "process": "constant"
+      },
+      "input_distribution": {
+       "type": "gaussian",
+       "params": {
+        "mean": 512,
+        "std_dev": 256,
+        "min": 2,
+        "max": 7000
+       }
+      },
+      "output_distribution": {
+       "type": "gaussian",
+       "params": {
+        "mean": 128,
+        "std_dev": 256,
+        "min": 2,
+        "max": 7000
+       }
+      },
+      "rate_fraction": 1
+     }
+    ],
+    "aggregate_rate": 6.0
+   }
   }
  },
- "group_id": "5063e40dceb2",
+ "group_id": "86575212efc8",
  "kv_thrashing_rate": 0.0345,
  "metrics": {
   "cache_hit_rate": 0.42,
@@ -113,5 +146,5 @@
    }
   ]
  },
- "work_id": "ef152f7b4fe5"
+ "work_id": "f440c288c4fe"
 }

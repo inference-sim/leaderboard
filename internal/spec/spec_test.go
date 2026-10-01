@@ -92,6 +92,53 @@ func TestLoadFillsDefaultsAndDerivedFields(t *testing.T) {
 	}
 }
 
+// The flat gaussian shorthand in runs.yaml (still spelled `type: distribution`) is lowered
+// to a one-client gaussian workload-spec: no stored record is ever a distribution variant.
+// The synthesized spec mirrors blis's own SynthesizeFromDistribution — constant arrival,
+// gaussian token dists with blis's min/max flag defaults (2 and 7000) — so it reproduces
+// the stream the flat form produced.
+func TestLoadSynthesizesFlatIntoWorkloadSpec(t *testing.T) {
+	p, err := Load(write(t, minimal))
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	w := p.Group.Workload
+	if w.Type != "workload-spec" {
+		t.Fatalf("workload type = %q, want workload-spec (the flat shorthand must lower to a spec)", w.Type)
+	}
+	if w.SpecSHA256 == nil || *w.SpecSHA256 == "" {
+		t.Fatal("synthesized workload-spec has no spec_sha256")
+	}
+	// The flat fields are the not-applicable placeholder zeros every spec record carries.
+	if w.NumRequests != 0 || w.PromptTokens != 0 || w.Load != (schema.Load{Kind: "rate"}) {
+		t.Errorf("flat fields are not placeholder zeros: %+v", w)
+	}
+	// The stored spec_sha256 is the content hash of the inline spec.
+	want, _ := schema.SpecSHA256(w.Spec)
+	if *w.SpecSHA256 != want {
+		t.Errorf("spec_sha256 = %q, recomputes to %q", *w.SpecSHA256, want)
+	}
+	// One constant-arrival client carrying the whole rate, gaussian token distributions
+	// clamped at blis's flag defaults.
+	if w.Spec["version"] != "2" || w.Spec["aggregate_rate"] != 6.0 || w.Spec["num_requests"] != 500 {
+		t.Errorf("spec header wrong: %+v", w.Spec)
+	}
+	clients, _ := w.Spec["clients"].([]any)
+	if len(clients) != 1 {
+		t.Fatalf("want one client, got %d", len(clients))
+	}
+	c := clients[0].(map[string]any)
+	if c["rate_fraction"] != 1.0 || c["arrival"].(map[string]any)["process"] != "constant" {
+		t.Errorf("client arrival/rate wrong: %+v", c)
+	}
+	in := c["input_distribution"].(map[string]any)
+	params := in["params"].(map[string]any)
+	if in["type"] != "gaussian" || params["mean"] != 512.0 || params["std_dev"] != 128.0 ||
+		params["min"] != 2.0 || params["max"] != 7000.0 {
+		t.Errorf("input distribution wrong: %+v", in)
+	}
+}
+
 func TestPerRunOverrideDoesNotLeak(t *testing.T) {
 	body := strings.Replace(minimal,
 		"  - {run_id: l40s-tp2, hardware: L40S, tp: 2}",

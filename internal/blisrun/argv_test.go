@@ -8,17 +8,24 @@ import (
 	"github.com/inference-sim/leaderboard/internal/schema"
 )
 
+// group is a workload-spec comparability group — the only synthetic variant now (the flat
+// gaussian shorthand is lowered to one of these before a run). Argv reads the offered load
+// from the spec file, so the inline spec content here is immaterial to the command line.
 func group() schema.Group {
+	spec := map[string]any{
+		"version": "2", "category": "language", "aggregate_rate": 6.0, "num_requests": 500,
+		"clients": []any{map[string]any{"id": "c0", "rate_fraction": 1.0}},
+	}
+	sha, _ := schema.SpecSHA256(spec)
 	return schema.Group{
 		Seed:            42,
 		RequestTimeoutS: 300,
 		Workload: schema.Workload{
-			Type:           "distribution",
+			Type:           "workload-spec",
 			ArrivalProcess: "constant",
-			NumRequests:    500,
-			Load:           schema.Load{Kind: "rate", Value: 6.0},
-			PromptTokens:   512, PromptTokensStdev: 128,
-			OutputTokens: 128, OutputTokensStdev: 32,
+			Load:           schema.Load{Kind: "rate"},
+			SpecSHA256:     &sha,
+			Spec:           spec,
 		},
 	}
 }
@@ -39,22 +46,16 @@ func deployment() schema.Deployment {
 }
 
 func TestArgvIsExactAndComplete(t *testing.T) {
-	got := Argv("./blis", group(), deployment(), "/tmp/m.json", "", "")
+	got := Argv("./blis", group(), deployment(), "/tmp/m.json", "/tmp/spec.yaml", "")
 	want := []string{
 		"./blis", "run",
 		"--model", "qwen/qwen3-14b",
 		"--hardware", "H100",
 		"--tp", "2",
 		"--num-instances", "1",
-		"--workload", "distribution",
-		"--num-requests", "500",
-		"--rate", "6",
+		"--workload-spec", "/tmp/spec.yaml",
 		"--seed", "42",
 		"--timeout", "300",
-		"--prompt-tokens", "512",
-		"--prompt-tokens-stdev", "128",
-		"--output-tokens", "128",
-		"--output-tokens-stdev", "32",
 		"--max-model-len", "40960",
 		"--block-size-in-tokens", "16",
 		"--max-num-seqs", "256",
@@ -112,18 +113,6 @@ func TestArgvEmitsTotalKVBlocksWhenPinned(t *testing.T) {
 	joined := strings.Join(Argv("./blis", group(), d, "/tmp/m.json", "", ""), " ")
 	if !strings.Contains(joined, "--total-kv-blocks 20000") {
 		t.Errorf("a pinned total_kv_blocks must emit --total-kv-blocks: %s", joined)
-	}
-}
-
-func TestArgvConcurrencyModeReplacesRate(t *testing.T) {
-	g := group()
-	g.Workload.Load = schema.Load{Kind: "concurrency", Value: 32}
-	joined := strings.Join(Argv("./blis", g, deployment(), "/tmp/m.json", "", ""), " ")
-	if !strings.Contains(joined, "--concurrency 32") {
-		t.Errorf("missing --concurrency: %s", joined)
-	}
-	if strings.Contains(joined, "--rate") {
-		t.Errorf("--rate is mutually exclusive with --concurrency: %s", joined)
 	}
 }
 

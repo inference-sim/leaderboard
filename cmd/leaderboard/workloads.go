@@ -18,9 +18,9 @@ import (
 // handing a raw WorkloadSpec to blis itself so the errors are blis's own, not a port.
 //
 // profileBody is the wire shape of one profile, shared by GET output and
-// create/edit/validate input. It mirrors the clean catalog YAML shape: a distribution
-// profile carries the flat fields, a spec profile carries `spec` (+ its hash on
-// output). Kept separate from catalog.Profile so the HTTP contract is explicit.
+// create/edit/validate input. It mirrors the clean catalog YAML shape: a spec profile
+// carries `spec` (+ its hash on output), a trace profile its `trace` block. Kept separate
+// from catalog.Profile so the HTTP contract is explicit.
 type profileBody struct {
 	Name            string       `json:"name"`
 	Seed            int64        `json:"seed"`
@@ -34,14 +34,8 @@ type profileBody struct {
 }
 
 type workloadBody struct {
-	Type              string    `json:"type"`
-	NumRequests       int       `json:"num_requests,omitempty"`
-	Load              *loadBody `json:"load,omitempty"`
-	PromptTokens      int       `json:"prompt_tokens,omitempty"`
-	PromptTokensStdev int       `json:"prompt_tokens_stdev,omitempty"`
-	OutputTokens      int       `json:"output_tokens,omitempty"`
-	OutputTokensStdev int       `json:"output_tokens_stdev,omitempty"`
-	SpecSHA256        *string   `json:"spec_sha256,omitempty"`
+	Type       string  `json:"type"`
+	SpecSHA256 *string `json:"spec_sha256,omitempty"`
 	// Spec is the inline WorkloadSpec as an object; SpecYAML is the same authored as
 	// YAML text. The editor sends SpecYAML (the browser has no YAML parser and the raw
 	// mode is a text area); the server parses it here with the same parser blis uses.
@@ -51,7 +45,7 @@ type workloadBody struct {
 	SpecYAML *string        `json:"spec_yaml,omitempty"`
 
 	// Trace is the nested trace block (type == "trace"): comparability knobs plus the
-	// display/provenance returned by /api/traces. Absent for the other variants.
+	// display/provenance returned by /api/traces. Absent for the spec variant.
 	Trace *traceBody `json:"trace,omitempty"`
 }
 
@@ -67,11 +61,6 @@ type traceBody struct {
 	Records              int    `json:"records"`
 	Sessions             int    `json:"sessions"`
 	SessionContextGrowth string `json:"session_context_growth"`
-}
-
-type loadBody struct {
-	Kind  string  `json:"kind"`
-	Value float64 `json:"value"`
 }
 
 // validateResponse is what /api/workloads/validate returns: whether the profile is
@@ -94,13 +83,8 @@ func (b profileBody) toProfile() (catalog.Profile, error) {
 		timeout = *b.RequestTimeoutS
 	}
 	w := catalog.Workload{
-		Type:              b.Workload.Type,
-		NumRequests:       b.Workload.NumRequests,
-		PromptTokens:      b.Workload.PromptTokens,
-		PromptTokensStdev: b.Workload.PromptTokensStdev,
-		OutputTokens:      b.Workload.OutputTokens,
-		OutputTokensStdev: b.Workload.OutputTokensStdev,
-		Spec:              b.Workload.Spec,
+		Type: b.Workload.Type,
+		Spec: b.Workload.Spec,
 	}
 	if b.Workload.SpecYAML != nil && strings.TrimSpace(*b.Workload.SpecYAML) != "" {
 		var spec map[string]any
@@ -108,9 +92,6 @@ func (b profileBody) toProfile() (catalog.Profile, error) {
 			return catalog.Profile{}, fmt.Errorf("the spec is not valid YAML: %v", err)
 		}
 		w.Spec = spec
-	}
-	if b.Workload.Load != nil {
-		w.Load = schema.Load{Kind: b.Workload.Load.Kind, Value: b.Workload.Load.Value}
 	}
 	if tb := b.Workload.Trace; tb != nil {
 		w.Trace = &schema.Trace{
@@ -151,13 +132,6 @@ func profileToBody(p catalog.Profile) profileBody {
 		Workload:        workloadBody{Type: p.Workload.Type},
 	}
 	switch p.Workload.Type {
-	case "distribution":
-		b.Workload.NumRequests = p.Workload.NumRequests
-		b.Workload.Load = &loadBody{Kind: p.Workload.Load.Kind, Value: p.Workload.Load.Value}
-		b.Workload.PromptTokens = p.Workload.PromptTokens
-		b.Workload.PromptTokensStdev = p.Workload.PromptTokensStdev
-		b.Workload.OutputTokens = p.Workload.OutputTokens
-		b.Workload.OutputTokensStdev = p.Workload.OutputTokensStdev
 	case "workload-spec":
 		if sha, err := schema.SpecSHA256(p.Workload.Spec); err == nil {
 			b.Workload.SpecSHA256 = &sha
@@ -439,17 +413,10 @@ func decodeProfile(r *http.Request) (profileBody, error) {
 	return b, nil
 }
 
-// summarize is the one-line work summary the validate response carries. It mirrors the
-// web's workloadTitle phrasing for the distribution case; a spec is described by its
-// aggregate rate when it declares one.
+// summarize is the one-line work summary the validate response carries. A spec is
+// described by its aggregate rate when it declares one; a trace by its corpus and replay.
 func summarize(p catalog.Profile) string {
 	w := p.Workload
-	if w.Type == "workload-spec" {
-		if rate, ok := numberField(w.Spec["aggregate_rate"]); ok && rate > 0 {
-			return fmt.Sprintf("spec-backed workload at %s req/s aggregate", trimFloat(rate))
-		}
-		return "spec-backed workload"
-	}
 	if w.Type == "trace" {
 		records, sessions := 0, 0
 		if m := w.TraceMeta; m != nil {
@@ -461,11 +428,11 @@ func summarize(p catalog.Profile) string {
 		}
 		return fmt.Sprintf("replayed trace at recorded arrivals (%d records, %d sessions)", records, sessions)
 	}
-	load := trimFloat(w.Load.Value) + " req/s"
-	if w.Load.Kind == "concurrency" {
-		load = trimFloat(w.Load.Value) + " concurrent sessions"
+	// workload-spec (the only other stored variant).
+	if rate, ok := numberField(w.Spec["aggregate_rate"]); ok && rate > 0 {
+		return fmt.Sprintf("spec-backed workload at %s req/s aggregate", trimFloat(rate))
 	}
-	return fmt.Sprintf("%d requests at %s", w.NumRequests, load)
+	return "spec-backed workload"
 }
 
 func numberField(v any) (float64, bool) {

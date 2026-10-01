@@ -8,6 +8,7 @@ import {
   specText,
   variantOf,
   crossRef,
+  associatedRecords,
   listWorkloads,
   validateWorkload,
   saveWorkload,
@@ -20,23 +21,15 @@ function form(overrides: Partial<FormValues> = {}): FormValues {
   return { ...initialForm(), name: 'chat-6rps', ...overrides }
 }
 
-/** A flat distribution profile, the legacy variant the editor no longer authors but the
- * catalog still shows. */
-function distBody(overrides: Partial<ProfileBody> = {}): ProfileBody {
+/** A workload-spec profile that carries no inline spec yet — exercises the group-knob and
+ * no-spec paths (specText returns null until a spec is attached). */
+function noSpecBody(overrides: Partial<ProfileBody> = {}): ProfileBody {
   return {
     name: 'legacy',
     seed: 42,
     horizon_ticks: null,
     request_timeout_s: 300,
-    workload: {
-      type: 'distribution',
-      num_requests: 500,
-      load: { kind: 'rate', value: 6 },
-      prompt_tokens: 512,
-      prompt_tokens_stdev: 256,
-      output_tokens: 128,
-      output_tokens_stdev: 256,
-    },
+    workload: { type: 'workload-spec' },
     ...overrides,
   }
 }
@@ -49,28 +42,28 @@ describe('specText', () => {
 
   it('falls back to serializing the spec object when no YAML text is present', () => {
     const body: ProfileBody = {
-      ...distBody(),
+      ...noSpecBody(),
       workload: { type: 'workload-spec', spec: { version: '2', aggregate_rate: 20 } },
     }
     expect(specText(body)).toContain('aggregate_rate: 20')
   })
 
-  it('is null for a distribution profile, which has no spec', () => {
-    expect(specText(distBody())).toBeNull()
+  it('is null for a profile with no inline spec', () => {
+    expect(specText(noSpecBody())).toBeNull()
   })
 })
 
 describe('profileKnobs', () => {
   it('names the seed, an uncapped horizon, and the timeout', () => {
-    expect(profileKnobs(distBody())).toBe('seed 42 · no horizon cap · timeout 300s')
+    expect(profileKnobs(noSpecBody())).toBe('seed 42 · no horizon cap · timeout 300s')
   })
 
   it('reports a set horizon in ticks', () => {
-    expect(profileKnobs(distBody({ horizon_ticks: 100000 }))).toContain('horizon 100000 ticks')
+    expect(profileKnobs(noSpecBody({ horizon_ticks: 100000 }))).toContain('horizon 100000 ticks')
   })
 
   it('says the timeout is disabled when negative', () => {
-    expect(profileKnobs(distBody({ request_timeout_s: -1 }))).toContain('timeout disabled')
+    expect(profileKnobs(noSpecBody({ request_timeout_s: -1 }))).toContain('timeout disabled')
   })
 })
 
@@ -81,8 +74,6 @@ describe('interpret', () => {
     expect(body).not.toBeNull()
     expect(body!.workload.type).toBe('workload-spec')
     expect(body!.workload.spec_yaml).toBe(initialForm().specYaml)
-    // The distribution shortcut fields do not travel in a spec body.
-    expect(body!.workload.num_requests).toBeUndefined()
   })
 
   it('rejects an empty or malformed name', () => {
@@ -132,29 +123,6 @@ describe('bodyToForm', () => {
     })
     expect(f.specYaml).toBe('version: "2"\n')
   })
-
-  it('lifts a legacy distribution profile into an equivalent WorkloadSpec', () => {
-    const f = bodyToForm({
-      name: 'legacy',
-      seed: 3,
-      horizon_ticks: null,
-      request_timeout_s: 300,
-      workload: {
-        type: 'distribution',
-        num_requests: 500,
-        load: { kind: 'rate', value: 6 },
-        prompt_tokens: 512,
-        prompt_tokens_stdev: 128,
-        output_tokens: 128,
-        output_tokens_stdev: 64,
-      },
-    })
-    // The lifted spec is a runnable single-client WorkloadSpec, editable in the one editor.
-    expect(f.specYaml).toContain('aggregate_rate: 6')
-    expect(f.specYaml).toContain('num_requests: 500')
-    expect(f.specYaml).toContain('rate_fraction: 1')
-    expect(interpret(f).body!.workload.type).toBe('workload-spec')
-  })
 })
 
 describe('variantOf', () => {
@@ -181,19 +149,29 @@ describe('crossRef', () => {
   // sit in workloads.yaml) and a spec profile alike. A spec profile carries the spec and
   // its spec_sha256 the server emits, so profileToGroup rebuilds the same group the runs
   // declared from it were filed under — including the presets, which are spec-backed.
-  const distributionBody: ProfileBody = {
+  const gaussianBody: ProfileBody = {
     name: 'chat',
     seed: 42,
     horizon_ticks: null,
     request_timeout_s: 300,
     workload: {
-      type: 'distribution',
-      num_requests: 500,
-      load: { kind: 'rate', value: 6 },
-      prompt_tokens: 512,
-      prompt_tokens_stdev: 256,
-      output_tokens: 128,
-      output_tokens_stdev: 256,
+      type: 'workload-spec',
+      spec_sha256: '7aa7a6b03fe2a4ad54d2c291e750993e02d2e1885a6645fbfb21b3e24c1c1d7e',
+      spec: {
+        version: '2',
+        category: 'language',
+        aggregate_rate: 6,
+        num_requests: 500,
+        clients: [
+          {
+            id: 'c0',
+            rate_fraction: 1,
+            arrival: { process: 'constant' },
+            input_distribution: { type: 'gaussian', params: { mean: 512, std_dev: 256, min: 2, max: 7000 } },
+            output_distribution: { type: 'gaussian', params: { mean: 128, std_dev: 256, min: 2, max: 7000 } },
+          },
+        ],
+      },
     },
   }
 
@@ -213,9 +191,9 @@ describe('crossRef', () => {
 
   it('counts models and runs under a matching workload, matched by workloadKey', () => {
     const fakeWorkloads = [
-      { workloadKey: keyOf(distributionBody), models: ['a/x'], records: [1, 2, 3] },
+      { workloadKey: keyOf(gaussianBody), models: ['a/x'], records: [1, 2, 3] },
     ] as unknown as Parameters<typeof crossRef>[1]
-    expect(crossRef(distributionBody, fakeWorkloads)).toEqual({ models: 1, runs: 3 })
+    expect(crossRef(gaussianBody, fakeWorkloads)).toEqual({ models: 1, runs: 3 })
   })
 
   it('counts runs for a spec profile too, matched by its workloadKey', () => {
@@ -237,6 +215,35 @@ import { profileToGroup } from './workloads'
 function keyOf(body: ProfileBody): string {
   return workloadKey(profileToGroup(body))
 }
+
+describe('associatedRecords', () => {
+  // The runs a workload delete cascades to: the matching board workload's records, by
+  // workloadKey (the same match crossRef counts), so the deleted set equals the shown count.
+  const body: ProfileBody = {
+    name: 'chatbot',
+    seed: 42,
+    horizon_ticks: null,
+    request_timeout_s: 300,
+    workload: {
+      type: 'workload-spec',
+      spec: { version: '2', aggregate_rate: 10, num_requests: 500, clients: [] },
+      spec_sha256: 'e264541cc9716e6ac4950f2b825f297dbaae44d7523f0e3ed6652c60ad318762',
+    },
+  }
+
+  it('returns the matching workload’s records, matched by workloadKey', () => {
+    const r1 = { group_id: 'g1', run_id: 'a' }
+    const r2 = { group_id: 'g1', run_id: 'b' }
+    const fakeWorkloads = [
+      { workloadKey: keyOf(body), records: [r1, r2] },
+    ] as unknown as Parameters<typeof associatedRecords>[1]
+    expect(associatedRecords(body, fakeWorkloads)).toEqual([r1, r2])
+  })
+
+  it('returns [] when no board workload matches the profile', () => {
+    expect(associatedRecords(body, [])).toEqual([])
+  })
+})
 
 describe('api client', () => {
   const record = { ok: true } as unknown

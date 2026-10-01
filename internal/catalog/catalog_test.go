@@ -8,19 +8,24 @@ import (
 	"github.com/inference-sim/leaderboard/internal/schema"
 )
 
-func distProfile(name string, rate float64) Profile {
+// rateProfile is a one-client gaussian workload-spec at the given aggregate rate — the
+// shape the flat gaussian shorthand lowers to. Content varies by rate, so the name/twin/
+// duplicate-content tests get distinct profiles.
+func rateProfile(name string, rate float64) Profile {
 	return Profile{
 		Name:            name,
 		Seed:            42,
 		RequestTimeoutS: 300,
 		Workload: Workload{
-			Type:              "distribution",
-			NumRequests:       500,
-			Load:              schema.Load{Kind: "rate", Value: rate},
-			PromptTokens:      512,
-			PromptTokensStdev: 256,
-			OutputTokens:      128,
-			OutputTokensStdev: 256,
+			Type: "workload-spec",
+			Spec: map[string]any{
+				"version": "2", "category": "language", "aggregate_rate": rate, "num_requests": 500,
+				"clients": []any{map[string]any{
+					"id": "c0", "rate_fraction": 1.0, "arrival": map[string]any{"process": "constant"},
+					"input_distribution":  map[string]any{"type": "gaussian", "params": map[string]any{"mean": 512, "std_dev": 256, "min": 2, "max": 7000}},
+					"output_distribution": map[string]any{"type": "gaussian", "params": map[string]any{"mean": 128, "std_dev": 256, "min": 2, "max": 7000}},
+				}},
+			},
 		},
 	}
 }
@@ -59,10 +64,10 @@ func TestReadMissingFileIsEmptyCatalog(t *testing.T) {
 	}
 }
 
-func TestRoundTripDistributionAndSpec(t *testing.T) {
+func TestRoundTripSpecProfiles(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "workloads.yaml")
 	orig := &Catalog{Profiles: []Profile{
-		distProfile("chat-6rps", 6),
+		rateProfile("chat-6rps", 6),
 		specProfile("cohort-diurnal", 20),
 	}}
 	if err := orig.Write(path); err != nil {
@@ -75,8 +80,9 @@ func TestRoundTripDistributionAndSpec(t *testing.T) {
 	if len(got.Profiles) != 2 {
 		t.Fatalf("want 2 profiles, got %d", len(got.Profiles))
 	}
-	if got.Profiles[0].Name != "chat-6rps" || got.Profiles[0].Workload.NumRequests != 500 {
-		t.Errorf("distribution profile drifted: %+v", got.Profiles[0])
+	if got.Profiles[0].Name != "chat-6rps" || got.Profiles[0].Workload.Type != "workload-spec" ||
+		got.Profiles[0].Workload.Spec["version"] != "2" {
+		t.Errorf("one-client spec profile drifted: %+v", got.Profiles[0])
 	}
 	spec := got.Profiles[1]
 	if spec.Workload.Type != "workload-spec" || spec.Workload.Spec["version"] != "2" {
@@ -88,7 +94,7 @@ func TestWriteCreatesParentDirectory(t *testing.T) {
 	// The catalog lives at <out>/workloads.yaml, and <out> may not exist yet on a fresh
 	// checkout, so Write must create it.
 	path := filepath.Join(t.TempDir(), "results", "workloads.yaml")
-	c := &Catalog{Profiles: []Profile{distProfile("chat", 6)}}
+	c := &Catalog{Profiles: []Profile{rateProfile("chat", 6)}}
 	if err := c.Write(path); err != nil {
 		t.Fatalf("write into a missing directory should create it: %v", err)
 	}
@@ -101,7 +107,7 @@ func TestWriteCreatesParentDirectory(t *testing.T) {
 func TestReadRejectsDuplicateName(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "workloads.yaml")
 	// Two different-content profiles sharing a name.
-	c := &Catalog{Profiles: []Profile{distProfile("chat", 6), distProfile("chat", 10)}}
+	c := &Catalog{Profiles: []Profile{rateProfile("chat", 6), rateProfile("chat", 10)}}
 	if err := c.Write(path); err != nil {
 		t.Fatalf("write: %v", err)
 	}
@@ -114,7 +120,7 @@ func TestReadRejectsDuplicateName(t *testing.T) {
 func TestReadRejectsDuplicateContentWithTwinPointer(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "workloads.yaml")
 	// Same content, two names — the P3 twin rejection.
-	c := &Catalog{Profiles: []Profile{distProfile("chat-a", 6), distProfile("chat-b", 6)}}
+	c := &Catalog{Profiles: []Profile{rateProfile("chat-a", 6), rateProfile("chat-b", 6)}}
 	if err := c.Write(path); err != nil {
 		t.Fatalf("write: %v", err)
 	}
@@ -128,18 +134,18 @@ func TestReadRejectsDuplicateContentWithTwinPointer(t *testing.T) {
 }
 
 func TestFindContentTwin(t *testing.T) {
-	c := &Catalog{Profiles: []Profile{distProfile("chat-6rps", 6)}}
+	c := &Catalog{Profiles: []Profile{rateProfile("chat-6rps", 6)}}
 	// Same content, proposed under a new name.
-	twin, ok := c.FindContentTwin(distProfile("something-else", 6))
+	twin, ok := c.FindContentTwin(rateProfile("something-else", 6))
 	if !ok || twin != "chat-6rps" {
 		t.Errorf("want twin \"chat-6rps\", got %q (%v)", twin, ok)
 	}
 	// Different content: no twin.
-	if _, ok := c.FindContentTwin(distProfile("faster", 10)); ok {
+	if _, ok := c.FindContentTwin(rateProfile("faster", 10)); ok {
 		t.Error("a different rate must not be reported as a twin")
 	}
 	// Editing a profile in place (same name, same content) is not its own twin.
-	if _, ok := c.FindContentTwin(distProfile("chat-6rps", 6)); ok {
+	if _, ok := c.FindContentTwin(rateProfile("chat-6rps", 6)); ok {
 		t.Error("a profile is not a twin of itself")
 	}
 }
@@ -189,11 +195,11 @@ func TestValidateRejectsModelPinnedSpec(t *testing.T) {
 }
 
 func TestValidateRejectsMismatchedVariant(t *testing.T) {
-	// A distribution profile carrying a spec.
-	bad := distProfile("x", 6)
-	bad.Workload.Spec = map[string]any{"version": "2"}
-	if err := Validate(bad); err == nil {
-		t.Error("a distribution profile with a spec must be rejected")
+	// The legacy "distribution" variant is no longer a stored type: it is authoring sugar
+	// lowered to a workload-spec, so a profile that still names it is rejected.
+	legacy := Profile{Name: "x", Seed: 1, RequestTimeoutS: 300, Workload: Workload{Type: "distribution"}}
+	if err := Validate(legacy); err == nil || !strings.Contains(err.Error(), "workload-spec") {
+		t.Errorf("a distribution profile must be rejected pointing at workload-spec, got %v", err)
 	}
 	// A workload-spec profile with no spec.
 	empty := Profile{Name: "y", Seed: 1, RequestTimeoutS: 300, Workload: Workload{Type: "workload-spec"}}

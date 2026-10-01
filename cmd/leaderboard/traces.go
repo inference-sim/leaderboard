@@ -134,6 +134,76 @@ func (s *server) handleTraceIngest(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// handleTraceStats returns the per-record distributions of a stored trace — input/output
+// token sizes, turns per session, arrival timeline, and think time — for the Saved-workloads
+// charts. It reads the trace's data.csv straight from the store (no blis subprocess, since the
+// CSV is already on disk) and bins it server-side. The sha is validated before the filesystem
+// is touched so a crafted id cannot read outside the store.
+func (s *server) handleTraceStats(w http.ResponseWriter, r *http.Request) {
+	sha := r.PathValue("sha256")
+	if !serveTraceSHAPattern.MatchString(sha) {
+		httpError(w, http.StatusBadRequest,
+			fmt.Sprintf("trace id %q must be hex — it is a content hash and a directory name", sha))
+		return
+	}
+	if !s.traceStore.Has(sha) {
+		httpError(w, http.StatusNotFound, fmt.Sprintf("no stored trace %q", sha))
+		return
+	}
+	_, dataPath := s.traceStore.Paths(sha)
+	data, err := os.ReadFile(dataPath)
+	if err != nil {
+		httpError(w, http.StatusInternalServerError, fmt.Sprintf("read trace data: %v", err))
+		return
+	}
+	stats, err := traceingest.StatsFromCSV(data)
+	if err != nil {
+		httpError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, stats)
+}
+
+// handleTraceRecords returns a stored trace as JSON for the "view trace as JSON" panel: the
+// header plus a bounded sample of records (?limit, default 50, capped). The full corpus can be
+// tens of thousands of records, so only the sample is materialized; total_records reports the
+// whole count. The sha is validated before the filesystem is touched.
+func (s *server) handleTraceRecords(w http.ResponseWriter, r *http.Request) {
+	sha := r.PathValue("sha256")
+	if !serveTraceSHAPattern.MatchString(sha) {
+		httpError(w, http.StatusBadRequest,
+			fmt.Sprintf("trace id %q must be hex — it is a content hash and a directory name", sha))
+		return
+	}
+	if !s.traceStore.Has(sha) {
+		httpError(w, http.StatusNotFound, fmt.Sprintf("no stored trace %q", sha))
+		return
+	}
+	headerPath, dataPath := s.traceStore.Paths(sha)
+	headerBytes, err := os.ReadFile(headerPath)
+	if err != nil {
+		httpError(w, http.StatusInternalServerError, fmt.Sprintf("read trace header: %v", err))
+		return
+	}
+	dataBytes, err := os.ReadFile(dataPath)
+	if err != nil {
+		httpError(w, http.StatusInternalServerError, fmt.Sprintf("read trace data: %v", err))
+		return
+	}
+	limit := 0
+	if q := r.URL.Query().Get("limit"); q != "" {
+		if n, err := strconv.Atoi(q); err == nil {
+			limit = n
+		}
+	}
+	recs, err := traceingest.RecordsFromFiles(headerBytes, dataBytes, limit)
+	if err != nil {
+		httpError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, recs)
+}
+
 // saveUpload writes the named multipart file part into dir as <base><ext> and returns its
 // path, preserving the upload's own extension (falling back to fallbackExt when the
 // uploaded name has none). The extension is load-bearing: `blis convert` chooses JSONL
