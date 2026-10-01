@@ -4722,30 +4722,42 @@ button.danger {
   border-color: var(--crit-line);
 }
 
-/* The Add-a-model row above the catalog, when the editor is closed: the primary action and a
- * one-line hint beside it. */
-.model-add-row {
-  display: flex;
-  align-items: baseline;
-  gap: 12px;
-  margin: 4px 0 16px;
+/* The add/edit-a-model modal is wider than the confirm dialog (it holds two forms) and caps
+ * its height so a long config.json scrolls inside the panel rather than off the screen. */
+.modal-wide {
+  max-width: 640px;
+  max-height: 85vh;
+  overflow-y: auto;
 }
 
-.model-add-row .dek {
-  margin: 0;
+/* The config.json code box inside the modal: taller than the default field, monospace, and
+ * resizable so a reader can open it up for a long config. */
+.modal-wide textarea {
+  min-height: 190px;
+  resize: vertical;
+  line-height: 1.45;
 }
 
-/* The "Load from file" control under each editor textarea: a quiet link-like label wrapping a
- * hidden file input, so picking a file reads it into the textarea. */
-.file-load {
-  display: inline-block;
-  margin-top: 7px;
+/* The Upload buttons under each form section: a quiet outline button that opens the file
+ * picker (the real file input is hidden). */
+.upload-btn {
+  margin-top: 10px;
+  padding: 5px 12px;
+  border: 1px solid var(--line-strong);
+  border-radius: 3px;
+  background: var(--panel);
+  color: var(--ink);
+  font-family: var(--font-sans);
   font-size: 12.5px;
-  color: var(--accent-ink);
   cursor: pointer;
 }
 
-.file-load input[type='file'] {
+.upload-btn:hover {
+  border-color: var(--accent);
+  color: var(--accent-ink);
+}
+
+.hidden-file {
   display: none;
 }
 

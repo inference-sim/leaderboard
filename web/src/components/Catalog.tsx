@@ -16,14 +16,19 @@ import {
   type ModelDetail,
   type ModelInfo,
   type ModelKind,
-  type ModelSubmission,
   type ModelValidation,
 } from '../models'
 import { collapseHardwareAliases, listHardware, type HardwareInfo } from '../hardware'
 import type { WorkloadGroup } from '../load'
 import { CopyBlock } from './CopyBlock'
 import { ConfirmDialog } from './ConfirmDialog'
-import { ModelEditor, type ModelDraft } from './ModelEditor'
+import {
+  ModelEditor,
+  draftFromDetail,
+  draftToSubmission,
+  emptyModelDraft,
+  type ModelDraft,
+} from './ModelEditor'
 import { Workloads } from './Workloads'
 
 /**
@@ -211,28 +216,19 @@ function ModelsPanel() {
     setExpanded((cur) => (cur === name ? null : name))
   }, [])
 
-  const toSubmission = (d: ModelDraft): ModelSubmission => ({
-    dir: d.dir,
-    model_yaml: d.modelYaml,
-    config_json: d.configJson,
-  })
-
   const openAdd = () => {
-    setEditing({ draft: { dir: '', modelYaml: '', configJson: '' }, name: null })
+    setEditing({ draft: emptyModelDraft(), name: null })
     setVerdict(null)
     setSaveError(null)
   }
 
-  // Editing prefills from the model's own files (the raw model.yaml and config.json), so the
-  // reader changes what is there rather than retyping it. The directory is the model's
-  // identity, so it is not editable (the editor locks the field).
+  // Editing prefills from the model's own files (the raw model.yaml parsed into the form, and
+  // config.json into the code box), so the reader changes what is there rather than retyping
+  // it. The directory is the model's identity, so the editor locks that field.
   const openEdit = async (name: string) => {
     try {
       const detail = await getModelConfig(name)
-      setEditing({
-        draft: { dir: modelOf(name), modelYaml: detail.model_yaml ?? '', configJson: detail.config },
-        name,
-      })
+      setEditing({ draft: draftFromDetail(name, detail.model_yaml ?? '', detail.config), name })
       setVerdict(null)
       setSaveError(null)
     } catch (e) {
@@ -250,7 +246,7 @@ function ModelsPanel() {
     if (!editing) return
     setValidating(true)
     try {
-      setVerdict(await validateModel(toSubmission(editing.draft), editing.name))
+      setVerdict(await validateModel(draftToSubmission(editing.draft), editing.name))
     } catch (e) {
       setVerdict(null)
       setSaveError(e instanceof Error ? e.message : String(e))
@@ -264,7 +260,7 @@ function ModelsPanel() {
     setSaving(true)
     setSaveError(null)
     try {
-      await saveModel(toSubmission(editing.draft), editing.name)
+      await saveModel(draftToSubmission(editing.draft), editing.name)
       closeEditor()
       await refresh()
     } catch (e) {
@@ -297,31 +293,6 @@ function ModelsPanel() {
   const shown = filterModels(models, query, kind)
   return (
     <>
-      {editing ? (
-        <ModelEditor
-          draft={editing.draft}
-          editingName={editing.name}
-          verdict={verdict}
-          validating={validating}
-          saving={saving}
-          saveError={saveError}
-          onChange={(draft) => setEditing((cur) => (cur ? { ...cur, draft } : cur))}
-          onValidate={onValidate}
-          onSave={onSave}
-          onCancel={closeEditor}
-        />
-      ) : (
-        <div className="model-add-row">
-          <button type="button" className="primary" onClick={openAdd}>
-            Add a model
-          </button>
-          <p className="dek">
-            Onboard your own model from a <code className="mono">model.yaml</code> and{' '}
-            <code className="mono">config.json</code>.
-          </p>
-        </div>
-      )}
-
       {actionError && <p className="dek issue">{actionError}</p>}
 
       {models.length === 0 ? (
@@ -363,6 +334,29 @@ function ModelsPanel() {
         Delete <code className="mono">{pendingDelete}</code>? This removes the model you added
         from the catalog and the picker. The base catalog is not affected. This cannot be undone.
       </ConfirmDialog>
+
+      {/* The Add-a-model trigger: a fixed bottom-right pill, like the board's Compare control.
+          It opens the editor modal. */}
+      <div className="comparebar">
+        <button type="button" className="cmpbtn" onClick={openAdd}>
+          Add a model
+        </button>
+      </div>
+
+      {editing && (
+        <ModelEditor
+          draft={editing.draft}
+          editingName={editing.name}
+          verdict={verdict}
+          validating={validating}
+          saving={saving}
+          saveError={saveError}
+          onChange={(draft) => setEditing((cur) => (cur ? { ...cur, draft } : cur))}
+          onValidate={onValidate}
+          onSave={onSave}
+          onCancel={closeEditor}
+        />
+      )}
     </>
   )
 }
