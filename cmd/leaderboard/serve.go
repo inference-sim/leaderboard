@@ -16,6 +16,7 @@ import (
 
 	"github.com/inference-sim/leaderboard/internal/blisrun"
 	"github.com/inference-sim/leaderboard/internal/hardware"
+	"github.com/inference-sim/leaderboard/internal/modelcatalog"
 	"github.com/inference-sim/leaderboard/internal/schema"
 	"github.com/inference-sim/leaderboard/internal/traceingest"
 )
@@ -64,6 +65,12 @@ type server struct {
 	// the same clone blis resolves configs against. A field so handleModels is testable
 	// without the environment; production sets it from os.Getenv in cmdServe.
 	catalogRoot string
+	// userModelsDir is the pristine user-models store: the durable source of truth for
+	// models added through the web app, re-overlaid onto the catalog on each boot so a user
+	// model wins a name collision with a base image update. A model is tagged "user" when
+	// its directory is present here. Empty means no store (reads still work; everything is
+	// base), set from -user-models / $LEADERBOARD_USER_MODELS in cmdServe.
+	userModelsDir string
 	// traceStore is the hash-addressed trace store beside the workload catalog
 	// (<dir of workloads.yaml>/traces). Ingest writes blobs here; a trace run resolves
 	// them here.
@@ -75,8 +82,15 @@ type server struct {
 	// validateSpec hands a raw inline WorkloadSpec to blis to surface its own parse and
 	// semantic errors (§5). nil error means blis accepts it.
 	validateSpec func(spec map[string]any) error
+	// validateModel smoke-tests a candidate model by running blis against it in a staging
+	// catalog (nil error means blis loaded and started it). A field so the model write
+	// handlers are testable without blis; production binds it to the runner in cmdServe.
+	validateModel func(sub modelcatalog.Submission, canonicalName string) error
 	// catMu serialises the read-modify-write of workloads.yaml across requests.
 	catMu sync.Mutex
+	// modelMu serialises user-model create/update/delete across requests, the same way
+	// catMu serialises the workload catalog.
+	modelMu sync.Mutex
 }
 
 func cmdServe(args []string) error {
@@ -85,6 +99,7 @@ func cmdServe(args []string) error {
 	c.bind(fs)
 	addr := fs.String("addr", ":8080", "address to listen on")
 	catalogPath := fs.String("workloads", "", "path to the workload catalog (default <out>/workloads.yaml)")
+	userModelsDir := fs.String("user-models", "", "path to the user-added model store (default <out>/user-models; or set $LEADERBOARD_USER_MODELS)")
 	// The trace-upload cap, in MiB. 0 uses the built-in default; $LEADERBOARD_MAX_UPLOAD_MB
 	// sets it when the flag is left at 0, so ops can raise it for large Weka/OTel corpora
 	// without a rebuild.
@@ -107,11 +122,23 @@ func cmdServe(args []string) error {
 		catPath = filepath.Join(c.outDir, "workloads.yaml")
 	}
 
+	// The user-models store defaults beside the other local state (<out>/user-models), the
+	// same way the workload catalog does. The flag wins, then the env, then the default, so
+	// the OpenShift manifest can point it at the PVC.
+	userModels := *userModelsDir
+	if userModels == "" {
+		userModels = os.Getenv("LEADERBOARD_USER_MODELS")
+	}
+	if userModels == "" {
+		userModels = filepath.Join(c.outDir, "user-models")
+	}
+
 	s := &server{
-		outDir:      c.outDir,
-		blisDir:     c.blisDir,
-		catalogPath: catPath,
-		catalogRoot: os.Getenv("BLIS_CATALOG"),
+		outDir:        c.outDir,
+		blisDir:       c.blisDir,
+		catalogPath:   catPath,
+		catalogRoot:   os.Getenv("BLIS_CATALOG"),
+		userModelsDir: userModels,
 		// The trace blob store is the sibling of the workload catalog, so the two travel
 		// together (§4.2).
 		traceStore:     traceingest.Store(filepath.Join(filepath.Dir(catPath), "traces")),
@@ -119,6 +146,7 @@ func cmdServe(args []string) error {
 	}
 	s.execute = s.runOnce
 	s.validateSpec = s.validateSpecWithBlis
+	s.validateModel = s.validateModelWithBlis
 
 	fmt.Printf("leaderboard serve — http://localhost%s  (blis: %s, results: %s)\n",
 		*addr, c.blisDir, c.outDir)
@@ -144,6 +172,14 @@ func (s *server) routes() *http.ServeMux {
 	mux.HandleFunc("GET /api/traces/{sha256}/records", s.handleTraceRecords)
 	mux.HandleFunc("GET /api/models", s.handleModels)
 	mux.HandleFunc("GET /api/models/config", s.handleModelConfig)
+	// User-added models (create/validate/edit/delete). The method+path patterns are
+	// distinct from the GET routes above and from each other, so Go's ServeMux routes each
+	// without collision. Edit/delete name the model by ?name= (the canonical name carries a
+	// slash, so it cannot be a path segment), mirroring GET /api/models/config.
+	mux.HandleFunc("POST /api/models", s.handleModelCreate)
+	mux.HandleFunc("POST /api/models/validate", s.handleModelValidate)
+	mux.HandleFunc("PUT /api/models", s.handleModelUpdate)
+	mux.HandleFunc("DELETE /api/models", s.handleModelDelete)
 	mux.HandleFunc("GET /api/hardware", s.handleHardware)
 	// Serve the built web app when it exists, so `leaderboard serve` is the whole
 	// thing in one process. In development the Vite dev server proxies /api here
@@ -297,6 +333,18 @@ func (s *server) validateSpecWithBlis(spec map[string]any) error {
 		return err
 	}
 	return runner.ValidateSpec(spec, probeModel, probeHardware)
+}
+
+// validateModelWithBlis is the production model validator: it stages a catalog with the
+// candidate overlaid on the base (s.catalogRoot) and runs blis against it once, so the
+// errors reported are blis's own. probeHardware is a card in hardware_config.json, so the
+// smoke run stays offline.
+func (s *server) validateModelWithBlis(sub modelcatalog.Submission, canonicalName string) error {
+	runner, err := blisrun.NewRunner(s.blisDir)
+	if err != nil {
+		return err
+	}
+	return runner.ValidateModel(s.catalogRoot, sub.Dir, canonicalName, sub.ModelYAML, sub.ConfigJSON, probeHardware)
 }
 
 // writeResult files a record the way `leaderboard run` does: results/<group_id>/
