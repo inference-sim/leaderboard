@@ -5,8 +5,8 @@ import type { RunRecord } from './load'
 import { dqSummary } from './model'
 
 const groups = loadGroups(fixture as unknown as RunRecord[])
-const main = groups.find((g) => g.groupId === '5063e40dceb2')!
-const horizon = groups.find((g) => g.groupId === '6beca76a8f45')!
+const main = groups.find((g) => g.groupId === '86575212efc8')!
+const horizon = groups.find((g) => g.groupId === 'e5538d4d5107')!
 
 describe('dqSummary', () => {
   it('is empty when every run completed', () => {

@@ -70,7 +70,10 @@ describe('dimOptions (X / Color candidates)', () => {
     // a concurrency workload labels and units differently
     const conc = clone()
     conc.group = JSON.parse(JSON.stringify(conc.group)) as RunRecord['group']
-    conc.group.workload.load = { kind: 'concurrency', value: 8 }
+    // Offered load lives in the spec now: concurrency on the client, no aggregate_rate.
+    const cspec = conc.group.workload.spec as { aggregate_rate?: unknown; clients?: Array<Record<string, unknown>> }
+    delete cspec.aggregate_rate
+    cspec.clients![0]!.concurrency = 8
     const c = dimOptions([conc]).find((d) => d.key === 'load')!
     expect(c.label).toBe('Concurrency')
     expect(c.unit).toBe('sessions')
@@ -124,7 +127,8 @@ function run(id: string, hardware: string, load: number, e2e: number, complete =
   r.run_id = id
   r.deployment.hardware = hardware
   r.group = JSON.parse(JSON.stringify(r.group)) as RunRecord['group']
-  r.group.workload.load = { ...r.group.workload.load, value: load }
+  // The offered rate is the spec's aggregate_rate now, not the flat load placeholder.
+  ;(r.group.workload.spec as Record<string, unknown>).aggregate_rate = load
   r.metrics = { ...r.metrics, e2e_p99_ms: e2e, tokens_per_sec: e2e * 2 }
   r.status = { ...r.status, complete }
   return r

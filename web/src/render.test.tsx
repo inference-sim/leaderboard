@@ -26,8 +26,8 @@ import { initialValues } from './newrun'
  * event loop; `sortRecords` itself is covered by model.test.ts (including across models).
  */
 
-const MAIN = '5063e40dceb2' // the unbounded qwen/qwen3-14b workload, 11 records
-const HORIZON = '6beca76a8f45' // the bounded-window lone disqualified run
+const MAIN = '86575212efc8' // the unbounded qwen/qwen3-14b workload, 11 records
+const HORIZON = 'e5538d4d5107' // the bounded-window lone disqualified run
 
 const records = fixture as unknown as RunRecord[]
 const workloads = loadWorkloads(records)
@@ -52,7 +52,8 @@ function twoModelWorkload(): ReturnType<typeof loadWorkloads>[number] {
 function twoLoadWorkload(): ReturnType<typeof loadWorkloads>[number] {
   const at6 = records.filter((r) => r.group_id === MAIN)
   const at10 = (JSON.parse(JSON.stringify(at6)) as RunRecord[]).map((r) => {
-    r.group.workload.load = { ...r.group.workload.load, value: 10 }
+    // Offered load is the spec's aggregate_rate now, not the flat load placeholder.
+    ;(r.group.workload.spec as Record<string, unknown>).aggregate_rate = 10
     r.group_id = `l10-${r.group_id}`
     r.run_id = `l10-${r.run_id}`
     return r
@@ -694,23 +695,23 @@ describe('ReproPanel (what an opened row reveals)', () => {
 describe('WorkloadHeader', () => {
   const html = renderToStaticMarkup(<WorkloadHeader workload={mainW} />)
 
-  it('titles the section by the work offered, without a model or load clause', () => {
-    // Load is a dimension of the profile now, so the title is the shape alone; the level
-    // shows in the field grid (and, across a sweep, in the Load filter and column).
-    expect(html).toContain('<h2>500 requests</h2>')
+  it('titles the section by the work offered, without a model clause', () => {
+    // A single-load workload keeps its offered load in the title; only a sweep drops it. The
+    // model is never named — it is a per-row candidate.
+    expect(html).toContain('<h2>500 requests at 6.0 req/s</h2>')
     expect(html).not.toContain(' on qwen/qwen3-14b')
   })
 
-  it('names the single offered rate for a one-level profile', () => {
-    expect(html).toContain('Offered rate')
-    expect(html).toContain('6.0')
+  it('does not repeat the offered rate as a field: the Load filter carries it, the title keeps it', () => {
+    // The rate moved to the always-on Load filter, so the card no longer has an "Offered rate"
+    // row; the single-load title still names the rate.
+    expect(html).not.toContain('Offered rate')
+    expect(html).toContain('<h2>500 requests at 6.0 req/s</h2>')
   })
 
-  it('names the load levels, not a single rate, for a sweep', () => {
+  it('does not list the load levels as a field for a sweep (the Load filter lists them)', () => {
     const sweepHtml = renderToStaticMarkup(<WorkloadHeader workload={twoLoadWorkload()} />)
-    expect(sweepHtml).toContain('Load levels')
-    expect(sweepHtml).toContain('6.0')
-    expect(sweepHtml).toContain('10.0')
+    expect(sweepHtml).not.toContain('Load levels')
     expect(sweepHtml).not.toContain('Offered rate')
   })
 
@@ -723,9 +724,11 @@ describe('WorkloadHeader', () => {
     expect(html).toContain('6.0')
   })
 
-  it('renders the arrival process inside the derived treatment, since blis does not report it', () => {
-    expect(html).toContain('arrival process is not reported by blis')
-    expect(html).toContain(mainW.groups[0]!.group.workload.arrival_process)
+  it('names the arrival process, read from the spec', () => {
+    // The main workload is a one-client spec now; its arrival is authored in the spec
+    // (constant), shown in the grid rather than derived.
+    expect(html).toContain('Arrival')
+    expect(html).toContain('constant')
   })
 })
 
@@ -783,10 +786,11 @@ describe('WorkloadHeader, a spec-backed workload', () => {
     expect(html).not.toContain('256 ±100 in / 256 ±100 out tokens')
   })
 
-  it('fills the grid from the single client, like a distribution: arrival, rate, token shapes', () => {
+  it('fills the grid from the single client, like a distribution: arrival, requests, token shapes', () => {
     expect(html).toContain('Arrival')
     expect(html).toContain('Requests')
-    expect(html).toContain('Offered rate')
+    // The offered load is no longer a field here; the Load filter carries it.
+    expect(html).not.toContain('Offered rate')
     expect(html).toContain('Prompt tokens')
     expect(html).toContain('Output tokens')
     expect(html).toContain('256 ±100')

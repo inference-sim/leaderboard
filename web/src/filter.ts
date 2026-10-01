@@ -1,5 +1,18 @@
-import type { RunRecord } from './load'
+import type { LoadAxis, RunRecord } from './load'
 import { offeredLoad } from './load'
+
+/**
+ * Whether a workload section shows the offered-load filter. It shows whenever the axis is a
+ * real load kind (rate or concurrency, a trace session pool included) with a positive level —
+ * at a single level as well as a sweep — so the offered load is always surfaced as a filter
+ * the way models and hardware are, and the header need not repeat it. A recorded-arrivals
+ * trace has no load kind to vary (kind not rate/concurrency, value 0), and a cohort spec that
+ * states no scalar load (placeholder 0) has no level to show, so neither gets a filter.
+ */
+export function showLoadFilter(axis: LoadAxis): boolean {
+  const isLoadKind = axis.kind === 'rate' || axis.kind === 'concurrency' || axis.kind === 'sessions'
+  return isLoadKind && axis.values.some((v) => v > 0)
+}
 
 /**
  * Whether a record survives the model, hardware, and load filters — the single predicate the

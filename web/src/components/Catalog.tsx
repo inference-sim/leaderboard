@@ -49,7 +49,23 @@ const TAB_HASH: Record<CatalogTab, string> = {
   workloads: '#/catalog/workloads',
 }
 
-export function Catalog({ boardWorkloads }: { boardWorkloads: WorkloadGroup[] }) {
+export function Catalog({
+  boardWorkloads,
+  revealWorkload = null,
+  onWorkloadRevealed,
+  onWorkloadSaved,
+  onBoardChanged,
+}: {
+  boardWorkloads: WorkloadGroup[]
+  /** A just-saved workload the Workloads tab should scroll to and highlight, or null. */
+  revealWorkload?: string | null
+  /** Called once the highlight has shown, so the parent can clear the target. */
+  onWorkloadRevealed?: () => void
+  /** Called when the Workloads tab's editor saves a workload, so the app can confirm it. */
+  onWorkloadSaved?: (name: string) => void
+  /** Called after a workload delete removed runs from disk, so the app reloads the board. */
+  onBoardChanged?: () => void | Promise<void>
+}) {
   const [tab, setTab] = useState<CatalogTab>(() => catalogTabFromHash(window.location.hash))
 
   // Follow the hash both ways: a tab click rewrites it, and back/forward or a pasted link
@@ -97,7 +113,13 @@ export function Catalog({ boardWorkloads }: { boardWorkloads: WorkloadGroup[] })
       ) : tab === 'hardware' ? (
         <HardwarePanel />
       ) : (
-        <Workloads boardWorkloads={boardWorkloads} />
+        <Workloads
+          boardWorkloads={boardWorkloads}
+          revealWorkload={revealWorkload}
+          onWorkloadRevealed={onWorkloadRevealed}
+          onWorkloadSaved={onWorkloadSaved}
+          onBoardChanged={onBoardChanged}
+        />
       )}
     </>
   )

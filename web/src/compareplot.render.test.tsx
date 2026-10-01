@@ -12,7 +12,7 @@ function run(id: string, hardware: string, load: number, e2e: number, complete =
   r.run_id = id
   r.deployment.hardware = hardware
   r.group = JSON.parse(JSON.stringify(r.group)) as RunRecord['group']
-  r.group.workload.load = { ...r.group.workload.load, value: load }
+  ;(r.group.workload.spec as Record<string, unknown>).aggregate_rate = load
   r.metrics = { ...r.metrics, e2e_p99_ms: e2e, tokens_per_sec: e2e * 2 }
   r.status = { ...r.status, complete }
   return r

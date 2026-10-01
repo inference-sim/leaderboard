@@ -2,23 +2,35 @@ package schema
 
 import "testing"
 
-// fixtureGroup is the twelve-run matrix's comparability group, as it stands after
-// the Task 2 fixture migration (arrival_process replaces distribution, and
-// request_timeout_s is present).
+// fixtureGroup is the my-workload2 comparability group — a flat gaussian workload (500
+// requests, 6 req/s, 512±256 in / 128±256 out) as it is now stored: lowered to the
+// one-client workload-spec blis itself builds from `--workload distribution`. Its
+// group_id is the committed results/86575212efc8 table.
 func fixtureGroup() Group {
+	spec := map[string]any{
+		"version":        "2",
+		"category":       "language",
+		"aggregate_rate": 6.0,
+		"num_requests":   500,
+		"clients": []any{map[string]any{
+			"id":                  "c0",
+			"rate_fraction":       1.0,
+			"arrival":             map[string]any{"process": "constant"},
+			"input_distribution":  map[string]any{"type": "gaussian", "params": map[string]any{"mean": 512.0, "std_dev": 256.0, "min": 2.0, "max": 7000.0}},
+			"output_distribution": map[string]any{"type": "gaussian", "params": map[string]any{"mean": 128.0, "std_dev": 256.0, "min": 2.0, "max": 7000.0}},
+		}},
+	}
+	sha, _ := SpecSHA256(spec)
 	return Group{
 		Seed:            42,
 		HorizonTicks:    nil,
 		RequestTimeoutS: 300,
 		Workload: Workload{
-			Type:              "distribution",
-			ArrivalProcess:    "constant",
-			NumRequests:       500,
-			Load:              Load{Kind: "rate", Value: 6.0},
-			PromptTokens:      512,
-			PromptTokensStdev: 256,
-			OutputTokens:      128,
-			OutputTokensStdev: 256,
+			Type:           "workload-spec",
+			ArrivalProcess: "constant",
+			Load:           Load{Kind: "rate"},
+			SpecSHA256:     &sha,
+			Spec:           spec,
 		},
 	}
 }
@@ -28,11 +40,15 @@ func TestCanonicalJSONSortsKeysAndDropsWhitespace(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CanonicalJSON: %v", err)
 	}
-	want := `{"horizon_ticks":null,"request_timeout_s":300,` +
-		`"seed":42,"workload":{"arrival_process":"constant",` +
-		`"load":{"kind":"rate","value":6},"num_requests":500,"output_tokens":128,` +
-		`"output_tokens_stdev":256,"prompt_tokens":512,"prompt_tokens_stdev":256,` +
-		`"spec_file":null,"spec_sha256":null,"type":"distribution"}}`
+	want := `{"horizon_ticks":null,"request_timeout_s":300,"seed":42,"workload":{` +
+		`"arrival_process":"constant","load":{"kind":"rate","value":0},"num_requests":0,` +
+		`"output_tokens":0,"output_tokens_stdev":0,"prompt_tokens":0,"prompt_tokens_stdev":0,` +
+		`"spec":{"aggregate_rate":6,"category":"language","clients":[{"arrival":{"process":"constant"},` +
+		`"id":"c0","input_distribution":{"params":{"max":7000,"mean":512,"min":2,"std_dev":256},"type":"gaussian"},` +
+		`"output_distribution":{"params":{"max":7000,"mean":128,"min":2,"std_dev":256},"type":"gaussian"},` +
+		`"rate_fraction":1}],"num_requests":500,"version":"2"},` +
+		`"spec_file":null,"spec_sha256":"7aa7a6b03fe2a4ad54d2c291e750993e02d2e1885a6645fbfb21b3e24c1c1d7e",` +
+		`"type":"workload-spec"}}`
 	if string(got) != want {
 		t.Errorf("canonical form drifted\n got: %s\nwant: %s", got, want)
 	}
@@ -43,9 +59,9 @@ func TestGroupIDIsStable(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GroupID: %v", err)
 	}
-	if id != "5063e40dceb2" {
+	if id != "86575212efc8" {
 		t.Errorf("GroupID = %q, want %q — if this changed on purpose, update "+
-			"prototypes/results.json and results/ to match", id, "5063e40dceb2")
+			"prototypes/results.json and results/ to match", id, "86575212efc8")
 	}
 }
 
@@ -55,8 +71,8 @@ func TestWorkIDIgnoresSeed(t *testing.T) {
 	if err != nil {
 		t.Fatalf("WorkID: %v", err)
 	}
-	if id != "ef152f7b4fe5" {
-		t.Errorf("WorkID = %q, want %q", id, "ef152f7b4fe5")
+	if id != "f440c288c4fe" {
+		t.Errorf("WorkID = %q, want %q", id, "f440c288c4fe")
 	}
 
 	g.Seed = 1234
@@ -83,8 +99,8 @@ func TestHorizonChangesTheGroup(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GroupID: %v", err)
 	}
-	if id != "6beca76a8f45" {
-		t.Errorf("horizon group_id = %q, want %q", id, "6beca76a8f45")
+	if id != "e5538d4d5107" {
+		t.Errorf("horizon group_id = %q, want %q", id, "e5538d4d5107")
 	}
 	base, _ := GroupID(fixtureGroup())
 	if id == base {
@@ -92,9 +108,9 @@ func TestHorizonChangesTheGroup(t *testing.T) {
 	}
 }
 
-// specGroup is a spec-backed comparability group: no distribution fields, an inline
-// blis WorkloadSpec, and its content hash. aggregate_rate varies so a test can prove
-// the spec content reaches group_id.
+// specGroup is a minimal spec-backed comparability group: an inline blis WorkloadSpec
+// and its content hash. aggregate_rate varies so a test can prove the spec content
+// reaches group_id.
 func specGroup(aggregateRate float64) Group {
 	spec := map[string]any{"version": "2", "aggregate_rate": aggregateRate}
 	sha, _ := SpecSHA256(spec)
@@ -130,8 +146,8 @@ func TestSpecSHA256IsStableAndOrderIndependent(t *testing.T) {
 }
 
 // TestWorkloadSpecFoldsSpecIntoGroupID is the §4 guarantee: identical spec content →
-// identical group; different content → different group; and a spec-backed group never
-// collides with a flat distribution group.
+// identical group; different content → different group; and two different specs never
+// collide on one group_id.
 func TestWorkloadSpecFoldsSpecIntoGroupID(t *testing.T) {
 	id, err := GroupID(specGroup(20))
 	if err != nil {
@@ -147,8 +163,8 @@ func TestWorkloadSpecFoldsSpecIntoGroupID(t *testing.T) {
 	if other, _ := GroupID(specGroup(40)); other == id {
 		t.Error("changing the inline spec content did not change group_id")
 	}
-	if dist, _ := GroupID(fixtureGroup()); dist == id {
-		t.Error("a spec-backed group collided with a distribution group_id")
+	if other, _ := GroupID(fixtureGroup()); other == id {
+		t.Error("two different specs collided on one group_id")
 	}
 }
 

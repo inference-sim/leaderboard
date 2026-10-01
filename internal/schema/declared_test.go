@@ -5,14 +5,6 @@ import (
 	"testing"
 )
 
-func TestDeclaredRequestsDistribution(t *testing.T) {
-	w := Workload{Type: "distribution", NumRequests: 500}
-	n, ok := w.DeclaredRequests()
-	if !ok || n != 500 {
-		t.Fatalf("DeclaredRequests() = (%d, %v), want (500, true)", n, ok)
-	}
-}
-
 // A spec decoded from JSON carries float64; one built in Go carries int. Both must
 // resolve to the same declared count, since the flat NumRequests is a placeholder for
 // this variant and reading it would report zero.

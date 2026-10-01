@@ -201,13 +201,15 @@ export function loadWorkloads(records: RunRecord[]): WorkloadGroup[] {
     const complete = bucket.flatMap((g) => g.complete)
     const disqualified = bucket.flatMap((g) => g.disqualified)
     const name = workloadName(records)
-    const summary = workloadTitle(bucket[0]!.group)
     const loadValues = [...new Set(bucket.map((g) => offeredLoad(g.group).value))].sort((a, b) => a - b)
     // A sweep spans several comparability groups, which flatMap concatenates low→high — so the
     // rows arrive pre-ordered by load. Regroup them by configuration instead, each config's load
     // levels adjacent: the natural way to read a scaling curve, and not pre-sorted by load, so
     // the Load column reorders on the first click and nothing is ordered by load until then (D3).
     const isSweep = loadValues.length > 1
+    // A sweep's load varies across its rows, so the rate leaves the title (the Load column and
+    // axis carry the level); a single-load workload keeps its offered load in the title.
+    const summary = isSweep ? sweepTitle(bucket[0]!.group) : workloadTitle(bucket[0]!.group)
     workloads.push({
       workloadKey: key,
       groups: bucket,
@@ -224,7 +226,15 @@ export function loadWorkloads(records: RunRecord[]): WorkloadGroup[] {
       title: name ?? summary,
     })
   }
-  workloads.sort((a, b) => compareWorkloads(a.groups[0]!, b.groups[0]!))
+  // The gallery leads with the most-populated workload: order by ranked + disqualified run
+  // count, descending, so the table a reader is most likely to want (the one with the most to
+  // compare) is first and selected by default. Ties fall back to the work-offered order, so
+  // the sort stays deterministic when two workloads hold the same number of runs.
+  workloads.sort((a, b) => {
+    const byCount =
+      b.complete.length + b.disqualified.length - (a.complete.length + a.disqualified.length)
+    return byCount !== 0 ? byCount : compareWorkloads(a.groups[0]!, b.groups[0]!)
+  })
   return workloads
 }
 
@@ -248,6 +258,20 @@ export function offeredLoad(group: RunRecord['group']): { kind: string; value: n
 }
 
 /**
+ * The rate-vs-concurrency tag for an offered-load kind: the label a card shows and the CSS
+ * class that colours it (a rose for rate, a violet of matching depth for concurrency), or null for a kind with no load
+ * to vary (a recorded-arrivals trace). A trace's internal `sessions` pool reads as
+ * `concurrency`, the user-facing term. Used by the leaderboard picker and the Saved workloads
+ * list so a workload's load kind reads the same colour in both places.
+ */
+export function loadKindTag(kind: string): { label: string; className: string } | null {
+  if (kind === 'rate') return { label: 'rate', className: 'tag-rate' }
+  if (kind === 'concurrency' || kind === 'sessions')
+    return { label: 'concurrency', className: 'tag-concurrency' }
+  return null
+}
+
+/**
  * The workload key: the group block canonicalised (keys sorted, recursively) as a map key, so
  * it never has to equal a Go hash. The offered-load value is a dimension varied within a
  * profile, not part of its identity, so it is stripped from the key — runs differing only in
@@ -268,9 +292,7 @@ export function workloadKey(group: RunRecord['group']): string {
     }
   }
   const w = g.workload
-  if (w.type === 'distribution') {
-    delete w.load.value
-  } else if (w.type === 'workload-spec') {
+  if (w.type === 'workload-spec') {
     delete w.load.value
     delete w.spec_sha256
     if (w.spec) {
@@ -298,14 +320,28 @@ function canonicalJSON(value: unknown): string {
   return `{${entries.map(([k, v]) => `${JSON.stringify(k)}:${canonicalJSON(v)}`).join(',')}}`
 }
 
+/** declaredRequests is the real request count the group offered: for a workload-spec it is
+ * the spec's own num_requests (the flat field is a placeholder zero), and 0 for a trace or a
+ * cohort-driven spec that declares no single scalar count. Used to order tables by work. */
+function declaredRequests(group: RunRecord['group']): number {
+  const w = group.workload
+  if (w.type === 'workload-spec' && w.spec) {
+    const n = getPath(w.spec as SpecObject, ['num_requests'])
+    if (typeof n === 'number') return n
+  }
+  return w.num_requests
+}
+
 /** compareGroups minus the model key: workloads are ordered by the work they offered. */
 function compareWorkloads(a: RunGroup, b: RunGroup): number {
   const ag = a.group
   const bg = b.group
+  const al = offeredLoad(ag)
+  const bl = offeredLoad(bg)
   return (
-    cmp(ag.workload.num_requests, bg.workload.num_requests) ||
-    cmp(ag.workload.load.kind, bg.workload.load.kind) ||
-    cmp(ag.workload.load.value, bg.workload.load.value) ||
+    cmp(declaredRequests(ag), declaredRequests(bg)) ||
+    cmp(al.kind, bl.kind) ||
+    cmp(al.value, bl.value) ||
     cmp(ag.horizon_ticks ?? 0, bg.horizon_ticks ?? 0) ||
     cmp(ag.seed, bg.seed) ||
     cmp(a.workId, b.workId)
@@ -320,18 +356,20 @@ function compareWorkloads(a: RunGroup, b: RunGroup): number {
  * (E1), so it no longer orders tables — it is a per-row candidate. group_id breaks the
  * final tie, so the order is still deterministic across builds.
  *
- * A workload-spec group carries placeholder zeros in num_requests/load (its real load is
- * in the spec), so spec groups tie on the first keys and fall through to the stable
- * group_id — arbitrary but deterministic. Ordering spec tables by their spec content is a
- * later refinement, not needed for correctness.
+ * A workload-spec group carries placeholder zeros in the flat num_requests/load, so the
+ * work it offered is read from the spec (declaredRequests / offeredLoad) — otherwise every
+ * spec table would tie and fall through to the arbitrary group_id, which, now that every
+ * stored workload is a spec, would hash-order the whole page.
  */
 export function compareGroups(a: RunGroup, b: RunGroup): number {
   const ag = a.group
   const bg = b.group
+  const al = offeredLoad(ag)
+  const bl = offeredLoad(bg)
   return (
-    cmp(ag.workload.num_requests, bg.workload.num_requests) ||
-    cmp(ag.workload.load.kind, bg.workload.load.kind) ||
-    cmp(ag.workload.load.value, bg.workload.load.value) ||
+    cmp(declaredRequests(ag), declaredRequests(bg)) ||
+    cmp(al.kind, bl.kind) ||
+    cmp(al.value, bl.value) ||
     // Unbounded first: it is the group that offered the work no observation window
     // could cut short.
     cmp(ag.horizon_ticks ?? 0, bg.horizon_ticks ?? 0) ||
@@ -355,18 +393,25 @@ export function groupTitle(group: RunRecord['group']): string {
 }
 
 /**
- * The profile title in one readable line, model omitted (a profile spans many models). For a
- * distribution the offered load is a dimension varied within the profile, so the title names
- * the request count and shape without a rate — the Load filter and Load column carry the level.
- * Spec and trace profiles keep their offered load in the title, since it does not vary for them.
- * The observation-window clause stays either way — a bounded window is part of the work offered.
+ * The profile title in one readable line, model omitted (a profile spans many models). A
+ * single-load workload keeps its offered load, since it does not vary; a load sweep uses
+ * sweepTitle instead (the rate leaves the title because it is a dimension of the sweep). The
+ * observation-window clause stays either way — a bounded window is part of the work offered.
  */
 export function workloadTitle(group: RunRecord['group']): string {
   const window = group.horizon_ticks == null ? '' : ', bounded window'
-  if (group.workload.type === 'distribution') {
-    return `${group.workload.num_requests.toLocaleString('en-US')} requests${window}`
-  }
   return `${workOffered(group)}${window}`
+}
+
+/**
+ * A load sweep's title: the request count (and window) without the offered rate, since the
+ * load is the dimension the sweep varies — the Load column and axis carry the level.
+ */
+function sweepTitle(group: RunRecord['group']): string {
+  const window = group.horizon_ticks == null ? '' : ', bounded window'
+  const n = declaredRequests(group)
+  const body = n > 0 ? `${n.toLocaleString('en-US')} requests` : workOffered(group)
+  return `${body}${window}`
 }
 
 /**

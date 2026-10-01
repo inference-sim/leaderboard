@@ -15,7 +15,7 @@ import {
 } from './slo'
 
 const records = fixture as unknown as RunRecord[]
-const main = loadGroups(records).find((g) => g.groupId === '5063e40dceb2')!
+const main = loadGroups(records).find((g) => g.groupId === '86575212efc8')!
 const byId = (id: string): RunRecord => main.complete.find((r) => r.run_id === id)!
 
 /** A clone of one complete run with one metric nulled, for the missing-value case. */

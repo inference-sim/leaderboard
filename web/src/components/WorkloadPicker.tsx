@@ -1,18 +1,5 @@
 import type { WorkloadGroup } from '../load'
-
-/** Whether the load axis is a swept one the load tag names — a synthetic rate or concurrency,
- *  or a trace's pool of closed-loop `sessions` — as opposed to a trace's `recorded` arrivals
- *  (value 0), which is not a load level to vary. */
-function isLoadKind(kind: string): boolean {
-  return kind === 'rate' || kind === 'concurrency' || kind === 'sessions'
-}
-
-/** The tag label for a load kind. There are two offered-load types the reader sees: an arrival
- *  rate, or a concurrency — a trace's pool of concurrent sessions is the same thing, so it is
- *  labelled 'concurrency' rather than exposing the internal 'sessions' kind. */
-function loadKindLabel(kind: string): string {
-  return kind === 'sessions' ? 'concurrency' : kind
-}
+import { loadKindTag } from '../load'
 
 interface Props {
   workloads: WorkloadGroup[]
@@ -28,6 +15,12 @@ interface Props {
  * which model to narrow to is a decision made inside the table, via the section's
  * ModelFilter. The disqualified count is shown in its own critical tone rather than folded
  * into the ranked count: an excluded run is surfaced here, never hidden.
+ *
+ * The card carries a load-kind tag (rate or concurrency, colour-coded) so the reader can tell
+ * at a glance what a workload's offered load is measured in; the specific levels are not on
+ * the card (once selected, the section's Load filter lists them, and the spec header carries a
+ * single workload's load). A recorded-arrivals trace has no load kind to vary, so it shows no
+ * such tag.
  */
 export function WorkloadPicker({ workloads, selected, onSelect }: Props) {
   return (
@@ -36,6 +29,7 @@ export function WorkloadPicker({ workloads, selected, onSelect }: Props) {
         {workloads.map((workload) => {
           const isCurrent = workload.workloadKey === selected
           const dq = workload.disqualified.length
+          const loadTag = loadKindTag(workload.loadAxis.kind)
           return (
             <li key={workload.workloadKey}>
               <button
@@ -45,13 +39,9 @@ export function WorkloadPicker({ workloads, selected, onSelect }: Props) {
                 onClick={() => onSelect(workload.workloadKey)}
               >
                 <span className="wtitle">{workload.title}</span>
-                {(workload.tags.length > 0 || isLoadKind(workload.loadAxis.kind)) && (
+                {(loadTag || workload.tags.length > 0) && (
                   <span className="wtags">
-                    {/* The load kind being varied (rate / concurrency), so the reader knows what
-                        the sweep's axis measures before opening the table. */}
-                    {isLoadKind(workload.loadAxis.kind) && (
-                      <span className="spec-tag tag-load">{loadKindLabel(workload.loadAxis.kind)}</span>
-                    )}
+                    {loadTag && <span className={`spec-tag ${loadTag.className}`}>{loadTag.label}</span>}
                     {workload.tags.map((tag) => (
                       <span key={tag} className={`spec-tag tag-${tag}`}>
                         {tag}
@@ -60,9 +50,6 @@ export function WorkloadPicker({ workloads, selected, onSelect }: Props) {
                   </span>
                 )}
                 <span className="gcount">
-                  {workload.loadAxis.values.length > 1 && (
-                    <span className="loadlevels">{workload.loadAxis.values.length} load levels</span>
-                  )}
                   <span className="ranked">{workload.complete.length} ranked</span>
                   {dq > 0 && <span className="dq">{dq} disqualified</span>}
                 </span>

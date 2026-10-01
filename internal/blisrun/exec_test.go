@@ -291,6 +291,25 @@ func TestRunFinalizesWorkloadSpecSHA(t *testing.T) {
 // is hermetic: a stub stands in for blis, writing the fixture metrics to the metrics
 // path (Argv puts it last) and printing the human KV Cache Metrics section to stdout,
 // exactly as printKVCacheMetrics does upstream.
+// flatSpecGroup is a flat gaussian workload as it is now stored: the one-client gaussian
+// workload-spec it lowers to. Token min/max are blis's distribution-mode flag defaults, so
+// a run reproduces the stream the old flat form produced.
+func flatSpecGroup(numRequests, timeout, pMean, pStd, oMean, oStd int) schema.Group {
+	return schema.Group{
+		Seed: 42, RequestTimeoutS: timeout,
+		Workload: schema.Workload{
+			Type: "workload-spec", ArrivalProcess: "constant", Load: schema.Load{Kind: "rate"},
+			Spec: map[string]any{
+				"version": "2", "category": "language", "aggregate_rate": 6.0, "num_requests": numRequests,
+				"clients": []any{map[string]any{"id": "c0", "rate_fraction": 1.0,
+					"arrival":             map[string]any{"process": "constant"},
+					"input_distribution":  map[string]any{"type": "gaussian", "params": map[string]any{"mean": pMean, "std_dev": pStd, "min": 2, "max": 7000}},
+					"output_distribution": map[string]any{"type": "gaussian", "params": map[string]any{"mean": oMean, "std_dev": oStd, "min": 2, "max": 7000}}}},
+			},
+		},
+	}
+}
+
 func TestRunScrapesKVThrashingFromStdout(t *testing.T) {
 	dir := t.TempDir()
 	stub := filepath.Join(dir, "blis-stub.sh")
@@ -306,15 +325,7 @@ func TestRunScrapesKVThrashingFromStdout(t *testing.T) {
 	}
 	r := &Runner{Binary: stub, Cwd: dir, commit: "abcdef1", binarySHA256: "0123456789abcdef"}
 
-	g := schema.Group{
-		Seed: 42, RequestTimeoutS: 300,
-		Workload: schema.Workload{
-			Type: "distribution", ArrivalProcess: "constant", NumRequests: 500,
-			Load:         schema.Load{Kind: "rate", Value: 6.0},
-			PromptTokens: 512, PromptTokensStdev: 128,
-			OutputTokens: 128, OutputTokensStdev: 32,
-		},
-	}
+	g := flatSpecGroup(500, 300, 512, 128, 128, 32)
 	d := schema.Deployment{
 		Model:    "qwen/qwen3-14b",
 		Hardware: "L40S", TP: 1, DP: 1, NumInstances: 1,
@@ -353,15 +364,7 @@ func TestRunOmitsKVThrashingWhenStdoutHasNoSection(t *testing.T) {
 		t.Fatalf("write stub: %v", err)
 	}
 	r := &Runner{Binary: stub, Cwd: dir, commit: "abcdef1", binarySHA256: "0123456789abcdef"}
-	g := schema.Group{
-		Seed: 42, RequestTimeoutS: 300,
-		Workload: schema.Workload{
-			Type: "distribution", ArrivalProcess: "constant", NumRequests: 500,
-			Load:         schema.Load{Kind: "rate", Value: 6.0},
-			PromptTokens: 512, PromptTokensStdev: 128,
-			OutputTokens: 128, OutputTokensStdev: 32,
-		},
-	}
+	g := flatSpecGroup(500, 300, 512, 128, 128, 32)
 	d := schema.Deployment{
 		Model: "qwen/qwen3-14b", Hardware: "L40S", TP: 1, DP: 1, NumInstances: 1,
 		MaxModelLen: 40960, BlockSizeInTokens: 16, MaxNumSeqs: 256,
@@ -390,15 +393,7 @@ func TestIntegrationRunProducesADisqualifiedTimeoutRecord(t *testing.T) {
 		t.Fatalf("NewRunner: %v", err)
 	}
 
-	g := schema.Group{
-		Seed: 42, RequestTimeoutS: 3,
-		Workload: schema.Workload{
-			Type: "distribution", ArrivalProcess: "constant", NumRequests: 200,
-			Load:         schema.Load{Kind: "rate", Value: 6.0},
-			PromptTokens: 512, PromptTokensStdev: 128,
-			OutputTokens: 128, OutputTokensStdev: 32,
-		},
-	}
+	g := flatSpecGroup(200, 3, 512, 128, 128, 32)
 	d := schema.Deployment{
 		Model:    "qwen/qwen3-14b",
 		Hardware: "L40S", TP: 1, DP: 1, NumInstances: 1,

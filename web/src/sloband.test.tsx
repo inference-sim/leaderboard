@@ -6,7 +6,7 @@ import type { RunRecord } from './load'
 import { SloBand } from './components/SloBand'
 import { splitBySlo } from './slo'
 
-const main = loadGroups(fixture as unknown as RunRecord[]).find((g) => g.groupId === '5063e40dceb2')!
+const main = loadGroups(fixture as unknown as RunRecord[]).find((g) => g.groupId === '86575212efc8')!
 
 describe('SloBand', () => {
   it('renders nothing when no run is hidden', () => {

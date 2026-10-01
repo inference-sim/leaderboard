@@ -162,7 +162,11 @@ func (r *Runner) Run(g schema.Group, c RunSpec, metricsPath string) (schema.Reco
 		g.Workload.SpecSHA256 = &sha
 		argv = Argv(r.Binary, g, c.Deployment, metricsPath, specPath, kvOffloadPath)
 	default:
-		argv = Argv(r.Binary, g, c.Deployment, metricsPath, "", kvOffloadPath)
+		// Only "workload-spec" and "trace" are stored variants; the flat gaussian shorthand
+		// is lowered to a workload-spec before a run reaches here (internal/spec,
+		// internal/catalog), so any other type is a malformed group, not a run to attempt.
+		return schema.Record{}, fmt.Errorf("blisrun: %s: unknown workload type %q; "+
+			"want \"workload-spec\" or \"trace\"", c.RunID, g.Workload.Type)
 	}
 
 	cmd := exec.Command(argv[0], argv[1:]...)

@@ -3,7 +3,7 @@ import fixture from '../../prototypes/results.json'
 import { loadGroups, loadWorkloads, type RunRecord } from './load'
 
 const records = fixture as unknown as RunRecord[]
-const MAIN = '5063e40dceb2'
+const MAIN = '86575212efc8'
 
 // A trace record reuses a real record as its base, then swaps in a trace workload and its
 // record-level trace_meta, so the board can be exercised without a stored trace blob.

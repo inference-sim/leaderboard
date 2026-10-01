@@ -15,7 +15,7 @@ import type { RunDecl } from './liverun'
  * the pure claims those rest on are covered by liverun.test.ts.
  */
 
-const MAIN = '5063e40dceb2' // the unbounded qwen/qwen3-14b workload
+const MAIN = '86575212efc8' // the unbounded qwen/qwen3-14b workload
 const records = fixture as unknown as RunRecord[]
 const workloads = loadWorkloads(records)
 const mainW = workloads.find((w) => w.groups.some((g) => g.groupId === MAIN))!

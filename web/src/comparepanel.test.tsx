@@ -21,7 +21,7 @@ function twoRuns(): RunRecord[] {
 function twoLoads(): RunRecord[] {
   const [a, b] = twoRuns()
   b!.group = JSON.parse(JSON.stringify(b!.group)) as RunRecord['group']
-  b!.group.workload.load = { ...b!.group.workload.load, value: 10 }
+  ;(b!.group.workload.spec as Record<string, unknown>).aggregate_rate = 10
   return [a!, b!]
 }
 

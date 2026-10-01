@@ -7,16 +7,29 @@ import (
 	"github.com/inference-sim/leaderboard/internal/schema"
 )
 
+// group is the my-workload2-style group: a flat gaussian workload now stored as the
+// one-client workload-spec it lowers to, so DeclaredRequests reads num_requests from the
+// spec (the flat NumRequests is the placeholder zero every spec record carries).
 func group(numRequests int) schema.Group {
+	spec := map[string]any{
+		"version": "2", "category": "language", "aggregate_rate": 6.0,
+		"num_requests": numRequests,
+		"clients": []any{map[string]any{
+			"id": "c0", "rate_fraction": 1.0, "arrival": map[string]any{"process": "constant"},
+			"input_distribution":  map[string]any{"type": "gaussian", "params": map[string]any{"mean": 512, "std_dev": 256, "min": 2, "max": 7000}},
+			"output_distribution": map[string]any{"type": "gaussian", "params": map[string]any{"mean": 128, "std_dev": 256, "min": 2, "max": 7000}},
+		}},
+	}
+	sha, _ := schema.SpecSHA256(spec)
 	return schema.Group{
 		Seed:            42,
 		RequestTimeoutS: 300,
 		Workload: schema.Workload{
-			Type:           "distribution",
+			Type:           "workload-spec",
 			ArrivalProcess: "constant",
-			NumRequests:    numRequests,
-			Load:           schema.Load{Kind: "rate", Value: 6.0},
-			PromptTokens:   512, OutputTokens: 128,
+			Load:           schema.Load{Kind: "rate"},
+			SpecSHA256:     &sha,
+			Spec:           spec,
 		},
 	}
 }

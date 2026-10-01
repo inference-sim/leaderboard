@@ -27,13 +27,13 @@ import {
 
 const records = fixture as unknown as RunRecord[]
 const groups = loadGroups(records)
-const main = groups.find((g) => g.groupId === '5063e40dceb2')!
+const main = groups.find((g) => g.groupId === '86575212efc8')!
 
 describe('loadGroups', () => {
   it('buckets by group_id, so two runs offered different work cannot share a table', () => {
     expect(groups).toHaveLength(2)
     expect(main.records).toHaveLength(11)
-    expect(groups.find((g) => g.groupId === '6beca76a8f45')!.records).toHaveLength(1)
+    expect(groups.find((g) => g.groupId === 'e5538d4d5107')!.records).toHaveLength(1)
   })
 
   it('separates complete runs from disqualified ones without dropping any', () => {
@@ -295,7 +295,8 @@ describe('LOAD_COLUMN (the offered-load column of a sweep)', () => {
   const at = (value: number, id: string): RunRecord => {
     const r = JSON.parse(JSON.stringify(main.complete[0]!)) as RunRecord
     r.run_id = id
-    r.group.workload.load = { ...r.group.workload.load, value }
+    // The offered rate lives in the spec's aggregate_rate now; the flat load is a placeholder.
+    ;(r.group.workload.spec as Record<string, unknown>).aggregate_rate = value
     return r
   }
 
@@ -305,8 +306,8 @@ describe('LOAD_COLUMN (the offered-load column of a sweep)', () => {
 
   it('is sortable through sortRecords by its key', () => {
     const rows = [at(20, 'a'), at(6, 'b'), at(10, 'c')]
-    const asc = sortRecords(rows, [{ key: 'load', dir: 1 }]).map((r) => r.group.workload.load.value)
-    const desc = sortRecords(rows, [{ key: 'load', dir: -1 }]).map((r) => r.group.workload.load.value)
+    const asc = sortRecords(rows, [{ key: 'load', dir: 1 }]).map((r) => LOAD_COLUMN.value(r))
+    const desc = sortRecords(rows, [{ key: 'load', dir: -1 }]).map((r) => LOAD_COLUMN.value(r))
     expect(asc).toEqual([6, 10, 20])
     expect(desc).toEqual([20, 10, 6])
   })

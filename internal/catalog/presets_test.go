@@ -43,7 +43,7 @@ func TestPresetsAreFourModelFreeAndValid(t *testing.T) {
 
 func TestLoadMergesPresetsAheadOfFile(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "workloads.yaml")
-	user := &Catalog{Profiles: []Profile{distProfile("mine", 6)}}
+	user := &Catalog{Profiles: []Profile{rateProfile("mine", 6)}}
 	if err := user.Write(path); err != nil {
 		t.Fatalf("write: %v", err)
 	}
@@ -77,7 +77,7 @@ func TestLoadOnMissingFileIsJustThePresets(t *testing.T) {
 
 func TestLoadRejectsUserFileNamingAPreset(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "workloads.yaml")
-	clash := distProfile("chatbot", 6) // a user profile named after a preset
+	clash := rateProfile("chatbot", 6) // a user profile named after a preset
 	if err := (&Catalog{Profiles: []Profile{clash}}).Write(path); err != nil {
 		t.Fatalf("write: %v", err)
 	}
@@ -107,7 +107,7 @@ func TestLoadRejectsUserFileTwinningAPreset(t *testing.T) {
 
 func TestWriteAfterLoadPersistsOnlyUserProfiles(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "workloads.yaml")
-	if err := (&Catalog{Profiles: []Profile{distProfile("mine", 6)}}).Write(path); err != nil {
+	if err := (&Catalog{Profiles: []Profile{rateProfile("mine", 6)}}).Write(path); err != nil {
 		t.Fatalf("write: %v", err)
 	}
 	loaded, err := Load(path)

@@ -51,16 +51,24 @@ export const FALLBACK_GROUP: Group = {
   horizon_ticks: null,
   request_timeout_s: 300,
   workload: {
-    type: 'distribution',
+    // The empty-state default workload: a one-client gaussian spec (the shape the simple
+    // card authors), carrying the not-applicable flat placeholders every spec record does.
+    type: 'workload-spec',
     arrival_process: 'constant',
-    num_requests: 500,
-    load: { kind: 'rate', value: 6 },
-    prompt_tokens: 512,
-    prompt_tokens_stdev: 256,
-    output_tokens: 128,
-    output_tokens_stdev: 256,
+    num_requests: 0,
+    load: { kind: 'rate', value: 0 },
+    prompt_tokens: 0,
+    prompt_tokens_stdev: 0,
+    output_tokens: 0,
+    output_tokens_stdev: 0,
     spec_file: null,
     spec_sha256: null,
+    spec: gaussianSpec({
+      numRequests: 500,
+      load: { kind: 'rate', value: 6 },
+      input: { mean: 512, std_dev: 256, min: 1, max: deriveMax(512, 256) },
+      output: { mean: 128, std_dev: 256, min: 1, max: deriveMax(128, 256) },
+    }),
   },
 }
 
@@ -311,56 +319,30 @@ function cardFromSpec(spec: unknown): { input: TokenStat; output: TokenStat } | 
  * richer spec the card cannot represent, or a fresh page — from FALLBACK_GROUP.
  */
 export function customFieldsFrom(profile: ProfileBody | null): CardFields {
-  if (profile && profile.workload.type === 'distribution') {
-    const w = profile.workload
-    const pMean = w.prompt_tokens ?? 0
-    const pStd = w.prompt_tokens_stdev ?? 0
-    const oMean = w.output_tokens ?? 0
-    const oStd = w.output_tokens_stdev ?? 0
-    return {
-      loadKind: (w.load?.kind ?? 'rate') as LoadKind,
-      loadValue: numeric(w.load?.value ?? 0),
-      numRequests: String(w.num_requests ?? 0),
-      ...cardTokenFields('prompt', { mean: pMean, std_dev: pStd, min: 1, max: deriveMax(pMean, pStd) }),
-      ...cardTokenFields('output', { mean: oMean, std_dev: oStd, min: 1, max: deriveMax(oMean, oStd) }),
-      seed: String(profile.seed),
-      requestTimeoutS: String(profile.request_timeout_s),
-    }
+  // The card is a single-client gaussian spec. It prefills from a saved spec of that shape
+  // (bounds as authored); for a richer spec the card cannot represent, or a fresh page, it
+  // falls back to the FALLBACK_GROUP spec. (The legacy flat distribution variant is gone:
+  // every stored workload is a spec, so there is a single reading path.)
+  const specProfile =
+    profile?.workload.type === 'workload-spec' && cardFromSpec(profile.workload.spec) ? profile : null
+  const spec = (specProfile ? specProfile.workload.spec : FALLBACK_GROUP.workload.spec) as {
+    num_requests?: unknown
+    aggregate_rate?: unknown
+    clients?: unknown[]
   }
-  const fromSpec = profile?.workload.type === 'workload-spec' ? cardFromSpec(profile.workload.spec) : null
-  if (profile && fromSpec) {
-    const spec = profile.workload.spec as { num_requests?: unknown; aggregate_rate?: unknown; clients?: unknown[] }
-    const client = (spec.clients?.[0] ?? {}) as { concurrency?: unknown }
-    const concurrency = typeof client.concurrency === 'number' ? client.concurrency : null
-    return {
-      loadKind: (concurrency != null ? 'concurrency' : 'rate') as LoadKind,
-      loadValue: numeric(concurrency ?? (typeof spec.aggregate_rate === 'number' ? spec.aggregate_rate : 0)),
-      numRequests: String(typeof spec.num_requests === 'number' ? spec.num_requests : 0),
-      ...cardTokenFields('prompt', fromSpec.input),
-      ...cardTokenFields('output', fromSpec.output),
-      seed: String(profile.seed),
-      requestTimeoutS: String(profile.request_timeout_s),
-    }
-  }
-  const w = FALLBACK_GROUP.workload
+  const tokens = cardFromSpec(spec)! // both the matched profile spec and FALLBACK are one-client gaussian
+  const client = (spec.clients?.[0] ?? {}) as { concurrency?: unknown }
+  const concurrency = typeof client.concurrency === 'number' ? client.concurrency : null
+  const seed = specProfile ? specProfile.seed : FALLBACK_GROUP.seed
+  const timeout = specProfile ? specProfile.request_timeout_s : FALLBACK_GROUP.request_timeout_s
   return {
-    loadKind: w.load.kind as LoadKind,
-    loadValue: numeric(w.load.value),
-    numRequests: String(w.num_requests),
-    ...cardTokenFields('prompt', {
-      mean: w.prompt_tokens,
-      std_dev: w.prompt_tokens_stdev,
-      min: 1,
-      max: deriveMax(w.prompt_tokens, w.prompt_tokens_stdev),
-    }),
-    ...cardTokenFields('output', {
-      mean: w.output_tokens,
-      std_dev: w.output_tokens_stdev,
-      min: 1,
-      max: deriveMax(w.output_tokens, w.output_tokens_stdev),
-    }),
-    seed: String(FALLBACK_GROUP.seed),
-    requestTimeoutS: String(FALLBACK_GROUP.request_timeout_s),
+    loadKind: (concurrency != null ? 'concurrency' : 'rate') as LoadKind,
+    loadValue: numeric(concurrency ?? (typeof spec.aggregate_rate === 'number' ? spec.aggregate_rate : 0)),
+    numRequests: String(typeof spec.num_requests === 'number' ? spec.num_requests : 0),
+    ...cardTokenFields('prompt', tokens.input),
+    ...cardTokenFields('output', tokens.output),
+    seed: String(seed),
+    requestTimeoutS: String(timeout),
   }
 }
 
@@ -994,9 +976,6 @@ export function withOfferedLoad(group: Group, kind: LoadKind, value: number): Gr
       spec.aggregate_rate = value
     }
     w.arrival_process = arrivalProcess(kind)
-  } else if (w.type === 'distribution') {
-    w.load = { kind, value }
-    w.arrival_process = arrivalProcess(kind)
   }
   return g
 }
@@ -1222,22 +1201,6 @@ export function findTarget(group: Group, groups: RunGroup[]): Target {
   return { group: match ?? null }
 }
 
-/** The `group.workload` block for a distribution: the flat synthetic fields. */
-function distributionWorkloadLines(w: Group['workload']): string[] {
-  return [
-    '  workload:',
-    `    type: ${w.type}`,
-    `    num_requests: ${w.num_requests}`,
-    '    load:',
-    `      kind: ${w.load.kind}`,
-    `      value: ${numeric(w.load.value)}`,
-    `    prompt_tokens: ${w.prompt_tokens}`,
-    `    prompt_tokens_stdev: ${w.prompt_tokens_stdev}`,
-    `    output_tokens: ${w.output_tokens}`,
-    `    output_tokens_stdev: ${w.output_tokens_stdev}`,
-  ]
-}
-
 /** The `group.workload` block for a spec: the inline WorkloadSpec, indented under `spec:`. */
 function specWorkloadLines(w: Group['workload']): string[] {
   const spec = (w as { spec?: SpecObject }).spec ?? {}
@@ -1257,25 +1220,17 @@ function specWorkloadLines(w: Group['workload']): string[] {
  */
 export function yamlFile(group: Group, deployment: Deployment, runId: string): string {
   const w = group.workload
-  const isSpec = w.type === 'workload-spec'
-  // The CLI runs.yaml path (internal/spec.Load) only consumes a distribution; it rejects
-  // an inline workload-spec. So a spec declaration is written as a record of what ran —
-  // reproduced by the Run button, or by blis directly with the argv below — not as a
-  // `leaderboard run` input.
-  const header = isSpec
-    ? [
-        '# Written by the leaderboard web app: a record of a workload-spec run.',
-        '# `leaderboard run` does not read an inline spec yet — reproduce this with the Run',
-        '# button, or by running blis directly with the argv shown below the declaration.',
-        'schema_version: 1',
-      ]
-    : [
-        '# Written by the leaderboard web app. Save it, then run:',
-        '#   ./bin/leaderboard run -runs runs.new.yaml',
-        '# blis is executed with ../inference-sim as its working directory.',
-        'schema_version: 1',
-      ]
-  const workloadLines = isSpec ? specWorkloadLines(w) : distributionWorkloadLines(w)
+  // Every stored workload is an inline workload-spec (the flat shorthand is lowered before
+  // storage). The CLI runs.yaml path consumes the flat shorthand, not an inline spec, so a
+  // spec declaration is written as a record of what ran — reproduced by the Run button, or
+  // by blis directly with the argv below — not as a `leaderboard run` input.
+  const header = [
+    '# Written by the leaderboard web app: a record of a workload-spec run.',
+    '# `leaderboard run` does not read an inline spec; reproduce this with the Run button,',
+    '# or by running blis directly with the argv shown below the declaration.',
+    'schema_version: 1',
+  ]
+  const workloadLines = specWorkloadLines(w)
   const lines: string[] = [
     ...header,
     '',
@@ -1415,7 +1370,6 @@ export function argvFor(
 ): string[] {
   const a: string[] = [binary, 'run']
   const add = (flag: string, value: string | number) => a.push(flag, String(value))
-  const isSpec = g.workload.type === 'workload-spec'
 
   add('--model', d.model)
   add('--hardware', d.hardware)
@@ -1442,30 +1396,16 @@ export function argvFor(
     if (pd.transfer_contention) a.push('--pd-transfer-contention')
   }
 
-  // The workload surface: either the synthetic distribution flags, or a spec file that
-  // supersedes them (upstream: --workload-spec overrides --workload, and the synthetic
-  // --rate/--prompt-tokens/… flags are read only on the synthesize path).
-  if (isSpec) {
-    add('--workload-spec', specPath)
-  } else {
-    add('--workload', g.workload.type)
-    add('--num-requests', g.workload.num_requests)
-    // Exactly one of these: upstream rejects --rate together with --concurrency.
-    if (g.workload.load.kind === 'concurrency') add('--concurrency', numeric(g.workload.load.value))
-    else add('--rate', numeric(g.workload.load.value))
-  }
+  // The workload surface is the inline spec: --workload-spec supersedes the synthetic flags
+  // entirely (upstream: it overrides --workload). The offered load, token distributions and
+  // arrival all live in the spec; the flat gaussian shorthand is lowered to a spec before a
+  // run reaches here. Mirrors internal/blisrun.Argv.
+  add('--workload-spec', specPath)
   // Group-side knobs override the spec's own values, and decide whether the declared
-  // work completes, so they are passed in both variants.
+  // work completes.
   add('--seed', g.seed)
   add('--timeout', g.request_timeout_s)
   if (g.horizon_ticks != null) add('--horizon', g.horizon_ticks)
-
-  if (!isSpec) {
-    add('--prompt-tokens', g.workload.prompt_tokens)
-    add('--prompt-tokens-stdev', g.workload.prompt_tokens_stdev)
-    add('--output-tokens', g.workload.output_tokens)
-    add('--output-tokens-stdev', g.workload.output_tokens_stdev)
-  }
 
   if (d.max_model_len > 0) add('--max-model-len', d.max_model_len)
   add('--block-size-in-tokens', d.block_size_in_tokens)
@@ -1566,15 +1506,21 @@ export async function postRun(output: Output, fetchImpl: typeof fetch = fetch): 
  * run proceeds straight to postRun. A save failure rejects before the run, so a workload
  * that could not be saved (e.g. a name that raced another save) is never run — App bounces
  * back to Declare with the server's message, the same failure path a rejected run takes.
- * The impls are injectable so the sequencing is unit-tested without a server.
+ * The impls are injectable so the sequencing is unit-tested without a server. `onSaved`
+ * fires with the saved profile's name the instant the catalog write succeeds, before the
+ * run: the workload is in the catalog from that point whatever the run then does, so the
+ * "added to the catalog" confirmation reflects a fact that holds even if the run errors.
  */
 export async function saveThenRun(
   output: Output,
-  deps: { save?: typeof saveWorkload; post?: typeof postRun } = {},
+  deps: { save?: typeof saveWorkload; post?: typeof postRun; onSaved?: (name: string) => void } = {},
 ): Promise<RunRecord> {
   const save = deps.save ?? saveWorkload
   const post = deps.post ?? postRun
-  if (output.saveProfile) await save(output.saveProfile, null)
+  if (output.saveProfile) {
+    await save(output.saveProfile, null)
+    deps.onSaved?.(output.saveProfile.name)
+  }
   return post(output)
 }
 

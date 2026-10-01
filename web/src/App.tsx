@@ -22,9 +22,10 @@ import { nextSort, removeSort } from './model'
 import type { SortSpec } from './model'
 import { visibleOrder, visibleRows } from './rows'
 import { LiveRunBanner } from './components/LiveRunBanner'
+import { Toast } from './components/Toast'
 import { Catalog } from './components/Catalog'
 import { ErrorBoundary } from './components/ErrorBoundary'
-import { emptyFilterNoun } from './filter'
+import { emptyFilterNoun, showLoadFilter } from './filter'
 import { initialValues, saveThenRun } from './newrun'
 import type { FormValues, Output } from './newrun'
 import { runDeclFromOutput, workloadKeyForGroup } from './liverun'
@@ -162,6 +163,15 @@ export function App() {
   const [selectedKey, setSelectedKey] = useState<string | null>(null)
   // A pending "scroll to and highlight this row" request, set by the banner's View the run.
   const [revealTarget, setRevealTarget] = useState<RevealTarget | null>(null)
+  // The "workload added to the catalog" confirmation. Shown when a run's declaration saved a
+  // new custom workload (canView: offer a jump to the catalog, since the user is on the board)
+  // or when the Catalog's own editor saved one (canView false: the reader is already there and
+  // the row is highlighted in place). It lives here, at the root that outlives the submit
+  // redirect, so the toast floats over whatever view the user lands on. null means no toast.
+  const [catalogToast, setCatalogToast] = useState<{ name: string; canView: boolean } | null>(null)
+  // The saved workload the Catalog's Workloads tab should scroll to and highlight, set by the
+  // toast's "View in catalog". Cleared once the highlight has shown (onWorkloadRevealed).
+  const [revealWorkload, setRevealWorkload] = useState<string | null>(null)
 
   const toggleNav = useCallback(() => {
     setCollapsed((c) => {
@@ -216,7 +226,12 @@ export function App() {
       setLiveRun({ status: 'running', decl })
       window.location.hash = '#/'
       try {
-        const record = await saveThenRun(output)
+        // A new custom workload is saved to the catalog before the run. Confirm that the
+        // instant the save lands (onSaved), independent of the run's own outcome: the
+        // workload is in the catalog from then on either way.
+        const record = await saveThenRun(output, {
+          onSaved: (name) => setCatalogToast({ name, canView: true }),
+        })
         await reload()
         setLiveRun({ status: 'done', decl, record })
         onReveal(record)
@@ -352,7 +367,13 @@ export function App() {
                 onRun={startRun}
               />
             ) : view === 'catalog' ? (
-              <Catalog boardWorkloads={workloads} />
+              <Catalog
+                boardWorkloads={workloads}
+                revealWorkload={revealWorkload}
+                onWorkloadRevealed={() => setRevealWorkload(null)}
+                onWorkloadSaved={(name) => setCatalogToast({ name, canView: false })}
+                onBoardChanged={reload}
+              />
             ) : (
               <>
                 {(liveRun?.status === 'running' || liveRun?.status === 'done') && (
@@ -392,6 +413,26 @@ export function App() {
         Delete <code className="mono">{pendingDelete?.run_id}</code>? This permanently removes its
         result from <code>results/</code> on disk. Re-run the same declaration to bring it back.
       </ConfirmDialog>
+
+      {catalogToast && (
+        <Toast
+          workloadName={catalogToast.name}
+          onView={
+            catalogToast.canView
+              ? () => {
+                  // Set the reveal target first, then route to the Workloads catalog: the tab
+                  // is the default under #/catalog, so it opens there and the target is already
+                  // set when it mounts. (A save made inside the catalog passes canView false,
+                  // so no action is offered: the row is already highlighted in place.)
+                  setRevealWorkload(catalogToast.name)
+                  setCatalogToast(null)
+                  window.location.hash = '#/catalog'
+                }
+              : undefined
+          }
+          onDismiss={() => setCatalogToast(null)}
+        />
+      )}
     </div>
   )
 }
@@ -546,7 +587,9 @@ function WorkloadSection({
   const showHardware = hardwareTypes.length > 0
   // A single load level names itself in the header, so the Load filter (like the table's Load
   // column) appears only for a sweep across two or more levels.
-  const showLoad = workload.loadAxis.values.length > 1
+  // The Load filter shows for a sweep, and also for a single-level concurrency (a trace's
+  // session pool, even one concurrent session), so a trace's offered load is always a filter.
+  const showLoad = showLoadFilter(workload.loadAxis)
   const emptyNoun = emptyFilterNoun(showModels, models, showHardware, hardware, showLoad, loads)
   // Select-all pulls in exactly the runs the model and hardware filters leave on screen (the
   // ranked rows, any SLO-banded ones, and the disqualified band), in declared order; Clear

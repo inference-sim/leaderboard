@@ -16,21 +16,17 @@ import { defaultSpec, parseSpec, serializeSpec, setPath, summarizeSpec, type Spe
 type Group = RunRecord['group']
 type SchemaWorkload = Group['workload']
 
-/** The wire shape of one profile — mirrors the server's profileBody (cmd/leaderboard). */
+/** The wire shape of one profile — mirrors the server's profileBody (cmd/leaderboard). The
+ * two stored variants are workload-spec and trace; the flat gaussian shorthand is authoring
+ * sugar lowered to a one-client spec, never a stored variant. */
 export interface WorkloadBody {
-  type: 'distribution' | 'workload-spec' | 'trace'
-  num_requests?: number
-  load?: { kind: 'rate' | 'concurrency'; value: number }
-  prompt_tokens?: number
-  prompt_tokens_stdev?: number
-  output_tokens?: number
-  output_tokens_stdev?: number
+  type: 'workload-spec' | 'trace'
   spec_sha256?: string | null
   /** The raw WorkloadSpec as YAML text; the server parses it. */
   spec_yaml?: string
   spec?: Record<string, unknown>
   /** The trace block (type === 'trace'): comparability knobs + display/provenance,
-   * mirroring the server's traceBody. Absent for the other variants. */
+   * mirroring the server's traceBody. Absent for the spec variant. */
   trace?: TraceBody
 }
 
@@ -219,10 +215,9 @@ export function bodyToForm(body: ProfileBody): FormValues {
       },
     }
   }
-  const specYaml =
-    w.type === 'workload-spec'
-      ? w.spec_yaml ?? (w.spec ? serializeSpec(w.spec as SpecObject) : '')
-      : serializeSpec(distributionToSpec(w))
+  // Non-trace is workload-spec (handled above, trace returns early): its YAML is the
+  // authored text, or the inline spec serialized.
+  const specYaml = w.spec_yaml ?? (w.spec ? serializeSpec(w.spec as SpecObject) : '')
   return {
     ...base,
     name: body.name,
@@ -251,10 +246,8 @@ export function deriveMax(mean: number, stdev: number): number {
 }
 
 /** gaussianSpec builds a single-client WorkloadSpec with gaussian input and output
- * distributions from explicit token statistics. Both the custom card (explicit min/max
- * from the user) and distributionToSpec (bounds derived for a legacy distribution) build
- * on it, so the two produce the same shape and the custom card is simply a guided front
- * end for a one-client spec. */
+ * distributions from explicit token statistics. The custom card builds on it, so the card
+ * is simply a guided front end for a one-client spec. */
 export function gaussianSpec(opts: {
   numRequests: number
   load: { kind: 'rate' | 'concurrency'; value: number }
@@ -279,23 +272,6 @@ export function gaussianSpec(opts: {
     spec = setPath(spec, ['clients', 0, 'rate_fraction'], 1)
   }
   return spec
-}
-
-/** distributionToSpec lifts a legacy distribution workload into the equivalent
- * WorkloadSpec, so an existing profile opens in the spec editor rather than breaking. The
- * mean/stdev pair maps onto a blis gaussian, and the bounds are derived from the mean and
- * spread so the result validates. */
-function distributionToSpec(w: WorkloadBody): SpecObject {
-  const pMean = w.prompt_tokens ?? 0
-  const pStd = w.prompt_tokens_stdev ?? 0
-  const oMean = w.output_tokens ?? 0
-  const oStd = w.output_tokens_stdev ?? 0
-  return gaussianSpec({
-    numRequests: w.num_requests ?? 0,
-    load: w.load ?? { kind: 'rate', value: 0 },
-    input: { mean: pMean, std_dev: pStd, min: 1, max: deriveMax(pMean, pStd) },
-    output: { mean: oMean, std_dev: oStd, min: 1, max: deriveMax(oMean, oStd) },
-  })
 }
 
 /** The variant every profile authored here is stored as: the editor is spec-first, so a
@@ -402,7 +378,9 @@ export function profileToGroup(body: ProfileBody): Group {
           }
         : undefined,
     } as SchemaWorkload
-  } else if (w.type === 'workload-spec') {
+  } else {
+    // workload-spec is the only other stored variant (the flat gaussian shorthand is
+    // lowered to one before storage), so it carries the not-applicable placeholders.
     workload = {
       type: 'workload-spec',
       arrival_process: 'constant',
@@ -416,19 +394,6 @@ export function profileToGroup(body: ProfileBody): Group {
       spec_sha256: w.spec_sha256 ?? null,
       spec: w.spec,
     } as SchemaWorkload
-  } else {
-    workload = {
-      type: 'distribution',
-      arrival_process: w.load!.kind === 'concurrency' ? 'closed-loop' : 'constant',
-      num_requests: w.num_requests!,
-      load: w.load!,
-      prompt_tokens: w.prompt_tokens!,
-      prompt_tokens_stdev: w.prompt_tokens_stdev!,
-      output_tokens: w.output_tokens!,
-      output_tokens_stdev: w.output_tokens_stdev!,
-      spec_file: null,
-      spec_sha256: null,
-    }
   }
   return {
     seed: body.seed,
@@ -505,6 +470,103 @@ export async function ingestTrace(
   return (await readOrThrow(res)) as IngestResult
 }
 
+/** One bar of a trace histogram: a [lo, hi) bucket with its count (the last bin includes hi). */
+export interface TraceBin {
+  lo: number
+  hi: number
+  count: number
+}
+
+/** A pre-binned numeric distribution of a trace, mirroring the server's traceingest.Histogram.
+ * count 0 (and empty bins) means the trace had no data for it, rendered as "no data". */
+export interface TraceHistogram {
+  bins: TraceBin[]
+  min: number
+  max: number
+  mean: number
+  p50: number
+  p95: number
+  count: number
+}
+
+/** Request arrivals binned over time (ms from the first arrival), mirroring traceingest.Timeline. */
+export interface TraceTimeline {
+  buckets: { t_ms: number; count: number }[]
+  span_ms: number
+  count: number
+}
+
+/** The distributions of a stored trace, mirroring the server's traceingest.Stats JSON. */
+export interface TraceStats {
+  records: number
+  sessions: number
+  input_tokens: TraceHistogram
+  output_tokens: TraceHistogram
+  turns_per_session: TraceHistogram
+  think_time_ms: TraceHistogram
+  arrival_timeline: TraceTimeline
+}
+
+/** fetchTraceStats reads a stored trace's distributions from GET /api/traces/{sha}/stats, for
+ * the Saved-workloads charts. Like the rest of this client, a dead server becomes the
+ * "start the server" message and an HTTP error carries the server's own {error}. */
+export async function fetchTraceStats(sha256: string, fetchImpl: typeof fetch = fetch): Promise<TraceStats> {
+  let res: Response
+  try {
+    res = await fetchImpl(`/api/traces/${encodeURIComponent(sha256)}/stats`)
+  } catch {
+    throw new Error(UNREACHABLE)
+  }
+  const body = await readOrThrow(res)
+  // A `leaderboard serve` built before this route has no handler for it, so the request falls
+  // through to the SPA catch-all and comes back 200 with index.html — which readOrThrow parses
+  // to null. Without this check that reaches the charts as a null stats object and crashes on
+  // stats.input_tokens; requiring the real shape turns it into an actionable message instead.
+  if (!body || typeof body !== 'object' || !('input_tokens' in body)) {
+    throw new Error(
+      'The server did not return trace stats. The running `leaderboard serve` may predate this ' +
+        'feature — rebuild it with `make build` and restart it, then reopen this trace.',
+    )
+  }
+  return body as TraceStats
+}
+
+/** A stored trace as JSON for the "view as JSON" panel: the header, a bounded record sample,
+ * and the full record count, mirroring the server's traceingest.Records. */
+export interface TraceRecords {
+  header: Record<string, unknown>
+  total_records: number
+  limit: number
+  records: Record<string, unknown>[]
+}
+
+/** fetchTraceRecords reads a stored trace's header and a record sample from
+ * GET /api/traces/{sha}/records (?limit, default 50 server-side). Same failure handling as the
+ * rest of this client, including the stale-server guard the stats endpoint uses. */
+export async function fetchTraceRecords(
+  sha256: string,
+  limit?: number,
+  fetchImpl: typeof fetch = fetch,
+): Promise<TraceRecords> {
+  const q = limit && limit > 0 ? `?limit=${limit}` : ''
+  let res: Response
+  try {
+    res = await fetchImpl(`/api/traces/${encodeURIComponent(sha256)}/records${q}`)
+  } catch {
+    throw new Error(UNREACHABLE)
+  }
+  const body = await readOrThrow(res)
+  // A server built before this route falls through to the SPA catch-all and answers 200 with
+  // index.html (parsed to null); require the real shape so it reads as "rebuild the server".
+  if (!body || typeof body !== 'object' || !('records' in body)) {
+    throw new Error(
+      'The server did not return trace records. The running `leaderboard serve` may predate ' +
+        'this feature — rebuild it with `make build` and restart it, then reopen this trace.',
+    )
+  }
+  return body as TraceRecords
+}
+
 /**
  * specText is the complete WorkloadSpec of a spec-backed profile, as YAML — the text the
  * catalog's detail panel shows and offers to copy. It prefers the server's own YAML
@@ -551,6 +613,19 @@ export function crossRef(body: ProfileBody, workloads: WorkloadGroup[]): CrossRe
   const key = workloadKey(profileToGroup(body))
   const match = workloads.find((w) => w.workloadKey === key)
   return match ? { models: match.models.length, runs: match.records.length } : { models: 0, runs: 0 }
+}
+
+/**
+ * Every leaderboard run filed under this profile's workload, matched by workloadKey — the
+ * same association crossRef counts, so what gets deleted equals the "N runs" the catalog
+ * row shows. Empty when the board holds no run under it (or the profile has no spec key to
+ * match yet). Deleting a workload cascades to these so a removed workload leaves no runs
+ * stranded on the board under a profile that no longer exists.
+ */
+export function associatedRecords(body: ProfileBody, workloads: WorkloadGroup[]): RunRecord[] {
+  const key = workloadKey(profileToGroup(body))
+  const match = workloads.find((w) => w.workloadKey === key)
+  return match ? match.records : []
 }
 
 // --- API client ------------------------------------------------------------------

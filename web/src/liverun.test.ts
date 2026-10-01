@@ -9,7 +9,7 @@ import { rowId, runDeclFromOutput, workloadKeyForGroup } from './liverun'
 const records = fixture as unknown as RunRecord[]
 const groups = loadGroups(records)
 const workloads = loadWorkloads(records)
-const main = groups.find((g) => g.groupId === '5063e40dceb2')!
+const main = groups.find((g) => g.groupId === '86575212efc8')!
 
 /** A custom-workload form, the same shape newrun.test.ts uses. The custom card authors a
  * single-client gaussian workload-spec now, so it names its own workload, not the
@@ -21,8 +21,8 @@ function valid(overrides: Partial<FormValues> = {}): FormValues {
 
 describe('rowId', () => {
   it('is run-<group_id>-<run_id>, keyed on identity not position', () => {
-    expect(rowId({ group_id: '5063e40dceb2', run_id: 'h100-tp1' })).toBe(
-      'run-5063e40dceb2-h100-tp1',
+    expect(rowId({ group_id: '86575212efc8', run_id: 'h100-tp1' })).toBe(
+      'run-86575212efc8-h100-tp1',
     )
   })
 

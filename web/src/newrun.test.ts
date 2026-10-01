@@ -55,7 +55,7 @@ const catalogHardware: HardwareInfo[] = [
   { name: 'H100', aliases: [], spec: { MemoryGiB: 80, TFlopsPeak: 989.5 } },
   { name: 'L40S', aliases: [], spec: { MemoryGiB: 48, TFlopsPeak: 362 } },
 ]
-const main = groups.find((g) => g.groupId === '5063e40dceb2')!
+const main = groups.find((g) => g.groupId === '86575212efc8')!
 
 /**
  * A custom-workload form. The custom card authors a single-client gaussian workload-spec,
@@ -89,8 +89,9 @@ function customClone(name = 'main-clone'): ProfileBody {
   }
 }
 
-/** A distribution profile whose work is exactly the main group's, so selecting it plus
- * the main group's model joins that table. Built from the fixture so it cannot drift. */
+/** A workload-spec profile whose work is exactly the main group's, so selecting it plus
+ * the main group's model joins that table. Built from the fixture (now a one-client gaussian
+ * spec) so it cannot drift. */
 function mainClone(): ProfileBody {
   const w = main.group.workload
   return {
@@ -99,15 +100,9 @@ function mainClone(): ProfileBody {
     horizon_ticks: main.group.horizon_ticks,
     request_timeout_s: main.group.request_timeout_s,
     workload: {
-      type: 'distribution',
-      num_requests: w.num_requests,
-      // The group's Load kind now spans the trace loads too (recorded/sessions); this
-      // clone is built from a distribution fixture, so its load is rate/concurrency.
-      load: w.load as { kind: 'rate' | 'concurrency'; value: number },
-      prompt_tokens: w.prompt_tokens,
-      prompt_tokens_stdev: w.prompt_tokens_stdev,
-      output_tokens: w.output_tokens,
-      output_tokens_stdev: w.output_tokens_stdev,
+      type: 'workload-spec',
+      spec_sha256: w.spec_sha256,
+      spec: w.spec,
     },
   }
 }
@@ -195,15 +190,15 @@ describe('argvFor', () => {
     }
   })
 
-  it('passes --concurrency instead of --rate in closed-loop mode, never both', () => {
-    const group = {
-      ...main.group,
-      workload: { ...main.group.workload, load: { kind: 'concurrency' as const, value: 32 } },
-    }
-    const argv = argvFor('./blis', group, main.records[0]!.deployment, '/tmp/x.json')
-    expect(argv).toContain('--concurrency')
+  it('emits --workload-spec and none of the synthetic load flags (the spec carries the load)', () => {
+    // Every run is a workload-spec now (closed-loop concurrency lives in the spec's client,
+    // not a --concurrency flag), so argv names the spec file and omits --rate/--concurrency.
+    const argv = argvFor('./blis', main.group, main.records[0]!.deployment, '/tmp/x.json', '/tmp/spec.yaml')
+    expect(argv).toContain('--workload-spec')
+    expect(argv[argv.indexOf('--workload-spec') + 1]).toBe('/tmp/spec.yaml')
     expect(argv).not.toContain('--rate')
-    expect(argv[argv.indexOf('--concurrency') + 1]).toBe('32')
+    expect(argv).not.toContain('--concurrency')
+    expect(argv).not.toContain('--num-requests')
   })
 
   it('omits --max-model-len when it is unset, since 0 means blis derives it', () => {
@@ -313,18 +308,18 @@ describe('interpret: a selected profile', () => {
     const values = valid({ workloadSel: 'main-clone', model: 'qwen/qwen3-14b' })
     const { issues, output } = interpret(values, groups, [mainClone()])
     expect(issues).toEqual([])
-    expect(output?.target.group?.groupId).toBe('5063e40dceb2')
-    expect(output?.resultPath).toBe('results/5063e40dceb2/h100-tp8.json')
+    expect(output?.target.group?.groupId).toBe('86575212efc8')
+    expect(output?.resultPath).toBe('results/86575212efc8/h100-tp8.json')
   })
 
-  it('carries a distribution profile’s work into the group and the chosen model onto the candidate', () => {
+  it('carries a selected profile’s work into the group and the chosen model onto the candidate', () => {
     // A different model against the same work now JOINS the table (E1): model left the key.
     const values = valid({ workloadSel: 'main-clone', model: '01-ai/yi-34b' })
     const { output } = interpret(values, groups, [mainClone()])
     expect(output?.deployment.model).toBe('01-ai/yi-34b')
-    expect(output?.group.workload.type).toBe('distribution')
-    expect(output?.group.workload.num_requests).toBe(main.group.workload.num_requests)
-    expect(output?.target.group?.groupId).toBe('5063e40dceb2')
+    expect(output?.group.workload.type).toBe('workload-spec')
+    expect((output?.group.workload.spec as { num_requests?: number }).num_requests).toBe(500)
+    expect(output?.target.group?.groupId).toBe('86575212efc8')
   })
 
   it('carries a spec profile’s spec into the group, model onto the candidate', () => {
@@ -340,16 +335,16 @@ describe('interpret: a selected profile', () => {
     expect(output?.deployment.model).toBe('qwen/qwen3-14b')
   })
 
-  it('overrides a distribution profile’s load with the form’s load control', () => {
-    // main-clone is a rate-6 profile; running it at rate 10 is a different point on the same
-    // profile's sweep, so the offered load becomes 10.
+  it('overrides a selected profile’s load with the form’s load control', () => {
+    // main-clone is a rate-6 one-client spec; running it at rate 10 is a different point on
+    // the same profile's sweep, so the offered load (in the spec's aggregate_rate) becomes 10.
     const { output } = interpret(
       valid({ workloadSel: 'main-clone', loadKind: 'rate', loadValue: '10' }),
       groups,
       [mainClone()],
     )
     expect(output).not.toBeNull()
-    expect(output!.group.workload.load).toEqual({ kind: 'rate', value: 10 })
+    expect((output!.group.workload.spec as { aggregate_rate?: number }).aggregate_rate).toBe(10)
   })
 
   it('overrides a spec profile’s load inside the spec (aggregate_rate)', () => {
@@ -607,15 +602,50 @@ describe('saveThenRun: a custom workload is persisted, then run', () => {
     await expect(saveThenRun(custom, { save, post })).rejects.toThrow(/already exists/)
     expect(posted).toBe(false)
   })
+
+  it('reports the saved workload name via onSaved, after the save and before the run', async () => {
+    const calls: string[] = []
+    const save = (async (body: ProfileBody) => {
+      calls.push(`save:${body.name}`)
+      return body
+    }) as typeof import('./workloads').saveWorkload
+    const post = (async () => {
+      calls.push('post')
+      return { run_id: 'r', group_id: 'g' } as unknown as RunRecord
+    }) as typeof postRun
+    const onSaved = (name: string) => calls.push(`saved:${name}`)
+    await saveThenRun(custom, { save, post, onSaved })
+    expect(calls).toEqual(['save:my-load', 'saved:my-load', 'post'])
+  })
+
+  it('does not fire onSaved when nothing new is saved', async () => {
+    let saved = false
+    const post = (async () => ({ run_id: 'r', group_id: 'g' }) as unknown as RunRecord) as typeof postRun
+    await saveThenRun(chosen, { post, onSaved: () => (saved = true) })
+    expect(saved).toBe(false)
+  })
+
+  it('does not fire onSaved when the save fails', async () => {
+    let saved = false
+    const save = (async () => {
+      throw new Error('a workload named "my-load" already exists')
+    }) as typeof import('./workloads').saveWorkload
+    const post = (async () => ({}) as unknown as RunRecord) as typeof postRun
+    await expect(
+      saveThenRun(custom, { save, post, onSaved: () => (saved = true) }),
+    ).rejects.toThrow(/already exists/)
+    expect(saved).toBe(false)
+  })
 })
 
 describe('customFieldsFrom: switching to Custom prefills the card', () => {
-  it('prefills from a distribution profile', () => {
+  it('prefills from a one-client gaussian spec profile', () => {
     const f = customFieldsFrom(mainClone())
-    expect(f.numRequests).toBe(String(main.group.workload.num_requests))
-    expect(f.promptTokens).toBe(String(main.group.workload.prompt_tokens))
+    // The card reads the one-client spec: 500 requests, 512-token prompts, rate 6.
+    expect(f.numRequests).toBe('500')
+    expect(f.promptTokens).toBe('512')
     expect(f.seed).toBe(String(main.group.seed))
-    expect(f.loadValue).toBe(String(main.group.workload.load.value))
+    expect(f.loadValue).toBe('6')
   })
 
   it('prefills from the flat fallback for a spec profile (the card cannot hold a spec)', () => {
@@ -1037,7 +1067,7 @@ describe('postRun', () => {
 
   it('POSTs the group, deployment and run_id, and returns the record on success', async () => {
     let seen: { url: string; body: unknown } | null = null
-    const record = { run_id: 'h100-tp8', group_id: '5063e40dceb2' }
+    const record = { run_id: 'h100-tp8', group_id: '86575212efc8' }
     const fakeFetch = (async (url, init) => {
       seen = { url: String(url), body: JSON.parse(String(init?.body)) }
       return new Response(JSON.stringify(record), { status: 200 })

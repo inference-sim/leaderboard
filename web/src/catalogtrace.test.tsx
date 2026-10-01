@@ -20,7 +20,19 @@ function trace(name: string, timeout: number): ProfileBody {
 function dist(name: string): ProfileBody {
   return {
     name, seed: 42, horizon_ticks: null, request_timeout_s: 300,
-    workload: { type: 'distribution', num_requests: 500, load: { kind: 'rate', value: 6 }, prompt_tokens: 512, prompt_tokens_stdev: 128, output_tokens: 128, output_tokens_stdev: 32 },
+    workload: {
+      type: 'workload-spec',
+      spec: {
+        version: '2', category: 'language', aggregate_rate: 6, num_requests: 500,
+        clients: [
+          {
+            id: 'c0', rate_fraction: 1, arrival: { process: 'constant' },
+            input_distribution: { type: 'gaussian', params: { mean: 512, std_dev: 128, min: 2, max: 7000 } },
+            output_distribution: { type: 'gaussian', params: { mean: 128, std_dev: 32, min: 2, max: 7000 } },
+          },
+        ],
+      },
+    },
     builtin: true,
   }
 }
@@ -34,5 +46,18 @@ describe('WorkloadCatalog with trace profiles', () => {
     for (const n of ['chatbot', 'weka-jsonl1', 'weka-jsonl2']) {
       expect(html, `missing ${n}`).toContain(n)
     }
+  })
+
+  it('tags each saved workload with its load kind: concurrency for a trace (even one session), rate for a rate spec', () => {
+    const profiles = [dist('chatbot'), trace('weka-jsonl1', 1000)]
+    const html = renderToStaticMarkup(
+      <WorkloadCatalog profiles={profiles} boardWorkloads={[]} onDelete={() => {}} />,
+    )
+    // The trace's pool is one concurrent session, yet it still carries the concurrency tag.
+    expect(html).toContain('tag-concurrency')
+    expect(html).toContain('>concurrency<')
+    // The rate spec carries the rate tag.
+    expect(html).toContain('tag-rate')
+    expect(html).toContain('>rate<')
   })
 })

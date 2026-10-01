@@ -30,6 +30,11 @@ var serveRunIDPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]*$`)
 // so this rejects a "." / ".." / slash that could point delete outside the results tree.
 var serveGroupIDPattern = regexp.MustCompile(`^[a-z0-9]+$`)
 
+// serveTraceSHAPattern matches a trace content hash (traceingest.hashTrace — a hex sha256),
+// a directory name under the trace store, so hex only: it rejects a "." / ".." / slash that
+// could read outside the store when the stats endpoint resolves the trace's data.csv.
+var serveTraceSHAPattern = regexp.MustCompile(`^[a-f0-9]+$`)
+
 // runRequest is the body the Declare-a-run screen POSTs to /api/run: the work
 // offered, the candidate under test, and the id the result is filed under. It is
 // the same three things a runs.yaml carries, decoded straight into the record
@@ -132,6 +137,11 @@ func (s *server) routes() *http.ServeMux {
 	mux.HandleFunc("DELETE /api/results/{group}/{run}", s.handleResultDelete)
 	s.registerWorkloadRoutes(mux)
 	mux.HandleFunc("POST /api/traces", s.handleTraceIngest)
+	// Distributions of a stored trace, for the Saved-workloads charts. A longer path than
+	// POST /api/traces, so the two patterns do not collide.
+	mux.HandleFunc("GET /api/traces/{sha256}/stats", s.handleTraceStats)
+	// A stored trace as JSON (header + a bounded record sample) for the "view as JSON" panel.
+	mux.HandleFunc("GET /api/traces/{sha256}/records", s.handleTraceRecords)
 	mux.HandleFunc("GET /api/models", s.handleModels)
 	mux.HandleFunc("GET /api/models/config", s.handleModelConfig)
 	mux.HandleFunc("GET /api/hardware", s.handleHardware)

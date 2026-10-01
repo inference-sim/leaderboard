@@ -1,12 +1,12 @@
 import { describe, expect, it } from 'vitest'
 import fixture from '../../prototypes/results.json'
-import { loadGroups, loadWorkloads, offeredLoad } from './load'
+import { loadGroups, loadKindTag, loadWorkloads, offeredLoad } from './load'
 import type { RunRecord } from './load'
 
 const records = fixture as unknown as RunRecord[]
 
-const MAIN = '5063e40dceb2' // the unbounded qwen/qwen3-14b group, 11 records
-const HORIZON = '6beca76a8f45' // the bounded-window lone disqualified run
+const MAIN = '86575212efc8' // the unbounded qwen/qwen3-14b group, 11 records
+const HORIZON = 'e5538d4d5107' // the bounded-window lone disqualified run
 
 /**
  * A second model against the same work. Model is a candidate now (E1): it rides on the
@@ -38,10 +38,13 @@ describe('loadGroups', () => {
   it('orders a heavier workload after a lighter one, whatever the hashes are', () => {
     const heavier = JSON.parse(JSON.stringify(records)) as RunRecord[]
     for (const r of heavier) {
-      r.group.workload.num_requests = 2000
+      // The real request count lives in the spec now (the flat field is a placeholder).
+      ;(r.group.workload.spec as Record<string, unknown>).num_requests = 2000
       r.group_id = `heavy-${r.group_id}`
     }
-    const ids = loadGroups([...heavier, ...records]).map((g) => g.group.workload.num_requests)
+    const ids = loadGroups([...heavier, ...records]).map(
+      (g) => (g.group.workload.spec as { num_requests: number }).num_requests,
+    )
     expect(ids).toEqual([500, 500, 2000, 2000])
   })
 
@@ -56,7 +59,7 @@ describe('loadGroups', () => {
     const g = loadGroups(records)[0]!
     // Model is on the deployment now, not the group.
     expect(g.records[0]!.deployment.model).toBe('qwen/qwen3-14b')
-    expect(g.group.workload.num_requests).toBe(500)
+    expect((g.group.workload.spec as { num_requests: number }).num_requests).toBe(500)
     expect(g.workId).toMatch(/^[0-9a-f]{12}$/)
   })
 
@@ -108,13 +111,13 @@ describe('loadWorkloads', () => {
     expect(differBySeed).toHaveLength(2)
   })
 
-  it('titles the workload without a model or load clause, since one profile spans both', () => {
+  it('titles the workload without a model clause (a single-load workload keeps its rate)', () => {
     const w = loadWorkloads(records).find((w) => w.title.startsWith('500 requests'))!
-    // Load is a dimension of the profile now, so the rate leaves the title.
-    expect(w.title).toBe('500 requests')
+    // A single-load workload keeps its offered load; only a sweep drops the rate. The model
+    // is never in the title — it is a per-row candidate.
+    expect(w.title).toBe('500 requests at 6.0 req/s')
     expect(w.title).not.toContain('qwen')
     expect(w.title).not.toContain(' on ')
-    expect(w.title).not.toMatch(/req\/s/)
   })
 
   it('merges every model’s complete and disqualified runs, none hidden', () => {
@@ -144,7 +147,8 @@ describe('load as a workload dimension', () => {
   function twoLoads(): RunRecord[] {
     const at6 = records.filter((r) => r.group_id === MAIN)
     const at10 = (JSON.parse(JSON.stringify(at6)) as RunRecord[]).map((r) => {
-      r.group.workload.load = { ...r.group.workload.load, value: 10 }
+      // The offered load lives in the spec's aggregate_rate now, not the flat load field.
+      ;(r.group.workload.spec as Record<string, unknown>).aggregate_rate = 10
       r.group_id = `load10-${r.group_id}`
       r.run_id = `${r.run_id}-l10`
       return r
@@ -347,8 +351,23 @@ describe('spec-backed workloads', () => {
 })
 
 describe('distribution workload tags', () => {
-  it('tags a distribution', () => {
+  it('tags a workload-spec', () => {
     const [w] = loadWorkloads(records.filter((r) => r.group_id === MAIN))
-    expect(w!.tags).toEqual(['distribution'])
+    expect(w!.tags).toEqual(['workload-spec'])
+  })
+})
+
+describe('loadKindTag', () => {
+  it('labels and colours a rate workload in its own class', () => {
+    expect(loadKindTag('rate')).toEqual({ label: 'rate', className: 'tag-rate' })
+  })
+
+  it('labels concurrency and a trace session pool alike, in the concurrency class', () => {
+    expect(loadKindTag('concurrency')).toEqual({ label: 'concurrency', className: 'tag-concurrency' })
+    expect(loadKindTag('sessions')).toEqual({ label: 'concurrency', className: 'tag-concurrency' })
+  })
+
+  it('returns null for a recorded-arrivals trace (no load kind to vary)', () => {
+    expect(loadKindTag('recorded')).toBeNull()
   })
 })

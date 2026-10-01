@@ -1,6 +1,9 @@
 import type { WorkloadGroup } from '../load'
-import { crossRef, profileKnobs, profileSummary, specText, type ProfileBody } from '../workloads'
+import { loadKindTag, offeredLoad } from '../load'
+import { crossRef, profileKnobs, profileSummary, profileToGroup, specText, type ProfileBody } from '../workloads'
 import { CopyBlock } from './CopyBlock'
+import { TraceCharts } from './TraceCharts'
+import { TraceJson } from './TraceJson'
 
 interface Props {
   profiles: ProfileBody[]
@@ -10,6 +13,9 @@ interface Props {
   /** The name of the card whose full spec is shown below the gallery, or null. Controlled
    * by the parent so the selection survives a catalog refresh. */
   selected?: string | null
+  /** A row to pulse-highlight for a couple of seconds (a just-saved workload the reader was
+   * sent here to see), or null. Separate from `selected` so the highlight is transient. */
+  revealed?: string | null
   onSelect?: (name: string) => void
   onDelete: (name: string) => void
 }
@@ -30,6 +36,7 @@ export function WorkloadCatalog({
   profiles,
   boardWorkloads,
   selected = null,
+  revealed = null,
   onSelect = () => {},
   onDelete,
 }: Props) {
@@ -54,6 +61,11 @@ export function WorkloadCatalog({
           <ul className="wlist">
             {ordered.map(({ p, xref }) => {
               const isSel = p.name === selected
+              const isRevealed = p.name === revealed
+              // The load kind this workload offers (rate or concurrency), coloured the same as
+              // on the leaderboard picker so a workload reads the same in both places. Null for
+              // a recorded-arrivals trace, which has no load kind to vary.
+              const loadTag = loadKindTag(offeredLoad(profileToGroup(p)).kind)
               return (
                 // A fixed id on the selected row (there is only ever one) is the scroll
                 // anchor for the #/workloads?workload=<name> deep link, robust to whatever
@@ -61,7 +73,7 @@ export function WorkloadCatalog({
                 <li
                   key={p.name}
                   id={isSel ? 'wrow-selected' : undefined}
-                  className={`wrow${isSel ? ' selected' : ''}`}
+                  className={`wrow${isSel ? ' selected' : ''}${isRevealed ? ' revealed' : ''}`}
                 >
                   <button
                     type="button"
@@ -79,6 +91,9 @@ export function WorkloadCatalog({
                     </span>
                     <span className="wrow-summary">{profileSummary(p)}</span>
                     <span className="wrow-meta">
+                      {loadTag && (
+                        <span className={`spec-tag ${loadTag.className}`}>{loadTag.label}</span>
+                      )}
                       <span className={`variant variant-${p.workload.type}`}>{p.workload.type}</span>
                       <span className="xref">
                         {xref.runs === 0
@@ -142,7 +157,7 @@ function TrashIcon() {
 /**
  * The detail panel for the chosen card: the group knobs (seed, horizon, timeout) above the
  * work itself. A spec-backed profile shows its complete WorkloadSpec YAML, copyable; a
- * distribution profile — which has no spec — shows its flat fields instead.
+ * trace profile — which has no spec — shows its replay knobs instead.
  */
 function WorkloadDetail({ profile }: { profile: ProfileBody }) {
   const yaml = specText(profile)
@@ -166,39 +181,45 @@ function WorkloadDetail({ profile }: { profile: ProfileBody }) {
           text={yaml}
         />
       ) : (
-        <DistributionDetail workload={profile.workload} />
+        <TraceDetail workload={profile.workload} />
       )}
     </div>
   )
 }
 
-/** The flat distribution fields, as a definition list — the whole of a distribution
- * profile's work definition (it carries no WorkloadSpec). */
-function DistributionDetail({ workload }: { workload: ProfileBody['workload'] }) {
-  const load = workload.load
-  const loadText = load ? `${load.value} ${load.kind === 'concurrency' ? 'concurrent sessions' : 'req/s'}` : '—'
+/** The replay knobs of a trace profile, as a definition list — a trace carries no
+ * WorkloadSpec, so this stands in for the spec YAML. */
+function TraceDetail({ workload }: { workload: ProfileBody['workload'] }) {
+  const t = workload.trace
+  if (!t) return null
+  const loadText = t.concurrent_sessions > 0 ? `${t.concurrent_sessions} concurrent sessions` : 'recorded arrivals'
   return (
-    <dl className="wdetail-fields">
-      <div>
-        <dt>Requests</dt>
-        <dd className="mono">{workload.num_requests}</dd>
-      </div>
-      <div>
-        <dt>Offered load</dt>
-        <dd className="mono">{loadText}</dd>
-      </div>
-      <div>
-        <dt>Prompt tokens</dt>
-        <dd className="mono">
-          {workload.prompt_tokens} ± {workload.prompt_tokens_stdev}
-        </dd>
-      </div>
-      <div>
-        <dt>Output tokens</dt>
-        <dd className="mono">
-          {workload.output_tokens} ± {workload.output_tokens_stdev}
-        </dd>
-      </div>
-    </dl>
+    <>
+      <dl className="wdetail-fields">
+        <div>
+          <dt>Source</dt>
+          <dd className="mono">{t.source_format}</dd>
+        </div>
+        <div>
+          <dt>Corpus</dt>
+          <dd className="mono">
+            {t.records} records, {t.sessions} sessions
+          </dd>
+        </div>
+        <div>
+          <dt>Session mode</dt>
+          <dd className="mono">{t.session_mode}</dd>
+        </div>
+        <div>
+          <dt>Offered load</dt>
+          <dd className="mono">{loadText}</dd>
+        </div>
+      </dl>
+      {/* The recorded corpus's actual shape: token sizes, turns per session, arrival
+          burstiness, think time. Fetched from the server, which reads the stored trace. */}
+      {t.sha256 && <TraceCharts sha256={t.sha256} />}
+      {/* The raw trace as JSON (header + a record sample), lazily on demand. */}
+      {t.sha256 && <TraceJson sha256={t.sha256} />}
+    </>
   )
 }
