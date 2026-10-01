@@ -82,11 +82,12 @@ function render(props: Partial<Parameters<typeof ModelEditor>[0]> = {}): string 
 }
 
 describe('ModelEditor', () => {
-  it('renders as a modal', () => {
+  it('renders as a modal with a corner close button', () => {
     const html = render()
     expect(html).toContain('modal-scrim')
     expect(html).toContain('modal-wide')
     expect(html).toContain('role="dialog"')
+    expect(html).toContain('aria-label="Close"')
   })
 
   it('offers a form for model.yaml and a code box for config.json, with upload buttons', () => {

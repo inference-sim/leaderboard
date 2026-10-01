@@ -4725,10 +4725,42 @@ button.danger {
 /* The add/edit-a-model modal is wider than the confirm dialog (it holds two forms) and caps
  * its height so a long config.json scrolls inside the panel rather than off the screen. */
 .modal-wide {
+  position: relative;
   max-width: 760px;
   max-height: 88vh;
   overflow-y: auto;
   padding: 24px 28px 22px;
+}
+
+/* The corner close button: a quiet X in the top-right that cancels, the same as Escape or a
+ * scrim click. Sits clear of the title's text. */
+.modal-close {
+  position: absolute;
+  top: 14px;
+  right: 14px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  background: none;
+  color: var(--muted);
+  cursor: pointer;
+  transition: color 0.12s, border-color 0.12s, background 0.12s;
+}
+
+.modal-close:hover {
+  color: var(--ink);
+  border-color: var(--line-strong);
+  background: var(--paper);
+}
+
+/* Keep a long "Edit <name>" title clear of the corner X. */
+.modal-wide .modal-title {
+  padding-right: 34px;
 }
 
 /* The config.json code box inside the modal: taller than the default field, monospace, and
