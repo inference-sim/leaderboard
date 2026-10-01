@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
 import {
   contextMeterFraction,
+  deleteModel,
   filterModels,
   formatContext,
   getModelConfig,
@@ -10,13 +11,19 @@ import {
   modelOf,
   orgOf,
   precision,
+  saveModel,
+  validateModel,
   type ModelDetail,
   type ModelInfo,
   type ModelKind,
+  type ModelSubmission,
+  type ModelValidation,
 } from '../models'
 import { collapseHardwareAliases, listHardware, type HardwareInfo } from '../hardware'
 import type { WorkloadGroup } from '../load'
 import { CopyBlock } from './CopyBlock'
+import { ConfirmDialog } from './ConfirmDialog'
+import { ModelEditor, type ModelDraft } from './ModelEditor'
 import { Workloads } from './Workloads'
 
 /**
@@ -158,22 +165,29 @@ function ModelsPanel() {
   const [query, setQuery] = useState('')
   const [kind, setKind] = useState<ModelKind>('all')
 
-  useEffect(() => {
-    let live = true
-    listModels()
-      .then((m) => {
-        if (live) {
-          setModels(m)
-          setError(null)
-        }
-      })
-      .catch((e) => {
-        if (live) setError(e instanceof Error ? e.message : String(e))
-      })
-    return () => {
-      live = false
+  // Add/edit editor state. `editing` null means the editor is closed and the Add button
+  // shows instead. An action error (a failed delete) is surfaced inline, separate from the
+  // load error that replaces the whole panel.
+  const [editing, setEditing] = useState<{ draft: ModelDraft; name: string | null } | null>(null)
+  const [verdict, setVerdict] = useState<ModelValidation | null>(null)
+  const [validating, setValidating] = useState(false)
+  const [saving, setSaving] = useState(false)
+  const [saveError, setSaveError] = useState<string | null>(null)
+  const [actionError, setActionError] = useState<string | null>(null)
+  const [pendingDelete, setPendingDelete] = useState<string | null>(null)
+
+  const refresh = useCallback(async () => {
+    try {
+      setModels(await listModels())
+      setError(null)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
     }
   }, [])
+
+  useEffect(() => {
+    refresh()
+  }, [refresh])
 
   // Load the open model's config the first time it is opened. Keyed on `expanded` alone; the
   // requested-set guard makes it fire once per model, and setting state after unmount is a
@@ -197,34 +211,158 @@ function ModelsPanel() {
     setExpanded((cur) => (cur === name ? null : name))
   }, [])
 
-  if (error) return <CatalogError message={error} />
-  if (models === null) return <p className="dek">Reading the model catalog.</p>
-  // An empty catalog is a misconfiguration, distinct from a filter that matched nothing:
-  // ModelsList carries the BLIS_CATALOG pointer for the former.
-  if (models.length === 0) {
-    return <ModelsList models={[]} expanded={expanded} onToggle={toggle} configFor={(n) => configs[n]} />
+  const toSubmission = (d: ModelDraft): ModelSubmission => ({
+    dir: d.dir,
+    model_yaml: d.modelYaml,
+    config_json: d.configJson,
+  })
+
+  const openAdd = () => {
+    setEditing({ draft: { dir: '', modelYaml: '', configJson: '' }, name: null })
+    setVerdict(null)
+    setSaveError(null)
   }
+
+  // Editing prefills from the model's own files (the raw model.yaml and config.json), so the
+  // reader changes what is there rather than retyping it. The directory is the model's
+  // identity, so it is not editable (the editor locks the field).
+  const openEdit = async (name: string) => {
+    try {
+      const detail = await getModelConfig(name)
+      setEditing({
+        draft: { dir: modelOf(name), modelYaml: detail.model_yaml ?? '', configJson: detail.config },
+        name,
+      })
+      setVerdict(null)
+      setSaveError(null)
+    } catch (e) {
+      setActionError(e instanceof Error ? e.message : String(e))
+    }
+  }
+
+  const closeEditor = () => {
+    setEditing(null)
+    setVerdict(null)
+    setSaveError(null)
+  }
+
+  const onValidate = async () => {
+    if (!editing) return
+    setValidating(true)
+    try {
+      setVerdict(await validateModel(toSubmission(editing.draft), editing.name))
+    } catch (e) {
+      setVerdict(null)
+      setSaveError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setValidating(false)
+    }
+  }
+
+  const onSave = async () => {
+    if (!editing) return
+    setSaving(true)
+    setSaveError(null)
+    try {
+      await saveModel(toSubmission(editing.draft), editing.name)
+      closeEditor()
+      await refresh()
+    } catch (e) {
+      setSaveError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const confirmDelete = async () => {
+    const name = pendingDelete
+    if (name == null) return
+    setPendingDelete(null)
+    setActionError(null)
+    try {
+      await deleteModel(name)
+      if (expanded === name) setExpanded(null)
+    } catch (e) {
+      setActionError(e instanceof Error ? e.message : String(e))
+    } finally {
+      await refresh()
+    }
+  }
+
+  // A load failure (catalog unreadable) replaces the panel, as before. Action errors stay
+  // inline below, so a failed delete does not blank the catalog.
+  if (error && models === null) return <CatalogError message={error} />
+  if (models === null) return <p className="dek">Reading the model catalog.</p>
+
   const shown = filterModels(models, query, kind)
   return (
     <>
-      <ModelsToolbar
-        query={query}
-        onQuery={setQuery}
-        kind={kind}
-        onKind={setKind}
-        shown={shown.length}
-        total={models.length}
-      />
-      {shown.length === 0 ? (
-        <p className="dek empty">No models match that filter.</p>
-      ) : (
-        <ModelsList
-          models={shown}
-          expanded={expanded}
-          onToggle={toggle}
-          configFor={(name) => configs[name]}
+      {editing ? (
+        <ModelEditor
+          draft={editing.draft}
+          editingName={editing.name}
+          verdict={verdict}
+          validating={validating}
+          saving={saving}
+          saveError={saveError}
+          onChange={(draft) => setEditing((cur) => (cur ? { ...cur, draft } : cur))}
+          onValidate={onValidate}
+          onSave={onSave}
+          onCancel={closeEditor}
         />
+      ) : (
+        <div className="model-add-row">
+          <button type="button" className="primary" onClick={openAdd}>
+            Add a model
+          </button>
+          <p className="dek">
+            Onboard your own model from a <code className="mono">model.yaml</code> and{' '}
+            <code className="mono">config.json</code>.
+          </p>
+        </div>
       )}
+
+      {actionError && <p className="dek issue">{actionError}</p>}
+
+      {models.length === 0 ? (
+        // An empty catalog is a misconfiguration, distinct from a filter that matched
+        // nothing: ModelsList carries the BLIS_CATALOG pointer for the former.
+        <ModelsList models={[]} expanded={expanded} onToggle={toggle} configFor={(n) => configs[n]} />
+      ) : (
+        <>
+          <ModelsToolbar
+            query={query}
+            onQuery={setQuery}
+            kind={kind}
+            onKind={setKind}
+            shown={shown.length}
+            total={models.length}
+          />
+          {shown.length === 0 ? (
+            <p className="dek empty">No models match that filter.</p>
+          ) : (
+            <ModelsList
+              models={shown}
+              expanded={expanded}
+              onToggle={toggle}
+              configFor={(name) => configs[name]}
+              onEdit={openEdit}
+              onDelete={setPendingDelete}
+            />
+          )}
+        </>
+      )}
+
+      <ConfirmDialog
+        open={pendingDelete !== null}
+        title="Delete model?"
+        confirmLabel="Delete"
+        onConfirm={confirmDelete}
+        onCancel={() => setPendingDelete(null)}
+      >
+        Delete <code className="mono">{pendingDelete}</code>? This removes the model you added
+        from the catalog and the picker. The base catalog is not affected. This cannot be undone.
+      </ConfirmDialog>
     </>
   )
 }
@@ -299,12 +437,18 @@ export function ModelsList({
   expanded,
   onToggle,
   configFor,
+  onEdit,
+  onDelete,
 }: {
   models: ModelInfo[]
   expanded: string | null
   onToggle: (name: string) => void
   /** The load state of a model's config, or undefined before it has been opened. */
   configFor: (name: string) => ConfigState | undefined
+  /** Edit/Delete a user-added model. Omitted (read-only view) means no card shows them;
+   * when present, only user-added cards do. */
+  onEdit?: (name: string) => void
+  onDelete?: (name: string) => void
 }) {
   if (models.length === 0) {
     return (
@@ -330,6 +474,8 @@ export function ModelsList({
                 open={m.name === expanded}
                 onToggle={onToggle}
                 config={configFor(m.name)}
+                onEdit={onEdit}
+                onDelete={onDelete}
               />
             ))}
           </div>
@@ -350,16 +496,24 @@ function ModelCard({
   open,
   onToggle,
   config,
+  onEdit,
+  onDelete,
 }: {
   model: ModelInfo
   open: boolean
   onToggle: (name: string) => void
   config: ConfigState | undefined
+  onEdit?: (name: string) => void
+  onDelete?: (name: string) => void
 }) {
   const spec = model.spec ?? {}
   const org = orgOf(model.name)
   const context = formatContext(spec.context)
   const meterPct = spec.context ? Math.max(2, contextMeterFraction(spec.context) * 100) : 0
+  // A model with no origin (an older server) reads as base. Edit/Delete show only on a
+  // user-added card and only when the parent passed handlers (a read-only list passes none).
+  const isUser = model.origin === 'user'
+  const showActions = isUser && (onEdit || onDelete)
   return (
     <div className={`mcard${open ? ' open' : ''}`}>
       <button
@@ -374,9 +528,14 @@ function ModelCard({
             <div className="mcard-name mono">{modelOf(model.name)}</div>
             {spec.arch && <div className="mcard-arch">{spec.arch}</div>}
           </div>
-          <span className={`badge ${model.moe ? 'moe' : 'dense'}`}>
-            {model.moe ? 'MoE' : 'Dense'}
-          </span>
+          <div className="mcard-tags">
+            <span className={`badge ${model.moe ? 'moe' : 'dense'}`}>
+              {model.moe ? 'MoE' : 'Dense'}
+            </span>
+            <span className={`prov prov-${isUser ? 'user' : 'base'}`}>
+              {isUser ? 'Added' : 'Built-in'}
+            </span>
+          </div>
         </div>
         <div className="mcard-ctx">
           <div className="mcard-ctx-row">
@@ -395,6 +554,22 @@ function ModelCard({
         </div>
         <ModelSpecs model={model} />
       </button>
+      {/* Actions sit outside the face button (a button cannot nest buttons). A user model is
+          editable and deletable; a base model is read-only, like a built-in workload. */}
+      {showActions && (
+        <div className="mcard-actions">
+          {onEdit && (
+            <button type="button" className="mcard-action" aria-label="Edit model" onClick={() => onEdit(model.name)}>
+              Edit
+            </button>
+          )}
+          {onDelete && (
+            <button type="button" className="mcard-action danger" aria-label="Delete model" onClick={() => onDelete(model.name)}>
+              Delete
+            </button>
+          )}
+        </div>
+      )}
       {open && <div className="mcard-detail">{renderConfig(config)}</div>}
     </div>
   )

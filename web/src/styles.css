@@ -4658,6 +4658,97 @@ button.danger {
   white-space: nowrap;
 }
 
+/* The two chips at the top-right of a model card stack so the architecture badge and the
+ * provenance tag read as separate keys rather than one run of chips. */
+.mcard-tags {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 5px;
+  flex: none;
+}
+
+/* The provenance tag: where the model came from, in the same chip box as the MoE/Dense
+ * badge. Added (user-ingested) carries the accent so it reads as "yours"; Built-in is the
+ * quiet neutral the base catalog's default deserves. */
+.prov {
+  display: inline-block;
+  padding: 1px 7px;
+  border-radius: 10px;
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  vertical-align: middle;
+  white-space: nowrap;
+}
+
+.prov-user {
+  border: 1px solid var(--accent);
+  background: var(--panel);
+  color: var(--accent-ink);
+}
+
+.prov-base {
+  border: 1px solid var(--line);
+  background: var(--paper);
+  color: var(--muted);
+}
+
+/* Edit/Delete on a user-added card, below the face button (a button cannot nest buttons). */
+.mcard-actions {
+  display: flex;
+  gap: 8px;
+  padding: 0 15px 13px;
+}
+
+.mcard-action {
+  padding: 4px 11px;
+  border: 1px solid var(--line-strong);
+  border-radius: 3px;
+  background: var(--panel);
+  color: var(--ink);
+  font: inherit;
+  font-size: 12.5px;
+  cursor: pointer;
+}
+
+.mcard-action:hover {
+  border-color: var(--accent);
+}
+
+.mcard-action.danger {
+  color: var(--crit-ink);
+  border-color: var(--crit-line);
+}
+
+/* The Add-a-model row above the catalog, when the editor is closed: the primary action and a
+ * one-line hint beside it. */
+.model-add-row {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  margin: 4px 0 16px;
+}
+
+.model-add-row .dek {
+  margin: 0;
+}
+
+/* The "Load from file" control under each editor textarea: a quiet link-like label wrapping a
+ * hidden file input, so picking a file reads it into the textarea. */
+.file-load {
+  display: inline-block;
+  margin-top: 7px;
+  font-size: 12.5px;
+  color: var(--accent-ink);
+  cursor: pointer;
+}
+
+.file-load input[type='file'] {
+  display: none;
+}
+
 /* Accelerators as spec cards: one per distinct accelerator (alias groups collapsed). */
 .hw-grid {
   margin-top: 18px;

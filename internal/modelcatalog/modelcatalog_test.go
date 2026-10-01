@@ -34,6 +34,18 @@ func TestConfigReturnsProvenanceAndPrettyConfig(t *testing.T) {
 	}
 }
 
+// Config returns the raw model.yaml bytes too, so the Catalog's edit form can prefill the
+// file a user is editing (the parsed source block alone would lose any other fields).
+func TestConfigReturnsRawModelYAML(t *testing.T) {
+	d, err := Config(catalogRoot, "", "qwen/qwen3-30b-a3b")
+	if err != nil {
+		t.Fatalf("Config: %v", err)
+	}
+	if !strings.Contains(d.ModelYAML, "repo: Qwen/Qwen3-30B-A3B") {
+		t.Errorf("ModelYAML = %q, want the raw model.yaml bytes", d.ModelYAML)
+	}
+}
+
 func TestConfigModelWithoutConfigJSONHasEmptyConfig(t *testing.T) {
 	d, err := Config(catalogRoot, "", "someorg/dense-no-config")
 	if err != nil {

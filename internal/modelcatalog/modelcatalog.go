@@ -103,6 +103,10 @@ type Detail struct {
 	// Source above (the model.yaml provenance block). The model view uses it to show the
 	// Added/Built-in tag and gate Edit/Delete.
 	Origin string `json:"origin"`
+	// ModelYAML is the raw model.yaml, so the Catalog's edit form can prefill the exact file
+	// a user is editing (the parsed Source block alone would drop any other fields). Empty
+	// when the directory ships no model.yaml.
+	ModelYAML string `json:"model_yaml,omitempty"`
 }
 
 // expertKeys are the config.json keys that mark a model as MoE. A model whose config
@@ -192,6 +196,12 @@ func Config(catalogRoot, userModelsDir, name string) (Detail, error) {
 		if err != nil {
 			return Detail{}, err
 		}
+		// The raw model.yaml, for the edit form's prefill. A missing file is "" (the same way
+		// an absent config.json is), not an error.
+		rawYAML, err := os.ReadFile(filepath.Join(modelsDir, dir, "model.yaml"))
+		if err != nil && !os.IsNotExist(err) {
+			return Detail{}, fmt.Errorf("reading %s: %w", filepath.Join(modelsDir, dir, "model.yaml"), err)
+		}
 		return Detail{
 			Name: name,
 			MoE:  moe,
@@ -201,8 +211,9 @@ func Config(catalogRoot, userModelsDir, name string) (Detail, error) {
 				Revision:  my.Source.Revision,
 				Retrieved: my.Source.Retrieved,
 			},
-			Config: cfg,
-			Origin: originOf(dir, userDirs),
+			Config:    cfg,
+			Origin:    originOf(dir, userDirs),
+			ModelYAML: string(rawYAML),
 		}, nil
 	}
 	return Detail{}, fmt.Errorf("%q: %w", name, ErrNotFound)

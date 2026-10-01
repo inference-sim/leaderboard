@@ -157,6 +157,45 @@ describe('ModelsList', () => {
   })
 })
 
+const mixedOrigin: ModelInfo[] = [
+  { name: 'acme/my-model', moe: false, origin: 'user' },
+  { name: 'meta-llama/llama-3.1-8b-instruct', moe: false, origin: 'base' },
+]
+
+describe('ModelsList provenance', () => {
+  it('tags each card Added or Built-in by origin', () => {
+    const html = renderToStaticMarkup(
+      <ModelsList models={mixedOrigin} expanded={null} onToggle={noop} configFor={none} />,
+    )
+    expect(html).toContain('Added')
+    expect(html).toContain('Built-in')
+  })
+
+  it('offers Edit and Delete only on user-added cards', () => {
+    const html = renderToStaticMarkup(
+      <ModelsList
+        models={mixedOrigin}
+        expanded={null}
+        onToggle={noop}
+        configFor={none}
+        onEdit={noop}
+        onDelete={noop}
+      />,
+    )
+    // One user model, so exactly one Edit and one Delete control.
+    expect(html.match(/aria-label="Edit model"/g)).toHaveLength(1)
+    expect(html.match(/aria-label="Delete model"/g)).toHaveLength(1)
+  })
+
+  it('shows no Edit/Delete controls when no handlers are passed', () => {
+    const html = renderToStaticMarkup(
+      <ModelsList models={mixedOrigin} expanded={null} onToggle={noop} configFor={none} />,
+    )
+    expect(html).not.toContain('aria-label="Edit model"')
+    expect(html).not.toContain('aria-label="Delete model"')
+  })
+})
+
 describe('ModelConfigView', () => {
   it('shows the model.yaml provenance as tags beside the config.json', () => {
     const detail: ModelDetail = {

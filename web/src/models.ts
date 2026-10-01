@@ -60,6 +60,9 @@ export interface ModelDetail {
   config: string
   /** "user" or "base", as on ModelInfo. */
   origin?: 'base' | 'user'
+  /** The raw model.yaml, so the edit form can prefill the exact file. Absent when the model
+   * ships none. */
+  model_yaml?: string
 }
 
 /** A proposed user model from the add/edit form: a directory name and the two file bodies.
@@ -179,11 +182,18 @@ function jsonPost(method: string, body: unknown): RequestInit {
  * (acceptable or not, with the derived facts and any issues) without writing anything. */
 export async function validateModel(
   body: ModelSubmission,
+  originalName: string | null = null,
   fetchImpl: typeof fetch = fetch,
 ): Promise<ModelValidation> {
+  // When editing, name the model so the server's collision check excludes it (editing in
+  // place is not a collision with itself).
+  const url =
+    originalName == null
+      ? '/api/models/validate'
+      : `/api/models/validate?name=${encodeURIComponent(originalName)}`
   let res: Response
   try {
-    res = await fetchImpl('/api/models/validate', jsonPost('POST', body))
+    res = await fetchImpl(url, jsonPost('POST', body))
   } catch {
     throw new Error(UNREACHABLE)
   }
