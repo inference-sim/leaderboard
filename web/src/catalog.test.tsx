@@ -171,28 +171,34 @@ describe('ModelsList provenance', () => {
     expect(html).toContain('Built-in')
   })
 
-  it('offers Edit and Delete only on user-added cards', () => {
+  it('offers a Delete control only on user-added cards, and never an Edit', () => {
+    const html = renderToStaticMarkup(
+      <ModelsList models={mixedOrigin} expanded={null} onToggle={noop} configFor={none} onDelete={noop} />,
+    )
+    // One user model, so exactly one Delete control; editing a model is not offered at all.
+    expect(html.match(/aria-label="Delete model"/g)).toHaveLength(1)
+    expect(html).not.toContain('aria-label="Edit model"')
+  })
+
+  it('shows no Delete control when no handler is passed', () => {
+    const html = renderToStaticMarkup(
+      <ModelsList models={mixedOrigin} expanded={null} onToggle={noop} configFor={none} />,
+    )
+    expect(html).not.toContain('aria-label="Delete model"')
+  })
+
+  it('pulses the just-added model card', () => {
     const html = renderToStaticMarkup(
       <ModelsList
         models={mixedOrigin}
         expanded={null}
         onToggle={noop}
         configFor={none}
-        onEdit={noop}
-        onDelete={noop}
+        highlighted="acme/my-model"
       />,
     )
-    // One user model, so exactly one Edit and one Delete control.
-    expect(html.match(/aria-label="Edit model"/g)).toHaveLength(1)
-    expect(html.match(/aria-label="Delete model"/g)).toHaveLength(1)
-  })
-
-  it('shows no Edit/Delete controls when no handlers are passed', () => {
-    const html = renderToStaticMarkup(
-      <ModelsList models={mixedOrigin} expanded={null} onToggle={noop} configFor={none} />,
-    )
-    expect(html).not.toContain('aria-label="Edit model"')
-    expect(html).not.toContain('aria-label="Delete model"')
+    expect(html).toContain('id="mcard-revealed"')
+    expect(html).toContain('class="mcard revealed"')
   })
 })
 

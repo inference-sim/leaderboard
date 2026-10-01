@@ -45,11 +45,11 @@ func decodeModelBody(r *http.Request) (modelBody, error) {
 }
 
 // checkModelSubmission runs every check without writing: structural validation (our rules),
-// a name-collision check against the catalog (the "new names only" rule), and the blis smoke
-// test. excludeName is the canonical name of the model being replaced on an edit, so editing
-// in place is not reported as colliding with itself. It returns the derived facts and the
-// issues; OK is true only when there are none.
-func (s *server) checkModelSubmission(b modelBody, excludeName string) modelValidateResponse {
+// a directory-collision check against the catalog (the "new names only" rule), and the blis
+// smoke test. It returns the derived facts and the issues; OK is true only when there are
+// none. There is no edit path, so a submission is always a new model and any existing
+// directory of the same name is a collision.
+func (s *server) checkModelSubmission(b modelBody) modelValidateResponse {
 	resp := modelValidateResponse{Issues: []string{}}
 	v, err := b.submission().Validate()
 	if err != nil {
@@ -60,20 +60,17 @@ func (s *server) checkModelSubmission(b modelBody, excludeName string) modelVali
 
 	// Collision is by directory, not canonical name: the directory is the model's on-disk
 	// identity (<catalog>/models/<dir>), so a different org under the same directory would
-	// still clobber an existing model's files. excludeName is the model being edited, whose
-	// own directory is not a collision with itself.
-	if b.Dir != modelDirOf(excludeName) {
-		models, err := modelcatalog.List(s.catalogRoot, s.userModelsDir)
-		if err != nil {
-			resp.Issues = append(resp.Issues, err.Error())
+	// still clobber an existing model's files.
+	models, err := modelcatalog.List(s.catalogRoot, s.userModelsDir)
+	if err != nil {
+		resp.Issues = append(resp.Issues, err.Error())
+		return resp
+	}
+	for _, m := range models {
+		if modelDirOf(m.Name) == b.Dir {
+			resp.Issues = append(resp.Issues, fmt.Sprintf("a model already occupies the directory "+
+				"%q (%s); choose another directory name", b.Dir, m.Name))
 			return resp
-		}
-		for _, m := range models {
-			if modelDirOf(m.Name) == b.Dir {
-				resp.Issues = append(resp.Issues, fmt.Sprintf("a model already occupies the directory "+
-					"%q (%s); choose another directory name", b.Dir, m.Name))
-				return resp
-			}
 		}
 	}
 
@@ -96,9 +93,7 @@ func (s *server) handleModelValidate(w http.ResponseWriter, r *http.Request) {
 		httpError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	// ?name= is the model being edited, so validating an edit in place does not report the
-	// model colliding with itself. Absent when validating a new model.
-	writeJSON(w, http.StatusOK, s.checkModelSubmission(b, r.URL.Query().Get("name")))
+	writeJSON(w, http.StatusOK, s.checkModelSubmission(b))
 }
 
 // handleModelCreate validates a submission and, if it passes, writes it to the pristine
@@ -113,42 +108,7 @@ func (s *server) handleModelCreate(w http.ResponseWriter, r *http.Request) {
 	s.modelMu.Lock()
 	defer s.modelMu.Unlock()
 
-	resp := s.checkModelSubmission(b, "")
-	if !resp.OK {
-		httpError(w, modelRejectionStatus(resp), strings.Join(resp.Issues, "; "))
-		return
-	}
-	if err := s.modelStore().Save(b.submission()); err != nil {
-		httpError(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-	writeJSON(w, http.StatusOK, resp)
-}
-
-// handleModelUpdate replaces a user model's files. The model is named by ?name= (its
-// canonical name). A base model is read-only (403); an unknown name is 404. A rename is not
-// supported: the directory is the model's identity, so the body's dir must match.
-func (s *server) handleModelUpdate(w http.ResponseWriter, r *http.Request) {
-	name := r.URL.Query().Get("name")
-	b, err := decodeModelBody(r)
-	if err != nil {
-		httpError(w, http.StatusBadRequest, err.Error())
-		return
-	}
-	s.modelMu.Lock()
-	defer s.modelMu.Unlock()
-
-	dir, status, msg := s.resolveUserModel(name)
-	if status != 0 {
-		httpError(w, status, msg)
-		return
-	}
-	if b.Dir != dir {
-		httpError(w, http.StatusBadRequest, fmt.Sprintf("the directory %q does not match the model "+
-			"being edited (%q); to rename, delete it and add a new one", b.Dir, dir))
-		return
-	}
-	resp := s.checkModelSubmission(b, name)
+	resp := s.checkModelSubmission(b)
 	if !resp.OK {
 		httpError(w, modelRejectionStatus(resp), strings.Join(resp.Issues, "; "))
 		return

@@ -172,13 +172,13 @@ func (s *server) routes() *http.ServeMux {
 	mux.HandleFunc("GET /api/traces/{sha256}/records", s.handleTraceRecords)
 	mux.HandleFunc("GET /api/models", s.handleModels)
 	mux.HandleFunc("GET /api/models/config", s.handleModelConfig)
-	// User-added models (create/validate/edit/delete). The method+path patterns are
-	// distinct from the GET routes above and from each other, so Go's ServeMux routes each
-	// without collision. Edit/delete name the model by ?name= (the canonical name carries a
-	// slash, so it cannot be a path segment), mirroring GET /api/models/config.
+	// User-added models (create/validate/delete). There is deliberately no edit route: a
+	// model's config is what its runs were produced against, so editing it in place would
+	// silently invalidate them. A model is added or deleted, not edited. Delete names the
+	// model by ?name= (the canonical name carries a slash, so it cannot be a path segment),
+	// mirroring GET /api/models/config.
 	mux.HandleFunc("POST /api/models", s.handleModelCreate)
 	mux.HandleFunc("POST /api/models/validate", s.handleModelValidate)
-	mux.HandleFunc("PUT /api/models", s.handleModelUpdate)
 	mux.HandleFunc("DELETE /api/models", s.handleModelDelete)
 	mux.HandleFunc("GET /api/hardware", s.handleHardware)
 	// Serve the built web app when it exists, so `leaderboard serve` is the whole

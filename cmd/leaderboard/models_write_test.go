@@ -184,28 +184,14 @@ func TestHandleModelDeleteBaseIs403(t *testing.T) {
 	}
 }
 
-func TestHandleModelUpdateUserModel(t *testing.T) {
+// There is no edit endpoint: a model's config is what its runs were produced against, so a
+// PUT must not be routed (editing would silently invalidate those runs).
+func TestHandleModelUpdateNotAllowed(t *testing.T) {
 	s := newModelServer(t)
-	s.routes().ServeHTTP(httptest.NewRecorder(), modelReq(http.MethodPost, "/api/models", createBody))
-
-	edited := `{"dir":"my-model","model_yaml":"source:\n  provider: huggingface\n  repo: Acme/My-Model\n","config_json":"{\"architectures\":[\"AcmeForCausalLM\"],\"hidden_size\":2048}"}`
+	body := `{"dir":"my-model","model_yaml":"source:\n  repo: Acme/My-Model\n","config_json":"{}"}`
 	rr := httptest.NewRecorder()
-	s.routes().ServeHTTP(rr, modelReq(http.MethodPut, "/api/models?name=acme/my-model", edited))
-	if rr.Code != http.StatusOK {
-		t.Fatalf("got %d, want 200 (%s)", rr.Code, rr.Body.String())
-	}
-	cfg, _ := os.ReadFile(filepath.Join(s.userModelsDir, "my-model", "config.json"))
-	if !strings.Contains(string(cfg), "2048") {
-		t.Errorf("edit not persisted; config = %q", cfg)
-	}
-}
-
-func TestHandleModelUpdateBaseIs403(t *testing.T) {
-	s := newModelServer(t)
-	body := `{"dir":"llama-base","model_yaml":"source:\n  repo: Meta/Llama-Base\n","config_json":"{}"}`
-	rr := httptest.NewRecorder()
-	s.routes().ServeHTTP(rr, modelReq(http.MethodPut, "/api/models?name=meta/llama-base", body))
-	if rr.Code != http.StatusForbidden {
-		t.Fatalf("got %d, want 403 (%s)", rr.Code, rr.Body.String())
+	s.routes().ServeHTTP(rr, modelReq(http.MethodPut, "/api/models?name=acme/my-model", body))
+	if rr.Code == http.StatusOK {
+		t.Fatalf("PUT /api/models returned 200; editing a model must not be possible")
 	}
 }

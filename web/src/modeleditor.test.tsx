@@ -2,7 +2,6 @@ import { describe, it, expect } from 'vitest'
 import { renderToStaticMarkup } from 'react-dom/server'
 import {
   ModelEditor,
-  draftFromDetail,
   draftModelYaml,
   draftToSubmission,
   emptyModelDraft,
@@ -53,21 +52,10 @@ describe('sourceFieldsFromYaml', () => {
   })
 })
 
-describe('draftFromDetail', () => {
-  it('fills the dir, source fields, and config box from a model detail', () => {
-    const d = draftFromDetail('acme/my-model', 'source:\n  repo: Acme/My-Model\n  provider: hf\n', '{"a":1}')
-    expect(d.dir).toBe('my-model')
-    expect(d.repo).toBe('Acme/My-Model')
-    expect(d.provider).toBe('hf')
-    expect(d.configJson).toBe('{"a":1}')
-  })
-})
-
 function render(props: Partial<Parameters<typeof ModelEditor>[0]> = {}): string {
   return renderToStaticMarkup(
     <ModelEditor
       draft={emptyModelDraft()}
-      editingName={null}
       verdict={null}
       validating={false}
       saving={false}
@@ -151,28 +139,14 @@ describe('ModelEditor', () => {
     expect(html).toContain('blis rejected the model')
   })
 
-  it('names the model and locks the directory when editing', () => {
-    const html = render({
-      editingName: 'acme/my-model',
-      draft: { ...emptyModelDraft(), dir: 'my-model', repo: 'Acme/My-Model' },
-    })
-    expect(html).toContain('Edit acme/my-model')
-    expect(html).toMatch(/name="dir"[^>]*disabled|disabled[^>]*name="dir"/)
+  it('is always in add mode with an editable directory (no edit flow)', () => {
+    const html = render()
+    expect(html).toContain('Add a model')
+    // The directory is always editable: there is no edit-in-place path.
+    expect(html).not.toMatch(/name="dir"[^>]*disabled|disabled[^>]*name="dir"/)
   })
 
   it('surfaces a save error', () => {
     expect(render({ saveError: 'the server is down' })).toContain('the server is down')
-  })
-
-  it('offers Delete only when editing an existing model', () => {
-    // Adding a new model: nothing to delete.
-    expect(render({ editingName: null, onDelete: noop })).not.toContain('Delete model')
-    // Editing: the Delete action is present.
-    const editing = render({
-      editingName: 'acme/my-model',
-      draft: { ...emptyModelDraft(), dir: 'my-model' },
-      onDelete: noop,
-    })
-    expect(editing).toContain('Delete model')
   })
 })

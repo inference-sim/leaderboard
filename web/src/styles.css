@@ -4696,30 +4696,57 @@ button.danger {
 }
 
 /* Edit/Delete on a user-added card, below the face button (a button cannot nest buttons). */
+/* The delete control on a user-added card: a single trash icon, right-aligned below the
+ * face. Quiet (muted) at rest, warming to the critical tone on hover. */
 .mcard-actions {
   display: flex;
-  gap: 8px;
-  padding: 0 15px 13px;
+  justify-content: flex-end;
+  padding: 0 12px 11px;
 }
 
-.mcard-action {
-  padding: 4px 11px;
-  border: 1px solid var(--line-strong);
-  border-radius: 3px;
-  background: var(--panel);
-  color: var(--ink);
-  font: inherit;
-  font-size: 12.5px;
+.mcard-trash {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: none;
+  color: var(--muted);
   cursor: pointer;
+  transition: color 0.12s, border-color 0.12s, background 0.12s;
 }
 
-.mcard-action:hover {
-  border-color: var(--accent);
-}
-
-.mcard-action.danger {
+.mcard-trash:hover {
   color: var(--crit-ink);
   border-color: var(--crit-line);
+  background: var(--paper);
+}
+
+/* A just-added model's card, pulsed for ~2s then cleared by JS. The accent ring reads over
+ * the card's own border; under reduced motion the static ring just shows for the interval. */
+.mcard.revealed {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px var(--accent-soft);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .mcard.revealed {
+    animation: mcard-flash 2s ease;
+  }
+}
+
+@keyframes mcard-flash {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 transparent;
+  }
+  15%,
+  50% {
+    box-shadow: 0 0 0 3px var(--accent-soft);
+  }
 }
 
 /* The add/edit-a-model modal is wider than the confirm dialog (it holds two forms) and caps

@@ -1,6 +1,6 @@
 import { useEffect, useRef } from 'react'
 import { parse, stringify } from 'yaml'
-import { modelOf, type ModelSubmission, type ModelValidation } from '../models'
+import type { ModelSubmission, ModelValidation } from '../models'
 
 /** The add/edit-a-model draft. model.yaml is captured as a structured form (its source block),
  * not raw text, and generated on submit; config.json stays a code box the user types or loads.
@@ -49,18 +49,8 @@ export function sourceFieldsFromYaml(raw: string): Pick<ModelDraft, 'provider' |
   }
 }
 
-/** draftFromDetail builds the editor draft from a model's own files (for the edit flow): the
- * directory from its canonical name, the source fields parsed from its raw model.yaml, and its
- * config.json into the code box. */
-export function draftFromDetail(name: string, modelYaml: string, configJson: string): ModelDraft {
-  return { dir: modelOf(name), ...sourceFieldsFromYaml(modelYaml), configJson }
-}
-
 interface Props {
   draft: ModelDraft
-  /** The canonical name being edited, or null when adding. When set, the directory is the
-   * model's identity and cannot be renamed in place. */
-  editingName: string | null
   verdict: ModelValidation | null
   validating: boolean
   saving: boolean
@@ -69,9 +59,6 @@ interface Props {
   onValidate: () => void
   onSave: () => void
   onCancel: () => void
-  /** Delete the model being edited. Present only in edit mode (a new model has nothing to
-   * delete); the parent gates the actual removal behind a confirm. */
-  onDelete?: () => void
 }
 
 /** A small upload glyph (arrow into a tray) for the Upload buttons. */
@@ -123,7 +110,6 @@ const EG = {
  */
 export function ModelEditor({
   draft,
-  editingName,
   verdict,
   validating,
   saving,
@@ -132,7 +118,6 @@ export function ModelEditor({
   onValidate,
   onSave,
   onCancel,
-  onDelete,
 }: Props) {
   const saveDisabled = !verdict?.ok || saving
   const set = (key: keyof ModelDraft, value: string) => onChange({ ...draft, [key]: value })
@@ -179,7 +164,7 @@ export function ModelEditor({
           </svg>
         </button>
         <h2 id={titleId} className="modal-title">
-          {editingName ? `Edit ${editingName}` : 'Add a model'}
+          Add a model
         </h2>
         {/* The .editor class brings the shared form-field styling (.editor .field/label/input/
             textarea) inside the modal; its own base is only max-width, so it adds no chrome. */}
@@ -198,7 +183,6 @@ export function ModelEditor({
             className="mono"
             placeholder={EG.dir}
             value={draft.dir}
-            disabled={editingName !== null}
             onChange={(e) => set('dir', e.target.value)}
           />
           <p className="dek">
@@ -329,11 +313,6 @@ export function ModelEditor({
         {saveError && <p className="issue">{saveError}</p>}
 
         <div className="editor-actions">
-          {editingName && onDelete && (
-            <button type="button" className="danger-ghost" onClick={onDelete}>
-              Delete model
-            </button>
-          )}
           <button type="button" className="ghost" onClick={onCancel}>
             Cancel
           </button>
@@ -341,7 +320,7 @@ export function ModelEditor({
             {validating ? 'Validating…' : 'Validate'}
           </button>
           <button type="button" className="primary" onClick={onSave} disabled={saveDisabled}>
-            {saving ? 'Saving…' : editingName ? 'Save changes' : 'Add model'}
+            {saving ? 'Saving…' : 'Add model'}
           </button>
         </div>
         </div>

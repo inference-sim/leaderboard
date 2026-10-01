@@ -182,38 +182,27 @@ function jsonPost(method: string, body: unknown): RequestInit {
  * (acceptable or not, with the derived facts and any issues) without writing anything. */
 export async function validateModel(
   body: ModelSubmission,
-  originalName: string | null = null,
   fetchImpl: typeof fetch = fetch,
 ): Promise<ModelValidation> {
-  // When editing, name the model so the server's collision check excludes it (editing in
-  // place is not a collision with itself).
-  const url =
-    originalName == null
-      ? '/api/models/validate'
-      : `/api/models/validate?name=${encodeURIComponent(originalName)}`
   let res: Response
   try {
-    res = await fetchImpl(url, jsonPost('POST', body))
+    res = await fetchImpl('/api/models/validate', jsonPost('POST', body))
   } catch {
     throw new Error(UNREACHABLE)
   }
   return (await readModelResponse(res)) as ModelValidation
 }
 
-/** saveModel creates a model (POST /api/models) when originalName is null, or edits the user
- * model at originalName (PUT /api/models?name=) otherwise. The server re-validates and runs
- * the blis smoke test before writing. */
+/** saveModel creates a model (POST /api/models). There is no edit: a model's config is what
+ * its runs were produced against, so it is added or deleted, never changed in place. The
+ * server re-validates and runs the blis smoke test before writing. */
 export async function saveModel(
   body: ModelSubmission,
-  originalName: string | null,
   fetchImpl: typeof fetch = fetch,
 ): Promise<ModelValidation> {
-  const url =
-    originalName == null ? '/api/models' : `/api/models?name=${encodeURIComponent(originalName)}`
-  const method = originalName == null ? 'POST' : 'PUT'
   let res: Response
   try {
-    res = await fetchImpl(url, jsonPost(method, body))
+    res = await fetchImpl('/api/models', jsonPost('POST', body))
   } catch {
     throw new Error(UNREACHABLE)
   }

@@ -22,13 +22,7 @@ import { collapseHardwareAliases, listHardware, type HardwareInfo } from '../har
 import type { WorkloadGroup } from '../load'
 import { CopyBlock } from './CopyBlock'
 import { ConfirmDialog } from './ConfirmDialog'
-import {
-  ModelEditor,
-  draftFromDetail,
-  draftToSubmission,
-  emptyModelDraft,
-  type ModelDraft,
-} from './ModelEditor'
+import { ModelEditor, draftToSubmission, emptyModelDraft, type ModelDraft } from './ModelEditor'
 import { Workloads } from './Workloads'
 
 /**
@@ -170,16 +164,21 @@ function ModelsPanel() {
   const [query, setQuery] = useState('')
   const [kind, setKind] = useState<ModelKind>('all')
 
-  // Add/edit editor state. `editing` null means the editor is closed and the Add button
-  // shows instead. An action error (a failed delete) is surfaced inline, separate from the
-  // load error that replaces the whole panel.
-  const [editing, setEditing] = useState<{ draft: ModelDraft; name: string | null } | null>(null)
+  // Add-model editor state. `editing` holds the draft while the modal is open, else null.
+  // There is no edit flow: a model is added or deleted, never changed in place (its config is
+  // what its runs were produced against). An action error (a failed delete) is surfaced
+  // inline, separate from the load error that replaces the whole panel.
+  const [editing, setEditing] = useState<ModelDraft | null>(null)
   const [verdict, setVerdict] = useState<ModelValidation | null>(null)
   const [validating, setValidating] = useState(false)
   const [saving, setSaving] = useState(false)
   const [saveError, setSaveError] = useState<string | null>(null)
   const [actionError, setActionError] = useState<string | null>(null)
   const [pendingDelete, setPendingDelete] = useState<string | null>(null)
+  // The just-added model's canonical name, highlighted (scrolled to and pulsed) so the reader
+  // sees what they added; cleared after the pulse.
+  const [highlight, setHighlight] = useState<string | null>(null)
+  const highlightTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   const refresh = useCallback(async () => {
     try {
@@ -216,24 +215,22 @@ function ModelsPanel() {
     setExpanded((cur) => (cur === name ? null : name))
   }, [])
 
+  // Once the just-added model is in the loaded list, scroll its card into view and pulse it,
+  // then clear the highlight after the pulse. Keyed on the models list so it fires after the
+  // refresh that follows a save.
+  useEffect(() => {
+    if (!highlight || !models?.some((m) => m.name === highlight)) return
+    document.getElementById('mcard-revealed')?.scrollIntoView({ block: 'center', behavior: 'smooth' })
+    if (highlightTimer.current) clearTimeout(highlightTimer.current)
+    highlightTimer.current = setTimeout(() => setHighlight(null), 2000)
+  }, [highlight, models])
+
+  useEffect(() => () => { if (highlightTimer.current) clearTimeout(highlightTimer.current) }, [])
+
   const openAdd = () => {
-    setEditing({ draft: emptyModelDraft(), name: null })
+    setEditing(emptyModelDraft())
     setVerdict(null)
     setSaveError(null)
-  }
-
-  // Editing prefills from the model's own files (the raw model.yaml parsed into the form, and
-  // config.json into the code box), so the reader changes what is there rather than retyping
-  // it. The directory is the model's identity, so the editor locks that field.
-  const openEdit = async (name: string) => {
-    try {
-      const detail = await getModelConfig(name)
-      setEditing({ draft: draftFromDetail(name, detail.model_yaml ?? '', detail.config), name })
-      setVerdict(null)
-      setSaveError(null)
-    } catch (e) {
-      setActionError(e instanceof Error ? e.message : String(e))
-    }
   }
 
   const closeEditor = () => {
@@ -246,7 +243,7 @@ function ModelsPanel() {
     if (!editing) return
     setValidating(true)
     try {
-      setVerdict(await validateModel(draftToSubmission(editing.draft), editing.name))
+      setVerdict(await validateModel(draftToSubmission(editing)))
     } catch (e) {
       setVerdict(null)
       setSaveError(e instanceof Error ? e.message : String(e))
@@ -260,9 +257,13 @@ function ModelsPanel() {
     setSaving(true)
     setSaveError(null)
     try {
-      await saveModel(draftToSubmission(editing.draft), editing.name)
+      const result = await saveModel(draftToSubmission(editing))
       closeEditor()
+      // Clear any filter so the new card is visible, then reveal it once the list reloads.
+      setQuery('')
+      setKind('all')
       await refresh()
+      setHighlight(result.canonical_name)
     } catch (e) {
       setSaveError(e instanceof Error ? e.message : String(e))
     } finally {
@@ -317,8 +318,8 @@ function ModelsPanel() {
               expanded={expanded}
               onToggle={toggle}
               configFor={(name) => configs[name]}
-              onEdit={openEdit}
               onDelete={setPendingDelete}
+              highlighted={highlight}
             />
           )}
         </>
@@ -357,25 +358,15 @@ function ModelsPanel() {
 
       {editing && (
         <ModelEditor
-          draft={editing.draft}
-          editingName={editing.name}
+          draft={editing}
           verdict={verdict}
           validating={validating}
           saving={saving}
           saveError={saveError}
-          onChange={(draft) => setEditing((cur) => (cur ? { ...cur, draft } : cur))}
+          onChange={setEditing}
           onValidate={onValidate}
           onSave={onSave}
           onCancel={closeEditor}
-          onDelete={
-            editing.name
-              ? () => {
-                  const name = editing.name
-                  closeEditor()
-                  setPendingDelete(name)
-                }
-              : undefined
-          }
         />
       )}
     </>
@@ -452,18 +443,19 @@ export function ModelsList({
   expanded,
   onToggle,
   configFor,
-  onEdit,
   onDelete,
+  highlighted = null,
 }: {
   models: ModelInfo[]
   expanded: string | null
   onToggle: (name: string) => void
   /** The load state of a model's config, or undefined before it has been opened. */
   configFor: (name: string) => ConfigState | undefined
-  /** Edit/Delete a user-added model. Omitted (read-only view) means no card shows them;
+  /** Delete a user-added model. Omitted (read-only view) means no card shows the control;
    * when present, only user-added cards do. */
-  onEdit?: (name: string) => void
   onDelete?: (name: string) => void
+  /** The canonical name of a just-added model to pulse and scroll to, or null. */
+  highlighted?: string | null
 }) {
   if (models.length === 0) {
     return (
@@ -489,8 +481,8 @@ export function ModelsList({
                 open={m.name === expanded}
                 onToggle={onToggle}
                 config={configFor(m.name)}
-                onEdit={onEdit}
                 onDelete={onDelete}
+                highlighted={m.name === highlighted}
               />
             ))}
           </div>
@@ -511,26 +503,31 @@ function ModelCard({
   open,
   onToggle,
   config,
-  onEdit,
   onDelete,
+  highlighted = false,
 }: {
   model: ModelInfo
   open: boolean
   onToggle: (name: string) => void
   config: ConfigState | undefined
-  onEdit?: (name: string) => void
   onDelete?: (name: string) => void
+  highlighted?: boolean
 }) {
   const spec = model.spec ?? {}
   const org = orgOf(model.name)
   const context = formatContext(spec.context)
   const meterPct = spec.context ? Math.max(2, contextMeterFraction(spec.context) * 100) : 0
-  // A model with no origin (an older server) reads as base. Edit/Delete show only on a
-  // user-added card and only when the parent passed handlers (a read-only list passes none).
+  // A model with no origin (an older server) reads as base. Delete shows only on a user-added
+  // card and only when the parent passed a handler (a read-only list passes none). A model is
+  // added or deleted, never edited: editing its config would invalidate the runs filed under
+  // it.
   const isUser = model.origin === 'user'
-  const showActions = isUser && (onEdit || onDelete)
+  const showDelete = isUser && onDelete
   return (
-    <div className={`mcard${open ? ' open' : ''}`}>
+    <div
+      className={`mcard${open ? ' open' : ''}${highlighted ? ' revealed' : ''}`}
+      id={highlighted ? 'mcard-revealed' : undefined}
+    >
       <button
         type="button"
         className="mcard-face"
@@ -569,20 +566,32 @@ function ModelCard({
         </div>
         <ModelSpecs model={model} />
       </button>
-      {/* Actions sit outside the face button (a button cannot nest buttons). A user model is
-          editable and deletable; a base model is read-only, like a built-in workload. */}
-      {showActions && (
+      {/* The delete control sits outside the face button (a button cannot nest buttons): a
+          trash icon on a user-added card. A base model is read-only, like a built-in
+          workload. There is no edit — a model is added or deleted, never changed in place. */}
+      {showDelete && (
         <div className="mcard-actions">
-          {onEdit && (
-            <button type="button" className="mcard-action" aria-label="Edit model" onClick={() => onEdit(model.name)}>
-              Edit
-            </button>
-          )}
-          {onDelete && (
-            <button type="button" className="mcard-action danger" aria-label="Delete model" onClick={() => onDelete(model.name)}>
-              Delete
-            </button>
-          )}
+          <button
+            type="button"
+            className="mcard-trash"
+            aria-label="Delete model"
+            title="Delete this model"
+            onClick={() => onDelete(model.name)}
+          >
+            <svg
+              width="15"
+              height="15"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="1.9"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              aria-hidden="true"
+            >
+              <path d="M3 6h18M8 6V4a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v2m2 0v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6M10 11v6M14 11v6" />
+            </svg>
+          </button>
         </div>
       )}
       {open && <div className="mcard-detail">{renderConfig(config)}</div>}

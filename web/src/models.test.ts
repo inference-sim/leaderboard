@@ -251,22 +251,14 @@ describe('validateModel', () => {
       expect(JSON.parse(String(init?.body))).toEqual(submission)
       return jsonResponse({ ok: true, canonical_name: 'acme/my-model', moe: false, provider: '', issues: [] })
     }) as typeof fetch
-    const v = await validateModel(submission, null, fakeFetch)
+    const v = await validateModel(submission, fakeFetch)
     expect(v.ok).toBe(true)
     expect(v.canonical_name).toBe('acme/my-model')
   })
 
-  it('names the edited model so the collision check excludes it', async () => {
-    const fakeFetch = (async (url) => {
-      expect(String(url)).toBe('/api/models/validate?name=acme%2Fmy-model')
-      return jsonResponse({ ok: true, canonical_name: 'acme/my-model', moe: false, provider: '', issues: [] })
-    }) as typeof fetch
-    await validateModel(submission, 'acme/my-model', fakeFetch)
-  })
-
   it('throws the server {error} on a bad request', async () => {
     const fakeFetch = (async () => jsonResponse({ error: 'could not read the model submission' }, 400)) as typeof fetch
-    await expect(validateModel(submission, null, fakeFetch)).rejects.toThrow(/could not read/)
+    await expect(validateModel(submission, fakeFetch)).rejects.toThrow(/could not read/)
   })
 })
 
@@ -277,21 +269,12 @@ describe('saveModel', () => {
       expect(init?.method).toBe('POST')
       return jsonResponse({ ok: true, canonical_name: 'acme/my-model', moe: false, provider: '', issues: [] })
     }) as typeof fetch
-    await saveModel(submission, null, fakeFetch)
-  })
-
-  it('PUTs to /api/models?name= to edit an existing model', async () => {
-    const fakeFetch = (async (url, init) => {
-      expect(String(url)).toBe('/api/models?name=acme%2Fmy-model')
-      expect(init?.method).toBe('PUT')
-      return jsonResponse({ ok: true, canonical_name: 'acme/my-model', moe: false, provider: '', issues: [] })
-    }) as typeof fetch
-    await saveModel(submission, 'acme/my-model', fakeFetch)
+    await saveModel(submission, fakeFetch)
   })
 
   it('throws the server {error} on a collision (409)', async () => {
-    const fakeFetch = (async () => jsonResponse({ error: 'a model named "acme/my-model" already exists' }, 409)) as typeof fetch
-    await expect(saveModel(submission, null, fakeFetch)).rejects.toThrow(/already exists/)
+    const fakeFetch = (async () => jsonResponse({ error: 'a model already occupies the directory "my-model"' }, 409)) as typeof fetch
+    await expect(saveModel(submission, fakeFetch)).rejects.toThrow(/already occupies/)
   })
 })
 
