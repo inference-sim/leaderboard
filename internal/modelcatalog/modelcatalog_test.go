@@ -10,7 +10,7 @@ import (
 const catalogRoot = "testdata/catalog"
 
 func TestConfigReturnsProvenanceAndPrettyConfig(t *testing.T) {
-	d, err := Config(catalogRoot, "qwen/qwen3-30b-a3b")
+	d, err := Config(catalogRoot, "", "qwen/qwen3-30b-a3b")
 	if err != nil {
 		t.Fatalf("Config: %v", err)
 	}
@@ -35,7 +35,7 @@ func TestConfigReturnsProvenanceAndPrettyConfig(t *testing.T) {
 }
 
 func TestConfigModelWithoutConfigJSONHasEmptyConfig(t *testing.T) {
-	d, err := Config(catalogRoot, "someorg/dense-no-config")
+	d, err := Config(catalogRoot, "", "someorg/dense-no-config")
 	if err != nil {
 		t.Fatalf("Config: %v", err)
 	}
@@ -48,7 +48,7 @@ func TestConfigModelWithoutConfigJSONHasEmptyConfig(t *testing.T) {
 }
 
 func TestConfigUnknownNameIsNotFound(t *testing.T) {
-	_, err := Config(catalogRoot, "acme/does-not-exist")
+	_, err := Config(catalogRoot, "", "acme/does-not-exist")
 	if !errors.Is(err, ErrNotFound) {
 		t.Fatalf("Config unknown name error = %v, want ErrNotFound", err)
 	}
@@ -60,7 +60,7 @@ func TestConfigUnknownNameIsNotFound(t *testing.T) {
 // multimodal model, as llama-4-scout is), a malformed entry with no org prefix (skipped),
 // and a dense model with no config.json (listed, dense).
 func TestListReadsNamesAndMoE(t *testing.T) {
-	got, err := List(filepath.Join("testdata", "catalog"))
+	got, err := List(filepath.Join("testdata", "catalog"), "")
 	if err != nil {
 		t.Fatalf("List: %v", err)
 	}
@@ -90,7 +90,7 @@ func TestListReadsNamesAndMoE(t *testing.T) {
 // multimodal model like llama-4-scout) keeps hidden_size and its expert key under
 // text_config, and both must resolve.
 func TestListDerivesSpec(t *testing.T) {
-	got, err := List(filepath.Join("testdata", "catalog"))
+	got, err := List(filepath.Join("testdata", "catalog"), "")
 	if err != nil {
 		t.Fatalf("List: %v", err)
 	}
@@ -116,8 +116,43 @@ func TestListDerivesSpec(t *testing.T) {
 	}
 }
 
+// A model whose directory name is present in the user-models store is tagged "user"; every
+// other model is "base". Membership is by directory name, matching how the boot overlay
+// copies <user-models>/<dir> onto <catalog>/models/<dir>.
+func TestListMarksUserSource(t *testing.T) {
+	userDir := filepath.Join("testdata", "user-models")
+	got, err := List(filepath.Join("testdata", "catalog"), userDir)
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	origin := make(map[string]string, len(got))
+	for _, m := range got {
+		origin[m.Name] = m.Origin
+	}
+	if origin["qwen/qwen3-30b-a3b"] != "user" {
+		t.Errorf("qwen3-30b-a3b source = %q, want user (it is in the user store)", origin["qwen/qwen3-30b-a3b"])
+	}
+	if origin["meta-llama/llama-3.1-8b-instruct"] != "base" {
+		t.Errorf("llama-3.1-8b-instruct source = %q, want base", origin["meta-llama/llama-3.1-8b-instruct"])
+	}
+}
+
+// An empty user-store path (local dev without a store, or a fresh deploy) marks every model
+// base rather than erroring.
+func TestListNoUserStoreMarksAllBase(t *testing.T) {
+	got, err := List(filepath.Join("testdata", "catalog"), "")
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	for _, m := range got {
+		if m.Origin != "base" {
+			t.Errorf("%s source = %q, want base when there is no user store", m.Name, m.Origin)
+		}
+	}
+}
+
 func TestListEmptyRootIsError(t *testing.T) {
-	if _, err := List(""); err == nil {
+	if _, err := List("", ""); err == nil {
 		t.Fatal("expected an error for an empty catalog root, got nil")
 	}
 }
@@ -125,7 +160,7 @@ func TestListEmptyRootIsError(t *testing.T) {
 func TestListMissingModelsDirIsError(t *testing.T) {
 	// A root that exists but has no models/ subdirectory: a misconfiguration to surface,
 	// not an empty list.
-	if _, err := List(filepath.Join("testdata", "empty-root")); err == nil {
+	if _, err := List(filepath.Join("testdata", "empty-root"), ""); err == nil {
 		t.Fatal("expected an error when models/ is missing, got nil")
 	}
 }
