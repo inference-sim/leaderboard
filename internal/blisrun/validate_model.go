@@ -58,9 +58,32 @@ func (r *Runner) ValidateModel(baseCatalogRoot, dir, canonicalName, modelYAML, c
 		if ctx.Err() == context.DeadlineExceeded {
 			return fmt.Errorf("blis did not finish validating the model within %s", specValidateTimeout)
 		}
-		return fmt.Errorf("blis rejected the model:\n%s", tail(strings.TrimSpace(stderr.String())))
+		s := stderr.String()
+		// A GPU-capacity error means the model loaded and blis then found the probe's single
+		// GPU too small. That is a sizing choice (hardware and parallelism are picked in
+		// Declare-a-run), not a model defect, so the model passes validation.
+		if modelLoadsButDoesNotFit(s) {
+			return nil
+		}
+		return fmt.Errorf("blis rejected the model:\n%s", tail(strings.TrimSpace(s)))
 	}
 	return nil
+}
+
+// modelLoadsButDoesNotFit reports whether a blis failure is a GPU-capacity/sizing error rather
+// than a model defect. blis computes a model's memory footprint only after it has loaded the
+// model, so these signatures mean the model is valid and merely needs more or larger GPUs than
+// the single-GPU probe — a Declare-a-run decision, not an onboarding failure.
+func modelLoadsButDoesNotFit(stderr string) bool {
+	for _, sig := range []string{
+		"exceeds available GPU memory",
+		"Minimum GPUs required per instance",
+	} {
+		if strings.Contains(stderr, sig) {
+			return true
+		}
+	}
+	return false
 }
 
 // stageCatalog populates dst with the base catalog copied verbatim and the candidate model

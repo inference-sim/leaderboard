@@ -69,6 +69,9 @@ interface Props {
   onValidate: () => void
   onSave: () => void
   onCancel: () => void
+  /** Delete the model being edited. Present only in edit mode (a new model has nothing to
+   * delete); the parent gates the actual removal behind a confirm. */
+  onDelete?: () => void
 }
 
 /** A small upload glyph (arrow into a tray) for the Upload buttons. */
@@ -129,6 +132,7 @@ export function ModelEditor({
   onValidate,
   onSave,
   onCancel,
+  onDelete,
 }: Props) {
   const saveDisabled = !verdict?.ok || saving
   const set = (key: keyof ModelDraft, value: string) => onChange({ ...draft, [key]: value })
@@ -311,6 +315,11 @@ export function ModelEditor({
         {saveError && <p className="issue">{saveError}</p>}
 
         <div className="editor-actions">
+          {editingName && onDelete && (
+            <button type="button" className="danger-ghost" onClick={onDelete}>
+              Delete model
+            </button>
+          )}
           <button type="button" className="ghost" onClick={onCancel}>
             Cancel
           </button>

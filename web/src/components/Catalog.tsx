@@ -367,6 +367,15 @@ function ModelsPanel() {
           onValidate={onValidate}
           onSave={onSave}
           onCancel={closeEditor}
+          onDelete={
+            editing.name
+              ? () => {
+                  const name = editing.name
+                  closeEditor()
+                  setPendingDelete(name)
+                }
+              : undefined
+          }
         />
       )}
     </>

@@ -162,4 +162,16 @@ describe('ModelEditor', () => {
   it('surfaces a save error', () => {
     expect(render({ saveError: 'the server is down' })).toContain('the server is down')
   })
+
+  it('offers Delete only when editing an existing model', () => {
+    // Adding a new model: nothing to delete.
+    expect(render({ editingName: null, onDelete: noop })).not.toContain('Delete model')
+    // Editing: the Delete action is present.
+    const editing = render({
+      editingName: 'acme/my-model',
+      draft: { ...emptyModelDraft(), dir: 'my-model' },
+      onDelete: noop,
+    })
+    expect(editing).toContain('Delete model')
+  })
 })

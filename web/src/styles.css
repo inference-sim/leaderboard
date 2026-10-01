@@ -4781,22 +4781,39 @@ button.danger {
   gap: 10px;
 }
 
-.modal-wide .editor-actions .ghost {
+/* The first footer action is pushed to the left: Delete when editing, else Cancel. The rest
+ * (Cancel/Validate/Save) ride the right edge. */
+.modal-wide .editor-actions > button:first-child {
   margin-right: auto;
+}
+
+.modal-wide .editor-actions .ghost,
+.modal-wide .editor-actions .danger-ghost {
   padding: 8px 12px;
   border: 1px solid transparent;
   border-radius: 999px;
   background: none;
-  color: var(--muted);
   font-family: var(--font-sans);
   font-size: 13.5px;
   cursor: pointer;
   transition: color 0.12s, border-color 0.12s;
 }
 
+.modal-wide .editor-actions .ghost {
+  color: var(--muted);
+}
+
 .modal-wide .editor-actions .ghost:hover {
   color: var(--ink);
   border-color: var(--line-strong);
+}
+
+.modal-wide .editor-actions .danger-ghost {
+  color: var(--crit-ink);
+}
+
+.modal-wide .editor-actions .danger-ghost:hover {
+  border-color: var(--crit-line);
 }
 
 .modal-wide .editor-actions .secondary {

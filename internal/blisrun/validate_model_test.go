@@ -40,6 +40,30 @@ func TestStageCatalogOverlaysCandidateOnBase(t *testing.T) {
 	}
 }
 
+// A "does not fit on this hardware / needs N GPUs" error means blis loaded the model and then
+// its memory calculation found the probe's single GPU too small — a deployment-sizing matter
+// decided in Declare-a-run, not a model defect. So the smoke test must treat it as a pass.
+func TestModelLoadsButDoesNotFit(t *testing.T) {
+	fits := `time="..." level=fatal msg="--latency-model: KV capacity auto-calculation failed: ` +
+		`CalculateKVBlocks: model overhead (127.93 GiB = 119.78 weights + 8.00 activation + 0.15 ` +
+		`non-torch + 0.00 lora-adapter-reservation) exceeds available GPU memory (72.00 GiB = 80.0 ` +
+		`GiB × 90% util × 1 GPUs). Minimum GPUs required per instance: 2"`
+	if !modelLoadsButDoesNotFit(fits) {
+		t.Error("a GPU-capacity error should be recognised as the model loading but not fitting")
+	}
+
+	// A genuine model defect (a parse/architecture failure) is not a sizing error.
+	for _, real := range []string{
+		`level=fatal msg="failed to parse config.json: unexpected end of JSON input"`,
+		`level=fatal msg="unsupported architecture \"MadeUpForCausalLM\""`,
+		"",
+	} {
+		if modelLoadsButDoesNotFit(real) {
+			t.Errorf("a non-sizing error must not be treated as a pass: %q", real)
+		}
+	}
+}
+
 func mustWrite(t *testing.T, path, body string) {
 	t.Helper()
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
