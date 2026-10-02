@@ -169,8 +169,8 @@ describe('ModelsList provenance', () => {
     )
     // The one user model's card carries the tint class; the base card does not.
     expect(html.match(/mcard-user/g)).toHaveLength(1)
-    // Hovering it explains the provenance (a native title), rather than a persistent tag.
-    expect(html).toContain('title="Added by a user')
+    // Hovering it explains the provenance (a styled data-tip tooltip), rather than a tag.
+    expect(html).toContain('data-tip="Added by a user')
   })
 
   it('offers a Delete control only on user-added cards, and never an Edit', () => {

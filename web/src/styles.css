@@ -503,35 +503,20 @@ code {
 }
 
 /*
- * No scroll frame around the table: it grows to its full height and rides the page's own
- * scroll, so it reads as the page's main content rather than a cramped inner widget. The
- * wrapper is deliberately NOT an overflow scroll container — an `overflow` here would
- * capture the sticky `thead` and pin it to this box instead of letting it freeze against
- * the viewport (see the sticky header rules below). The cost is that a table wider than the
- * content column scrolls the whole page sideways rather than an inner frame; the first
- * column pins left through that scroll (its `left: 0` sticky now anchors to the page), so
- * the deployment stays in view. The table carries its own panel ground, since there is no
- * frame left to supply it — the header cells are opaque so scrolled rows never show through.
- */
-.tscroll {
-  /* intentionally empty — see the note above on why this must not scroll */
-}
-
-/*
- * The exception: the KV cache group adds four columns, which push the table past the page's
- * content column. When it is shown the wrapper becomes a scroll frame — a bounded box that
- * scrolls in both axes — so the wide table stays within the margin and both the header and the
- * leading columns freeze against the frame:
- *   - overflow: auto both scrolls the extra width horizontally and, with the max-height below,
+ * The table scrolls inside its own frame — a bounded box that scrolls in both axes — so a
+ * readout wider or taller than the content column stays within the page margin and gets its
+ * own scrollbars, instead of cropping off-screen and relying on the whole page to scroll
+ * sideways (which left the right-hand columns unreachable on a narrow window):
+ *   - overflow: auto scrolls the extra width horizontally and, with the max-height below,
  *     scrolls the rows vertically inside the frame;
  *   - max-height turns the frame into a stable viewport, so the sticky header (thead) freezes at
- *     its top and the sticky first column(s) (.lft / .lcol) freeze at its left, instead of
- *     riding the page — an auto-height overflow box scrolls away with the page and takes the
- *     sticky header with it, which is why the header did not stay put before.
- * This is confined to the wide KV view; the default table keeps riding the page with its header
- * frozen against the viewport (see the empty .tscroll note above).
+ *     its top and the sticky leading column(s) (.lft / .lcol) freeze at its left. Without the
+ *     bounded height the box would grow to the full table and the sticky header would scroll
+ *     away with the page rather than staying put.
+ * The table carries its own panel ground (the header cells are opaque) so scrolled rows never
+ * show through.
  */
-.tscroll-x {
+.tscroll {
   overflow: auto;
   /* Roughly a viewport tall, so a long table scrolls inside the frame under a frozen header
    * rather than growing without bound. dvh tracks the mobile URL bar; vh is the fallback. */
@@ -548,7 +533,7 @@ code {
  * still fills the frame on the off chance the content is narrower than it. Readability over real
  * estate: reach the extra columns by scrolling, never by crushing the ones already there.
  */
-.tscroll-x table.readout {
+.tscroll table.readout {
   width: max-content;
   min-width: 100%;
 }

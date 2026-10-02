@@ -239,35 +239,29 @@ describe('ReadoutTable, single-model workload (mainW: one model, three accelerat
   })
 })
 
-describe('ReadoutTable, KV cache metrics are hidden behind a toggle (§5.2)', () => {
+describe('ReadoutTable, KV cache metrics are always shown', () => {
   const html = renderToStaticMarkup(<ReadoutTable workload={mainW} models={[]} />)
 
-  it('offers a "Show KV cache metrics" toggle in the table tools', () => {
-    expect(html).toContain('Show KV cache metrics')
-    expect(html).toMatch(/aria-label="Show KV cache metrics"/)
-    // aria-pressed reflects the off state, so a screen reader hears it as a toggle.
-    expect(html).toMatch(/aria-pressed="false"/)
+  it('offers no KV cache toggle: the columns are always on', () => {
+    expect(html).not.toContain('KV cache metrics')
   })
 
-  it('renders none of the KV columns on load, so the default readout is unchanged', () => {
+  it('renders all four KV columns, so the group is part of the readout', () => {
     for (const label of ['Cache hit', 'Preempt rate', 'KV alloc fails', 'KV thrash'])
-      expect(html).not.toContain(label)
-    // The uppercased "KV" group header is the colgroup cell text (raw key "kv"); absent by default.
-    expect(html).not.toMatch(/scope="colgroup"[^>]*>kv</)
+      expect(html).toContain(label)
+    // The uppercased "KV" group header is the colgroup cell text (raw key "kv").
+    expect(html).toMatch(/scope="colgroup"[^>]*>kv</)
   })
 
-  it('leaves the table wrapper a non-scroll container by default, so the header freezes to the viewport', () => {
-    // tscroll-x (the horizontal scroll frame) is added only with the wide KV group; without it
-    // the wrapper stays the plain .tscroll that keeps the sticky header against the viewport.
+  it('wraps the table in a scroll frame so a wide readout scrolls in place, not off-screen', () => {
     expect(html).toMatch(/class="tscroll"/)
-    expect(html).not.toContain('tscroll-x')
   })
 
-  it('keeps the four KV columns out of every body row while hidden', () => {
-    // Each data row renders only the visible numeric columns: deployment + 10 = 11 cells,
-    // never the 4 KV cells. (A sweep would add a Load cell; mainW is a single load.)
+  it('renders the four KV cells in every body row', () => {
+    // Each data row renders deployment + 10 base numeric columns + 4 KV = 15 cells.
+    // (A sweep would add a Load cell; mainW is a single load.)
     for (const row of tbodyRows(html)) {
-      expect(cellsOfRow(row)).toHaveLength(11)
+      expect(cellsOfRow(row)).toHaveLength(15)
     }
   })
 })

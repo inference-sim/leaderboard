@@ -527,7 +527,9 @@ function ModelCard({
     <div
       className={`mcard${open ? ' open' : ''}${isUser ? ' mcard-user' : ''}${highlighted ? ' revealed' : ''}`}
       id={highlighted ? 'mcard-revealed' : undefined}
-      title={
+      // A styled hover/focus tooltip (data-tip, wired globally by initTooltips) explaining the
+      // blue tint, rather than a native title, which does not show reliably.
+      data-tip={
         isUser
           ? 'Added by a user. It persists across restarts and takes precedence over the base catalog if an update ships the same name.'
           : undefined

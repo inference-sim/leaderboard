@@ -112,10 +112,9 @@ export const COLUMNS: Column[] = [
     value: (r) => r.metrics.preemption_count,
     digits: 0,
   },
-  // The KV cache group. Hidden by default and appended to the right when the reader turns
-  // it on (ReadoutTable's showKV), so it never crowds the default performance readout. Each
-  // column carries the same "no automatic best" contract as the rest — higherIsBetter only
-  // orients the disqualified band's would-be-rank arrow (E5).
+  // The KV cache group, appended to the right of the health group. Each column carries the
+  // same "no automatic best" contract as the rest — higherIsBetter only orients the
+  // disqualified band's would-be-rank arrow (E5).
   {
     key: 'cache_hit_rate',
     label: 'Cache hit',
@@ -163,19 +162,8 @@ export const COLUMNS: Column[] = [
 ]
 
 /** The numeric columns, i.e. everything the deployment cell does not render itself. The
- *  KV columns are included so sortRecords and wouldBeRank resolve them uniformly; only
- *  their rendering is gated (see visibleColumns). */
+ *  KV columns are included so sortRecords and wouldBeRank resolve them uniformly. */
 export const NUMERIC_COLUMNS = COLUMNS.filter((c) => c.key !== 'deployment')
-
-/**
- * The columns the table renders, gated by the KV toggle. Off (the default) drops the `kv`
- * group so the readout is exactly the performance table; on returns every column, the KV
- * ones appended to the right. Sorting still resolves against the full COLUMNS/NUMERIC_COLUMNS,
- * so this governs rendering only, never which keys are sortable.
- */
-export function visibleColumns(showKV: boolean): Column[] {
-  return showKV ? COLUMNS : COLUMNS.filter((c) => c.group !== 'kv')
-}
 
 /**
  * The grouped top header row's colspans, built from a run of columns' `group`. Takes the

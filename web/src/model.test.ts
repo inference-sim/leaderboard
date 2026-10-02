@@ -21,7 +21,6 @@ import {
   servedFraction,
   sortRecords,
   varyingDeploymentFields,
-  visibleColumns,
   wouldBeRank,
 } from './model'
 
@@ -382,7 +381,7 @@ describe('COLUMNS', () => {
   it('groups headers as candidate, latency, throughput, health, kv', () => {
     const seen: string[] = []
     for (const c of COLUMNS) if (seen[seen.length - 1] !== c.group) seen.push(c.group)
-    // KV is last so it appends to the right when toggled on, past the default readout.
+    // KV is last so it appends to the right of the health group.
     expect(seen).toEqual(['candidate', 'latency', 'throughput', 'health', 'kv'])
   })
 
@@ -457,18 +456,9 @@ describe('preemptionRate', () => {
   })
 })
 
-describe('groupedHeaders (the grouped top header row, over the visible columns)', () => {
-  it('collapses runs of the same group into colspans, KV hidden by default', () => {
-    expect(groupedHeaders(visibleColumns(false), false)).toEqual([
-      { group: 'candidate', span: 2 },
-      { group: 'latency', span: 5 },
-      { group: 'throughput', span: 2 },
-      { group: 'health', span: 2 },
-    ])
-  })
-
-  it('appends a KV span when the KV columns are visible', () => {
-    expect(groupedHeaders(visibleColumns(true), false)).toEqual([
+describe('groupedHeaders (the grouped top header row, over all columns)', () => {
+  it('collapses runs of the same group into colspans, KV always present on the right', () => {
+    expect(groupedHeaders(COLUMNS, false)).toEqual([
       { group: 'candidate', span: 2 },
       { group: 'latency', span: 5 },
       { group: 'throughput', span: 2 },
@@ -478,43 +468,19 @@ describe('groupedHeaders (the grouped top header row, over the visible columns)'
   })
 
   it('prepends a blank leading cell for the Load column of a sweep', () => {
-    const headers = groupedHeaders(visibleColumns(false), true)
+    const headers = groupedHeaders(COLUMNS, true)
     expect(headers[0]).toEqual({ group: '', span: 1 })
   })
 })
 
 describe('groupStartKeys (the columns a group separator sits left of)', () => {
-  it('marks the first column of each group after candidate, tracking the visible set', () => {
-    expect([...groupStartKeys(visibleColumns(false))]).toEqual([
+  it('marks the first column of each group after candidate, including the KV boundary', () => {
+    expect([...groupStartKeys(COLUMNS)]).toEqual([
       'ttft_p99_ms',
       'tokens_per_sec',
       'served',
-    ])
-  })
-
-  it('adds the KV group boundary when KV is visible', () => {
-    expect(groupStartKeys(visibleColumns(true)).has('cache_hit_rate')).toBe(true)
-  })
-})
-
-describe('visibleColumns', () => {
-  it('drops the KV group when the toggle is off (the default readout)', () => {
-    const keys = visibleColumns(false).map((c) => c.key)
-    expect(keys).not.toContain('cache_hit_rate')
-    expect(keys).not.toContain('kv_thrashing_rate')
-    // Everything else is untouched, so the default table is exactly as before.
-    expect(visibleColumns(false)).toEqual(COLUMNS.filter((c) => c.group !== 'kv'))
-  })
-
-  it('appends the KV columns to the right when the toggle is on', () => {
-    const keys = visibleColumns(true).map((c) => c.key)
-    expect(keys.slice(-4)).toEqual([
       'cache_hit_rate',
-      'preemption_rate',
-      'kv_allocation_failures',
-      'kv_thrashing_rate',
     ])
-    expect(visibleColumns(true)).toEqual(COLUMNS)
   })
 })
 

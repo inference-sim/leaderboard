@@ -5,7 +5,9 @@ import { rowId } from '../liverun'
 import type { RevealTarget } from '../liverun'
 import { formatCount, formatMs, formatNumber, formatPercent } from '../format'
 import {
+  COLUMNS,
   LOAD_COLUMN,
+  NUMERIC_COLUMNS,
   deploymentSpec,
   distinctHardware,
   distinctModels,
@@ -15,7 +17,6 @@ import {
   preemptionRate,
   servedFraction,
   varyingDeploymentFields,
-  visibleColumns,
 } from '../model'
 import type { Column, SortSpec } from '../model'
 import type { SloTargets } from '../slo'
@@ -125,14 +126,12 @@ export function ReadoutTable({
   // The run_id of the row currently pulsing from a reveal, or null. Local to the table so
   // the highlight lives and dies with the row, not with App's reveal request.
   const [revealedKey, setRevealedKey] = useState<string | null>(null)
-  // Whether the KV cache column group is shown. Hidden on load so it never crowds the
-  // default performance readout; a TableTools toggle turns it on and the columns append to
-  // the right (§5.2). Local to the table, like the reproduce toggles.
-  const [showKV, setShowKV] = useState(false)
-  const visibleCols = useMemo(() => visibleColumns(showKV), [showKV])
-  const numericCols = useMemo(() => visibleCols.filter((c) => c.key !== 'deployment'), [visibleCols])
-  // The group-separator boundaries, tracking the visible set so the rule appears left of the
-  // KV group only when KV is shown. A shared helper the header and every body cell read, so
+  // Every column is shown, including the KV cache group, which appends to the right of the
+  // health group. The table scrolls horizontally in its own frame (see .tscroll in
+  // styles.css), so the extra columns are reached by scrolling, never crowded out.
+  const visibleCols = COLUMNS
+  const numericCols = NUMERIC_COLUMNS
+  // The group-separator boundaries. A shared helper the header and every body cell read, so
   // separators cannot drift between them.
   const starts = useMemo(() => groupStartKeys(visibleCols), [visibleCols])
   const sep = (key: string): string | undefined => (starts.has(key) ? 'gsep' : undefined)
@@ -209,16 +208,6 @@ export function ReadoutTable({
   // no handler simply cannot sort, which is fine for the static render tests.
   const toggle = onSort ?? (() => {})
   const headerGroups = groupedHeaders(visibleCols, showLoad)
-  // Turning the KV group off drops any sort tiers keyed on a KV column, so a hidden column
-  // never silently drives the sort — and, since the sort is owned by the section and also
-  // orders the Compare panel, the two can never disagree. A KV tier can only exist while KV
-  // is shown (its header is the only way to add one), so this fires exactly when needed.
-  const toggleKV = () => {
-    if (showKV) {
-      for (const s of sort) if (KV_COLUMN_KEYS.has(s.key)) onRemoveSort?.(s.key)
-    }
-    setShowKV((on) => !on)
-  }
 
   return (
     <>
@@ -234,21 +223,17 @@ export function ReadoutTable({
             onRemoveSort={onRemoveSort ?? (() => {})}
             repro={repro}
             showControls={true}
-            showKV={showKV}
-            onToggleKV={toggleKV}
           />
 
-          {/* With a Load column present the table freezes both the Load and Deployment columns
-              on horizontal scroll (hasload): they stack at the left edge, so the reader keeps the
-              load level and the candidate in view while the metrics scroll. A gray separator sits
-              between them (see .hasload .lft in styles.css).
-
-              tscroll-x is added only when the KV group is shown: those four extra columns push
-              the table past the page's content column, so it gets its own horizontal scrollbar
-              and stays within the margin (the frozen columns pin within that frame). The default
-              table is not a scroll container, so its header keeps freezing against the viewport —
-              see the .tscroll note in styles.css. */}
-          <div className={showKV ? 'tscroll tscroll-x' : 'tscroll'}>
+          {/* The table scrolls in its own frame (.tscroll): a wide readout stays within the
+              page margin and gets a horizontal scrollbar right under it, rather than cropping
+              off-screen and relying on the whole page to scroll sideways. The header freezes at
+              the top of the frame and the leading columns at its left. With a Load column present
+              the table freezes both the Load and Deployment columns (hasload): they stack at the
+              left edge, so the reader keeps the load level and the candidate in view while the
+              metrics scroll. A gray separator sits between them (see .hasload .lft in
+              styles.css). */}
+          <div className="tscroll">
             <table className={showLoad ? 'readout hasload' : 'readout'}>
               <thead>
                 <tr className="grp">
@@ -435,27 +420,20 @@ function ReproControls({
 }
 
 /**
- * The bar above the table: the removable sort chips on the left, then the KV toggle and the
- * expand/collapse-all control on the right. Both right-side controls are always shown; each
- * expand/collapse button disables itself when it would be a no-op, so the pair also reads as
- * the resting state.
+ * The bar above the table: the removable sort chips on the left, then the expand/collapse-all
+ * control on the right. The right-side control is always shown; each expand/collapse button
+ * disables itself when it would be a no-op, so the pair also reads as the resting state.
  */
 function TableTools({
   sort,
   onRemoveSort,
   repro,
   showControls,
-  showKV,
-  onToggleKV,
 }: {
   sort: SortSpec[]
   onRemoveSort: (key: string) => void
   repro: ReturnType<typeof useReproToggles>
   showControls: boolean
-  /** Whether the KV cache column group is currently shown. */
-  showKV: boolean
-  /** Toggle the KV cache column group. */
-  onToggleKV: () => void
 }) {
   if (sort.length === 0 && !showControls) return null
   return (
@@ -463,18 +441,6 @@ function TableTools({
       <SortNote sort={sort} onRemove={onRemoveSort} />
       {showControls && (
         <div className="rowtools">
-          <button
-            type="button"
-            className="rowtool"
-            onClick={onToggleKV}
-            aria-pressed={showKV}
-            aria-label={`${showKV ? 'Hide' : 'Show'} KV cache metrics`}
-          >
-            <span className="car" aria-hidden="true">
-              {showKV ? '▾' : '▸'}
-            </span>
-            {showKV ? 'Hide KV cache metrics' : 'Show KV cache metrics'}
-          </button>
           <ReproControls
             allOpen={repro.allOpen}
             noneOpen={repro.noneOpen}
@@ -486,10 +452,6 @@ function TableTools({
     </div>
   )
 }
-
-/** The KV column keys, so the KV toggle can drop any sort tier keyed on one when it hides
- *  the group (see toggleKV). Derived from the columns, not hand-kept. */
-const KV_COLUMN_KEYS = new Set(visibleColumns(true).filter((c) => c.group === 'kv').map((c) => c.key))
 
 function HeaderCell({
   col,
