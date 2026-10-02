@@ -36,43 +36,45 @@ go/src/inference-sim/
 BLIS is a CPU-only, deterministic discrete-event simulator — same flags and seed
 produce the same numbers, so results are reproducible without GPUs.
 
+### Which blis and blis-catalog versions to use
+
+This repo pins the two upstream versions it is built and tested against in the root
+[`.env`](.env) (currently `blis` at `main`, `blis-catalog` at `0.1.1`), along with the
+repo URL for each. That file is the single source of truth, shared by both audiences: a
+given leaderboard commit declares its known-good pair there, and bumping a value updates
+both of the paths below at once.
+
+The leaderboard never installs blis or blis-catalog itself. How you get them depends on
+how you run the leaderboard:
+
+- **From source.** You clone and build blis and blis-catalog yourself; the repo only
+  hands you the commands (see [Getting a `blis` binary](#getting-a-blis-binary) and the
+  local build under [Container image and releases](#container-image-and-releases)). Use
+  the pinned refs so the dependencies match the leaderboard you checked out.
+- **From the GHCR image.** The release workflow, running against the leaderboard commit
+  being released, checks out those same refs and bundles both into the image. So
+  `ghcr.io/inference-sim/leaderboard:<tag>` already contains a matching blis and
+  blis-catalog, and a deploy needs no separate install. The catalog is baked into the
+  image (`BLIS_CATALOG` points inside it), not supplied by a volume; only the user-added
+  model store is persisted on a PVC (see `LEADERBOARD_USER_MODELS`).
+
 ### Environment variables
 
 The pipeline and server are configured entirely through environment variables (a few
-also have an equivalent CLI flag, which wins when set). Declare them in your shell with
-`export NAME=value`; in a container with `ENV` / `docker run -e NAME=value`; and in the
-OpenShift deployment through the container's `env:` block (see
-`deploy/openshift/leaderboard.yaml`).
+also have an equivalent CLI flag, which wins when set). Rather than restate them here,
+the root [`.env`](.env) is the catalog: it lists every variable with its default, a
+one-line purpose, and which ones to leave alone. It holds working local defaults, so
+`set -a; source .env; set +a` exports a runnable local setup in one command.
 
-| Variable | Flag | Default | Purpose |
-|---|---|---|---|
-| `BLIS_CATALOG` | `--catalog` (blis) | *(none — required for any run)* | Path to a `blis-catalog` clone. `blis` has no default and no search path, so a run is refused without it. The server reads it at startup and every `blis` subprocess it spawns inherits it. |
-| `LEADERBOARD_RESULTS` | `-out` | `~/leaderboard-results` | Where `results/<group_id>/<run_id>.json` is read and written. Point it at the repo (`results`) for local dev, or a persistent volume in a deployment. |
-| `LEADERBOARD_USER_MODELS` | `-user-models` | `<out>/user-models` | The pristine store for models added through the web app, re-overlaid onto the catalog on each boot. |
-| `LEADERBOARD_MAX_UPLOAD_MB` | `-max-upload-mb` | ~1 GiB | Cap for a trace upload to `/api/traces`, in MiB. Raise it for large Weka/OTel corpora. |
-| `LEADERBOARD_VERSION` | *(env only)* | *(auto-detect, else `unknown`)* | Display-only override: the leaderboard build the web app reports. |
-| `BLIS_VERSION` | *(env only)* | *(auto-detect, else `unknown`)* | Display-only override: the `blis` build the app reports. |
-| `BLIS_CATALOG_VERSION` | *(env only)* | *(auto-detect, else `unknown`)* | Display-only override: the catalog version the app reports. |
+The paths (`BLIS_CATALOG`, `LEADERBOARD_RESULTS`, `LEADERBOARD_USER_MODELS`) must point
+at a persistent volume in a deployment, so a platform engineer overrides the `.env`
+defaults there: in a container with `ENV` / `docker run -e NAME=value`, and in OpenShift
+through the container's `env:` block (see `deploy/openshift/leaderboard.yaml`).
 
-The last three show as small text beside the project links in the web app's left nav rail
-(served at `GET /api/version`), stating which build of each dependency the running server is
-made of. Each value is free-form — a tag (`v1.2.3`), a commit (`abc1234`), a date, or any
-combination — and is shown **verbatim**.
-
-They resolve in order: **the env var wins** (set it to show a tag, or to correct a wrong
-auto-detect); otherwise the server **auto-detects** at startup —
-
-- `leaderboard` from the binary's embedded VCS stamp (`go build` from a git checkout records
-  it automatically; an image built from a tree with `.git` stripped has none, so set the env
-  var there — the OpenShift deployment does),
-- `blis` from the bundled checkout's `git HEAD` (the image ships blis's `.git`),
-- `catalog` from a `VERSION` file bundled with it (written by `deploy/openshift/build.sh`), or
-  its `git HEAD` for a local checkout that still has one;
-
-and failing both it shows `unknown`. Auto-detected or declared, these are **not verified** —
-nothing proves the string matches the artifact actually serving — so treat them as a label,
-not a guarantee. With no server at all (the static committed board), the links show without
-versions.
+One group is display-only: the web app's left nav rail shows each dependency's version
+(served at `GET /api/version`), auto-detected at startup and overridable with the
+`*_VERSION` vars in `.env`. These are declared-grade labels, not verified against the
+artifact actually serving.
 
 ### Getting a `blis` binary
 
@@ -92,7 +94,8 @@ the working directory. The model catalog is external and must be located explici
 repo. The leaderboard image bundles it; for a raw run, clone it once.
 
 ```bash
-git clone https://github.com/inference-sim/blis-catalog.git
+# ref pinned in the root .env (BLIS_CATALOG_REF)
+git clone --branch 0.1.1 https://github.com/inference-sim/blis-catalog.git
 export BLIS_CATALOG="$PWD/blis-catalog"
 cd ../inference-sim
 ./blis run --model qwen/qwen3-14b --hardware H100 --tp 1 \
@@ -127,14 +130,12 @@ Practical notes:
 
 ## Building and running the leaderboard
 
-Results are read and written under `$LEADERBOARD_RESULTS` (default
-`~/leaderboard-results`; `-out` overrides it). For local dev, point it at the repo so
-you can see the `results/` tree change with your edits: `export LEADERBOARD_RESULTS=results`,
-or just use the `make` targets, which set it for you. The container image and the
-OpenShift deployment set it to a persistent-volume path instead.
+Every environment variable the leaderboard needs lives in the root [`.env`](.env) with
+working local defaults (the catalog path, the results path, and the dependency pins).
+Export them all in one command, then build and run:
 
 ```bash
-export LEADERBOARD_RESULTS=results   # local dev: write into the repo tree (make sets this too)
+set -a; source .env; set +a   # export every var in .env; or use the make targets, which set the same
 make blis                    # build the upstream simulator (Go >= 1.24)
 make build                   # bin/leaderboard
 ./bin/leaderboard run -runs runs.yaml   # execute a run declaration -> $LEADERBOARD_RESULTS/<group_id>/<run_id>.json
@@ -145,6 +146,12 @@ make web-install             # npm ci
 make web-test                # Vitest over prototypes/results.json
 cd web && npm run dev        # view the tables
 ```
+
+The `.env` defaults keep local state in the repo tree: `BLIS_CATALOG` points at the
+sibling `../blis-catalog` clone, and results land under `./results` so the tree changes
+with your edits (`-out` overrides it). The container image and the OpenShift deployment
+override these to persistent-volume paths (see `deploy/openshift/leaderboard.yaml`), which
+is where a platform engineer sets the locations that must survive a restart.
 
 To declare and run candidates from the browser instead of the CLI, run the API and the
 dev server together — the "Declare a run" screen sends each candidate to the API, which
@@ -176,14 +183,20 @@ docker run -p 8080:8080 -v "$PWD/results:/app/results" \
 The volume matters: the image ships no results, and `/api/run` writes new records
 into `/app/results`, which is otherwise lost when the container stops.
 
-To build it locally, check out the upstream repo as `upstream/` first (the workflow
-does the same), then build:
+To build it locally, check the two bundled dependencies into the build context first,
+at the repos and refs the root `.env` pins. Sourcing it keeps them in step with the
+released image rather than hardcoding versions here:
 
 ```bash
-git clone https://github.com/jgchn/inference-sim upstream   # or symlink ../inference-sim
+source .env   # BLIS_REPO, BLIS_REF, BLIS_CATALOG_REPO, BLIS_CATALOG_REF
+git clone --branch "$BLIS_REF"         "$BLIS_REPO"         upstream
+git clone --branch "$BLIS_CATALOG_REF" "$BLIS_CATALOG_REPO" blis-catalog
 docker build -t leaderboard:dev .
 docker run -p 8080:8080 -v "$PWD/results:/app/results" leaderboard:dev
 ```
+
+The root `Dockerfile` copies both `upstream/` and `blis-catalog/` from the context, so
+both must be present before `docker build`.
 
 ### What the table will and will not tell you
 

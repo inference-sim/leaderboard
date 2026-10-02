@@ -21,10 +21,24 @@ jobs:
       - name: Check out leaderboard
         uses: actions/checkout@v4
 
+      # Single source of truth for the repos+refs this image bundles. The README reads
+      # the same root .env, so the image and the local-clone instructions cannot drift.
+      # actions/checkout wants an owner/repo slug, so strip the URL prefix off BLIS_REPO.
+      - name: Pin dependency versions
+        run: |
+          . ./.env
+          {
+            echo "BLIS_REF=$BLIS_REF"
+            echo "BLIS_CATALOG_REF=$BLIS_CATALOG_REF"
+            echo "BLIS_REPO_SLUG=${BLIS_REPO#https://github.com/}"
+            echo "BLIS_CATALOG_REPO_SLUG=${BLIS_CATALOG_REPO#https://github.com/}"
+          } >> "$GITHUB_ENV"
+
       - name: Check out blis (upstream)
         uses: actions/checkout@v4
         with:
-          repository: inference-sim/inference-sim
+          repository: ${{ env.BLIS_REPO_SLUG }}   # from root .env
+          ref: ${{ env.BLIS_REF }}
           path: upstream
           fetch-depth: 0                 # full .git — GitProvenance needs real history
           # If inference-sim/inference-sim is PRIVATE, the default GITHUB_TOKEN cannot read
@@ -39,7 +53,8 @@ jobs:
         # public, config-only — no history needed.
         uses: actions/checkout@v4
         with:
-          repository: inference-sim/blis-catalog
+          repository: ${{ env.BLIS_CATALOG_REPO_SLUG }}   # from root .env
+          ref: ${{ env.BLIS_CATALOG_REF }}
           path: blis-catalog
 
       - name: Set up QEMU
