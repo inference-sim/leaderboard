@@ -4974,24 +4974,6 @@ button.danger {
   border-radius: 999px;
 }
 
-/* The Add-a-model toast: the Compare pill's shape and shadow, filled with the accent and
- * carrying a plus glyph so it reads as the one primary action on the Models tab. */
-.addmodel-fab {
-  display: inline-flex;
-  align-items: center;
-  gap: 7px;
-  padding-left: 0.85rem;
-  font-weight: 600;
-  background: var(--accent);
-  color: #fff;
-  border-color: var(--accent);
-}
-
-.addmodel-fab:hover {
-  background: var(--accent-ink);
-  border-color: var(--accent-ink);
-}
-
 /* Accelerators as spec cards: one per distinct accelerator (alias groups collapsed). */
 .hw-grid {
   margin-top: 18px;
@@ -5365,15 +5347,28 @@ button.danger {
   z-index: 40;
 }
 .cmpbtn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
   font-family: var(--font-sans);
   font-size: 0.9rem;
-  padding: 0.55rem 1rem;
+  padding: 0.55rem 1rem 0.55rem 0.85rem;
   border-radius: 999px;
   border: 1px solid var(--line-strong);
   background: var(--panel);
   color: var(--ink);
   cursor: pointer;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.12);
+}
+
+.cmpico {
+  width: 17px;
+  height: 17px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
 }
 .cmpbtn.on {
   background: var(--mode);
