@@ -279,13 +279,14 @@ describe('saveModel', () => {
 })
 
 describe('deleteModel', () => {
-  it('DELETEs /api/models?name=', async () => {
+  it('DELETEs /api/models?name= and returns how many runs went with it', async () => {
     const fakeFetch = (async (url, init) => {
       expect(String(url)).toBe('/api/models?name=acme%2Fmy-model')
       expect(init?.method).toBe('DELETE')
-      return jsonResponse({ deleted: 'acme/my-model' })
+      return jsonResponse({ deleted: 'acme/my-model', runs_deleted: 3 })
     }) as typeof fetch
-    await deleteModel('acme/my-model', fakeFetch)
+    const result = await deleteModel('acme/my-model', fakeFetch)
+    expect(result.runs_deleted).toBe(3)
   })
 
   it('throws the server {error} when the model is read-only (403)', async () => {

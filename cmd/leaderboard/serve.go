@@ -366,6 +366,38 @@ func (s *server) writeResult(rec schema.Record) error {
 	return nil
 }
 
+// deleteRunsForModel removes every stored run whose candidate is the given model, so deleting
+// a user-added model does not leave its runs stranded on the leaderboard pointing at a model
+// that no longer exists. It returns how many runs were removed. A missing results directory
+// (or an unset outDir) removes nothing.
+func deleteRunsForModel(outDir, model string) (int, error) {
+	if outDir == "" {
+		return 0, nil
+	}
+	records, err := readResults(outDir)
+	if err != nil {
+		return 0, err
+	}
+	n := 0
+	for _, rec := range records {
+		if rec.Deployment.Model != model {
+			continue
+		}
+		// The record is stored at results/<group_id>/<run_id>.json, with an optional
+		// <run_id>.requests.json sidecar (as handleResultDelete removes them).
+		record := filepath.Join(outDir, rec.GroupID, rec.RunID+".json")
+		if err := os.Remove(record); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return n, fmt.Errorf("delete %s: %w", record, err)
+		}
+		sidecar := filepath.Join(outDir, rec.GroupID, rec.RunID+".requests.json")
+		if err := os.Remove(sidecar); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return n, fmt.Errorf("delete %s: %w", sidecar, err)
+		}
+		n++
+	}
+	return n, nil
+}
+
 // readResults reads every results/<group>/<run>.json under dir, skipping the
 // per-request sidecars. A missing directory is not an error: a fresh checkout has
 // no results yet and the page shows its empty state.

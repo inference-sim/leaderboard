@@ -209,16 +209,26 @@ export async function saveModel(
   return (await readModelResponse(res)) as ModelValidation
 }
 
-/** deleteModel removes a user model by its canonical name. The server refuses a base model
- * (403). */
-export async function deleteModel(name: string, fetchImpl: typeof fetch = fetch): Promise<void> {
+/** What DELETE /api/models returns: the deleted model and how many of its leaderboard runs
+ * were removed with it (a model's runs were produced against it, so they go together). */
+export interface ModelDeleteResult {
+  deleted: string
+  runs_deleted: number
+}
+
+/** deleteModel removes a user model by its canonical name, and with it any leaderboard runs
+ * that used the model. The server refuses a base model (403). */
+export async function deleteModel(
+  name: string,
+  fetchImpl: typeof fetch = fetch,
+): Promise<ModelDeleteResult> {
   let res: Response
   try {
     res = await fetchImpl(`/api/models?name=${encodeURIComponent(name)}`, { method: 'DELETE' })
   } catch {
     throw new Error(UNREACHABLE)
   }
-  await readModelResponse(res)
+  return (await readModelResponse(res)) as ModelDeleteResult
 }
 
 // ---------- Presentation helpers ----------

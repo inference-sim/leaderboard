@@ -35,8 +35,25 @@ func newModelServer(t *testing.T) *server {
 	return &server{
 		catalogRoot:   catalog,
 		userModelsDir: userStore,
+		outDir:        t.TempDir(),
 		validateModel: func(modelcatalog.Submission, string) error { return nil },
 	}
+}
+
+// writeResultFile drops a minimal result record at results/<group>/<run>.json for the given
+// model, so a test can assert what a model delete removes from the leaderboard.
+func writeResultFile(t *testing.T, outDir, group, run, model string) string {
+	t.Helper()
+	dir := filepath.Join(outDir, group)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(dir, run+".json")
+	body := fmt.Sprintf(`{"run_id":%q,"group_id":%q,"deployment":{"model":%q}}`, run, group, model)
+	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return path
 }
 
 func modelReq(method, target, body string) *http.Request {
@@ -168,6 +185,37 @@ func TestHandleModelDeleteUserModel(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(s.userModelsDir, "my-model")); !os.IsNotExist(err) {
 		t.Errorf("user model still in store after delete (err=%v)", err)
+	}
+}
+
+// Deleting a model also deletes the leaderboard runs that used it; runs for other models are
+// left alone.
+func TestHandleModelDeleteRemovesAssociatedRuns(t *testing.T) {
+	s := newModelServer(t)
+	s.routes().ServeHTTP(httptest.NewRecorder(), modelReq(http.MethodPost, "/api/models", createBody))
+
+	mine := writeResultFile(t, s.outDir, "g1", "r1", "acme/my-model")
+	other := writeResultFile(t, s.outDir, "g2", "r2", "meta/llama-base")
+
+	rr := httptest.NewRecorder()
+	s.routes().ServeHTTP(rr, httptest.NewRequest(http.MethodDelete, "/api/models?name=acme/my-model", nil))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("got %d, want 200 (%s)", rr.Code, rr.Body.String())
+	}
+	var got struct {
+		RunsDeleted int `json:"runs_deleted"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	if got.RunsDeleted != 1 {
+		t.Errorf("runs_deleted = %d, want 1", got.RunsDeleted)
+	}
+	if _, err := os.Stat(mine); !os.IsNotExist(err) {
+		t.Errorf("the model's run was not deleted (err=%v)", err)
+	}
+	if _, err := os.Stat(other); err != nil {
+		t.Errorf("a run for a different model was deleted: %v", err)
 	}
 }
 

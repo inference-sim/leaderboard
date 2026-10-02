@@ -136,7 +136,14 @@ func (s *server) handleModelDelete(w http.ResponseWriter, r *http.Request) {
 		httpError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]string{"deleted": name})
+	// A model's runs were produced against it, so they go with it: leaving them would strand
+	// rows on the leaderboard pointing at a model that no longer exists.
+	runs, err := deleteRunsForModel(s.outDir, name)
+	if err != nil {
+		httpError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"deleted": name, "runs_deleted": runs})
 }
 
 // resolveUserModel maps a canonical name to the user model's directory, or an HTTP error: a

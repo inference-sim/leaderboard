@@ -115,7 +115,7 @@ export function Catalog({
         ))}
       </div>
       {tab === 'models' ? (
-        <ModelsPanel />
+        <ModelsPanel onBoardChanged={onBoardChanged} />
       ) : tab === 'hardware' ? (
         <HardwarePanel />
       ) : (
@@ -151,7 +151,7 @@ type ConfigState =
 
 /** The Models tab body: the models BLIS can run, grouped by provider, each openable to reveal
  * its config.json in place. The Catalog page owns the heading and tab bar above it. */
-function ModelsPanel() {
+function ModelsPanel({ onBoardChanged }: { onBoardChanged?: () => void | Promise<void> }) {
   const [models, setModels] = useState<ModelInfo[] | null>(null)
   const [error, setError] = useState<string | null>(null)
   // Which model is open (only one at a time), and the fetched detail per model, cached so
@@ -277,11 +277,14 @@ function ModelsPanel() {
     setPendingDelete(null)
     setActionError(null)
     try {
-      await deleteModel(name)
+      const result = await deleteModel(name)
       if (expanded === name) setExpanded(null)
+      await refresh()
+      // Deleting the model also deleted its runs; reload the board so those rows leave the
+      // leaderboard without a manual refresh.
+      if (result.runs_deleted > 0) await onBoardChanged?.()
     } catch (e) {
       setActionError(e instanceof Error ? e.message : String(e))
-    } finally {
       await refresh()
     }
   }
@@ -333,7 +336,8 @@ function ModelsPanel() {
         onCancel={() => setPendingDelete(null)}
       >
         Delete <code className="mono">{pendingDelete}</code>? This removes the model you added
-        from the catalog and the picker. The base catalog is not affected. This cannot be undone.
+        from the catalog and the picker, and permanently deletes any leaderboard runs that used
+        it. The base catalog is not affected. This cannot be undone.
       </ConfirmDialog>
 
       {/* The Add-a-model trigger: a fixed bottom-right pill, like the board's Compare control.
