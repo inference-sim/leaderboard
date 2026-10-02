@@ -17,12 +17,15 @@
 #                             BLIS_CATALOG below).
 #   git on PATH               used for that provenance capture.
 #   writable /tmp             blis run/spec scratch files (emptyDir below).
-#   writable /data            results/<group_id>/<run_id>.json, workloads.yaml, and
-#                             the model catalog at /data/blis-catalog (the PVC
-#                             below); this is the only state that survives a
-#                             restart. Putting the catalog here makes it editable:
-#                             add a private model by `oc rsh` + writing
-#                             /data/blis-catalog/models/<name>/{config.json,model.yaml}.
+#   writable /data            results/<group_id>/<run_id>.json, workloads.yaml, the
+#                             model catalog at /data/blis-catalog, and the user-added
+#                             model store at /data/user-models (the PVC below); this is
+#                             the only state that survives a restart. Models are added
+#                             through the web app's Add-a-model form (or by `oc rsh` +
+#                             writing /data/user-models/<name>/{config.json,model.yaml}):
+#                             the store is the durable source of truth, re-overlaid onto
+#                             the catalog on every boot so a user model wins over a base
+#                             update on a name collision.
 #
 # There is no Dockerfile in this repo yet — build an image that lays the tree out
 # as above and set `.spec.template.spec.containers[0].image` to it. A multi-stage
@@ -105,9 +108,16 @@ spec:
             - |
               set -eu
               mkdir -p /data/results && chmod 2775 /data/results
-              mkdir -p /data/blis-catalog
+              mkdir -p /data/blis-catalog /data/user-models
+              # Base catalog from the image, then the user-added models overlaid LAST so a
+              # user model always wins a name collision with a base update. /data/user-models
+              # is the pristine, durable source of truth (the web app writes a model to both
+              # it and the live catalog); re-overlaying it here is what makes "the user config
+              # is the source of truth" hold across a BLIS_CATALOG version bump. An empty
+              # user store copies nothing and is a no-op.
               cp -R /app/inference-sim/blis-catalog/. /data/blis-catalog/
-              chmod -R g+rwX /data/blis-catalog
+              cp -R /data/user-models/. /data/blis-catalog/models/
+              chmod -R g+rwX /data/blis-catalog /data/user-models
           securityContext:
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true
@@ -158,6 +168,14 @@ spec:
             - /app/inference-sim
             - -workloads
             - /data/workloads.yaml
+            # The pristine user-added model store on the PVC. The web app's Add-a-model form
+            # writes here (and into the live catalog); the seed-data initContainer re-overlays
+            # it onto /data/blis-catalog on every boot, so a user model survives a restart and
+            # wins over a base catalog update. Keep it inside the /data mount. Defaults to
+            # <out>/user-models when unset, which would land outside the PVC, so set it
+            # explicitly.
+            - -user-models
+            - /data/user-models
             # Cap for a trace upload to /api/traces, in MiB. Real Weka/OTel corpora are far
             # larger than a converted TraceV2, so this is generous; the server keeps only
             # 32 MiB in memory and spills the rest to a temp file, so a large upload streams

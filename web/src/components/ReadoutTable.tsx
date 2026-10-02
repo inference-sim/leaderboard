@@ -5,7 +5,9 @@ import { rowId } from '../liverun'
 import type { RevealTarget } from '../liverun'
 import { formatCount, formatMs, formatNumber, formatPercent } from '../format'
 import {
+  COLUMNS,
   LOAD_COLUMN,
+  NUMERIC_COLUMNS,
   deploymentSpec,
   distinctHardware,
   distinctModels,
@@ -15,7 +17,6 @@ import {
   preemptionRate,
   servedFraction,
   varyingDeploymentFields,
-  visibleColumns,
 } from '../model'
 import type { Column, SortSpec } from '../model'
 import type { SloTargets } from '../slo'
@@ -125,14 +126,12 @@ export function ReadoutTable({
   // The run_id of the row currently pulsing from a reveal, or null. Local to the table so
   // the highlight lives and dies with the row, not with App's reveal request.
   const [revealedKey, setRevealedKey] = useState<string | null>(null)
-  // Whether the KV cache column group is shown. Hidden on load so it never crowds the
-  // default performance readout; a TableTools toggle turns it on and the columns append to
-  // the right (§5.2). Local to the table, like the reproduce toggles.
-  const [showKV, setShowKV] = useState(false)
-  const visibleCols = useMemo(() => visibleColumns(showKV), [showKV])
-  const numericCols = useMemo(() => visibleCols.filter((c) => c.key !== 'deployment'), [visibleCols])
-  // The group-separator boundaries, tracking the visible set so the rule appears left of the
-  // KV group only when KV is shown. A shared helper the header and every body cell read, so
+  // Every column is shown, including the KV cache group, which appends to the right of the
+  // health group. The table scrolls horizontally in its own frame (see .tscroll in
+  // styles.css), so the extra columns are reached by scrolling, never crowded out.
+  const visibleCols = COLUMNS
+  const numericCols = NUMERIC_COLUMNS
+  // The group-separator boundaries. A shared helper the header and every body cell read, so
   // separators cannot drift between them.
   const starts = useMemo(() => groupStartKeys(visibleCols), [visibleCols])
   const sep = (key: string): string | undefined => (starts.has(key) ? 'gsep' : undefined)
@@ -179,7 +178,22 @@ export function ReadoutTable({
     }),
     [workload.loadAxis.kind],
   )
-  const repro = useReproToggles(rows)
+  // The reproduce panels are keyed over every ranked row; the args bulk-expand is keyed over
+  // just the rows whose deployment cell actually has hidden fields to show (a cell with
+  // nothing past "show all" has no toggle), so Expand-all rests disabled when none do.
+  const reproKeys = useMemo(() => rows.map(reproKey), [rows])
+  const argKeys = useMemo(
+    () =>
+      rows
+        .filter((r) => {
+          const spec = deploymentSpec(r, varying)
+          return spec.knobs.length > KNOBS_BEFORE_COLLAPSE || spec.rest.length > 0
+        })
+        .map(reproKey),
+    [rows, varying],
+  )
+  const repro = useRowToggles(reproKeys)
+  const args = useRowToggles(argKeys)
   // The table is replaced by a short note only when a target removed every complete row and
   // there are no disqualified rows to show either; a group with only disqualified runs (a
   // windowed sweep) still renders them inline, so it is never mistaken for empty.
@@ -209,16 +223,6 @@ export function ReadoutTable({
   // no handler simply cannot sort, which is fine for the static render tests.
   const toggle = onSort ?? (() => {})
   const headerGroups = groupedHeaders(visibleCols, showLoad)
-  // Turning the KV group off drops any sort tiers keyed on a KV column, so a hidden column
-  // never silently drives the sort — and, since the sort is owned by the section and also
-  // orders the Compare panel, the two can never disagree. A KV tier can only exist while KV
-  // is shown (its header is the only way to add one), so this fires exactly when needed.
-  const toggleKV = () => {
-    if (showKV) {
-      for (const s of sort) if (KV_COLUMN_KEYS.has(s.key)) onRemoveSort?.(s.key)
-    }
-    setShowKV((on) => !on)
-  }
 
   return (
     <>
@@ -233,22 +237,19 @@ export function ReadoutTable({
             sort={sort}
             onRemoveSort={onRemoveSort ?? (() => {})}
             repro={repro}
+            args={args}
             showControls={true}
-            showKV={showKV}
-            onToggleKV={toggleKV}
           />
 
-          {/* With a Load column present the table freezes both the Load and Deployment columns
-              on horizontal scroll (hasload): they stack at the left edge, so the reader keeps the
-              load level and the candidate in view while the metrics scroll. A gray separator sits
-              between them (see .hasload .lft in styles.css).
-
-              tscroll-x is added only when the KV group is shown: those four extra columns push
-              the table past the page's content column, so it gets its own horizontal scrollbar
-              and stays within the margin (the frozen columns pin within that frame). The default
-              table is not a scroll container, so its header keeps freezing against the viewport —
-              see the .tscroll note in styles.css. */}
-          <div className={showKV ? 'tscroll tscroll-x' : 'tscroll'}>
+          {/* The table scrolls in its own frame (.tscroll): a wide readout stays within the
+              page margin and gets a horizontal scrollbar right under it, rather than cropping
+              off-screen and relying on the whole page to scroll sideways. The header freezes at
+              the top of the frame and the leading columns at its left. With a Load column present
+              the table freezes both the Load and Deployment columns (hasload): they stack at the
+              left edge, so the reader keeps the load level and the candidate in view while the
+              metrics scroll. A gray separator sits between them (see .hasload .lft in
+              styles.css). */}
+          <div className="tscroll">
             <table className={showLoad ? 'readout hasload' : 'readout'}>
               <thead>
                 <tr className="grp">
@@ -287,6 +288,8 @@ export function ReadoutTable({
                     showLoad={showLoad}
                     open={repro.isOpen(record)}
                     onToggleRepro={() => repro.toggle(record)}
+                    argsOpen={args.isOpen(record)}
+                    onToggleArgs={() => args.toggle(record)}
                     revealed={revealedKey === runKey(record)}
                     onDelete={showDelete ? onDelete : undefined}
                     compareMode={compareMode}
@@ -323,6 +326,8 @@ export function ReadoutTable({
                         showLoad={showLoad}
                         open={repro.isOpen(record)}
                         onToggleRepro={() => repro.toggle(record)}
+                        argsOpen={args.isOpen(record)}
+                        onToggleArgs={() => args.toggle(record)}
                         revealed={revealedKey === runKey(record)}
                         onDelete={showDelete ? onDelete : undefined}
                         compareMode={compareMode}
@@ -358,14 +363,15 @@ function reproKey(record: RunRecord): string {
 }
 
 /**
- * Owns which rows have their reproduce (blis command) panel open. Each row still toggles
- * on its own click; this only adds a shared handle so one control can open or close every
- * row at once. Keys not in the current `rows` (a filter narrowed them away) simply never
- * render — the set is not pruned, so a row that returns comes back in the state it left.
+ * Owns which rows have a given panel open — used once for the reproduce (blis command)
+ * panels and once for the deployment cells' expanded args. Each row still toggles on its own
+ * click; this only adds a shared handle so one control can open or close every row at once.
+ * `keys` are the rows the bulk buttons act on (and read their resting state from); a key not
+ * in it still toggles on click, and the set is never pruned, so a row that a filter narrowed
+ * away comes back in the state it left.
  */
-function useReproToggles(rows: RunRecord[]) {
+function useRowToggles(keys: string[]) {
   const [open, setOpen] = useState<Set<string>>(() => new Set())
-  const keys = useMemo(() => rows.map(reproKey), [rows])
   const isOpen = (record: RunRecord) => open.has(reproKey(record))
   const toggle = (record: RunRecord) =>
     setOpen((prev) => {
@@ -380,38 +386,42 @@ function useReproToggles(rows: RunRecord[]) {
     toggle,
     expandAll: () => setOpen(new Set(keys)),
     collapseAll: () => setOpen(new Set()),
-    // Over the visible rows only, so the bulk buttons reflect what is on screen. With no
-    // rows both read true, so the always-shown control rests with both buttons disabled.
+    // allOpen is over the bulk keys only, so Expand-all rests disabled once every row it
+    // governs is open (and when there are no such rows). anyOpen covers every open panel,
+    // including a disqualified row opened on its own, so Collapse-all is live whenever
+    // anything at all is showing.
     allOpen: keys.every((k) => open.has(k)),
-    noneOpen: keys.every((k) => !open.has(k)),
+    anyOpen: open.size > 0,
   }
 }
 
 /**
- * Expand-all / collapse-all for the table's reproduce panels. Each button disables itself
- * once it would be a no-op (everything already open, or already closed), which doubles as
- * a resting-state read of whether any command is showing. The disqualified band keeps its
- * own per-run toggles; this control is the table's rows only.
+ * Expand-all / collapse-all over the table rows. Expand all opens the deployment cells' hidden
+ * args (the "show all" fields) — not the reproduce command, which stays a per-row click.
+ * Collapse all closes everything: any open reproduce panel and any expanded args. Each button
+ * disables itself when it would be a no-op (every expandable cell already open; nothing open at
+ * all), which doubles as a resting-state read. The disqualified band keeps its own per-run
+ * toggles; the bulk expand governs the table's ranked rows, but collapse clears every row.
  */
-function ReproControls({
-  allOpen,
-  noneOpen,
+function RowControls({
+  expandDisabled,
+  collapseDisabled,
   onExpandAll,
   onCollapseAll,
 }: {
-  allOpen: boolean
-  noneOpen: boolean
+  expandDisabled: boolean
+  collapseDisabled: boolean
   onExpandAll: () => void
   onCollapseAll: () => void
 }) {
   return (
-    <div className="rowtools" role="group" aria-label="Reproduce commands for every row">
+    <div className="rowtools" role="group" aria-label="Expand or collapse every row">
       <button
         type="button"
         className="rowtool"
         onClick={onExpandAll}
-        disabled={allOpen}
-        aria-label="Expand every row to show its blis command"
+        disabled={expandDisabled}
+        aria-label="Expand every row to show its full configuration"
       >
         <span className="car" aria-hidden="true">
           ▾
@@ -422,8 +432,8 @@ function ReproControls({
         type="button"
         className="rowtool"
         onClick={onCollapseAll}
-        disabled={noneOpen}
-        aria-label="Collapse every row to hide its blis command"
+        disabled={collapseDisabled}
+        aria-label="Collapse the command and configuration on every row"
       >
         <span className="car" aria-hidden="true">
           ▸
@@ -435,27 +445,22 @@ function ReproControls({
 }
 
 /**
- * The bar above the table: the removable sort chips on the left, then the KV toggle and the
- * expand/collapse-all control on the right. Both right-side controls are always shown; each
- * expand/collapse button disables itself when it would be a no-op, so the pair also reads as
- * the resting state.
+ * The bar above the table: the removable sort chips on the left, then the expand/collapse-all
+ * control on the right. The right-side control is always shown; each expand/collapse button
+ * disables itself when it would be a no-op, so the pair also reads as the resting state.
  */
 function TableTools({
   sort,
   onRemoveSort,
   repro,
+  args,
   showControls,
-  showKV,
-  onToggleKV,
 }: {
   sort: SortSpec[]
   onRemoveSort: (key: string) => void
-  repro: ReturnType<typeof useReproToggles>
+  repro: ReturnType<typeof useRowToggles>
+  args: ReturnType<typeof useRowToggles>
   showControls: boolean
-  /** Whether the KV cache column group is currently shown. */
-  showKV: boolean
-  /** Toggle the KV cache column group. */
-  onToggleKV: () => void
 }) {
   if (sort.length === 0 && !showControls) return null
   return (
@@ -463,33 +468,22 @@ function TableTools({
       <SortNote sort={sort} onRemove={onRemoveSort} />
       {showControls && (
         <div className="rowtools">
-          <button
-            type="button"
-            className="rowtool"
-            onClick={onToggleKV}
-            aria-pressed={showKV}
-            aria-label={`${showKV ? 'Hide' : 'Show'} KV cache metrics`}
-          >
-            <span className="car" aria-hidden="true">
-              {showKV ? '▾' : '▸'}
-            </span>
-            {showKV ? 'Hide KV cache metrics' : 'Show KV cache metrics'}
-          </button>
-          <ReproControls
-            allOpen={repro.allOpen}
-            noneOpen={repro.noneOpen}
-            onExpandAll={repro.expandAll}
-            onCollapseAll={repro.collapseAll}
+          <RowControls
+            // Expand all opens the cells' hidden args; collapse all closes args and reproduce
+            // panels alike.
+            expandDisabled={args.allOpen}
+            collapseDisabled={!repro.anyOpen && !args.anyOpen}
+            onExpandAll={args.expandAll}
+            onCollapseAll={() => {
+              repro.collapseAll()
+              args.collapseAll()
+            }}
           />
         </div>
       )}
     </div>
   )
 }
-
-/** The KV column keys, so the KV toggle can drop any sort tier keyed on one when it hides
- *  the group (see toggleKV). Derived from the columns, not hand-kept. */
-const KV_COLUMN_KEYS = new Set(visibleColumns(true).filter((c) => c.group === 'kv').map((c) => c.key))
 
 function HeaderCell({
   col,
@@ -577,6 +571,8 @@ function DataRow({
   showLoad,
   open,
   onToggleRepro,
+  argsOpen,
+  onToggleArgs,
   revealed,
   onDelete,
   compareMode,
@@ -601,6 +597,10 @@ function DataRow({
    * the table so the expand-all / collapse-all control can drive every row at once. */
   open: boolean
   onToggleRepro: () => void
+  /** Whether this row's deployment cell is expanded to show its hidden args, and how to flip
+   * it. Lives in the table too, so expand-all drives every cell's args at once. */
+  argsOpen: boolean
+  onToggleArgs: () => void
   /** Whether this row is the one a reveal is currently highlighting (§7). */
   revealed: boolean
   /** Opens the delete confirmation for this run, or undefined when deletion is not offered. */
@@ -651,6 +651,8 @@ function DataRow({
           reproOpen={open}
           onToggleRepro={onToggleRepro}
           reproPanelId={panelId}
+          expanded={argsOpen}
+          onToggleArgs={onToggleArgs}
           onDelete={onDelete}
           dq={dq}
         />
@@ -688,6 +690,8 @@ function DeploymentCell({
   reproOpen,
   onToggleRepro,
   reproPanelId,
+  expanded,
+  onToggleArgs,
   onDelete,
   dq = false,
 }: {
@@ -699,13 +703,16 @@ function DeploymentCell({
   reproOpen: boolean
   onToggleRepro: () => void
   reproPanelId: string
+  /** Whether the cell is expanded to show its hidden args ("show all"), and how to flip it.
+   *  Owned by the table so expand-all / collapse-all can drive every cell at once. */
+  expanded: boolean
+  onToggleArgs: () => void
   /** Opens the delete confirmation for this run, or undefined when deletion is not offered. */
   onDelete?: (record: RunRecord) => void
   /** Whether this is a disqualified run: leads the cell with a ⚠ marker (the row's non-color
    *  flag; the reasons live in the expanded why-block). */
   dq?: boolean
 }) {
-  const [expanded, setExpanded] = useState(false)
   const spec = deploymentSpec(record, varying)
   const knobs = expanded ? spec.knobs : spec.knobs.slice(0, KNOBS_BEFORE_COLLAPSE)
   const hidden = spec.knobs.length - knobs.length + spec.rest.length
@@ -766,7 +773,7 @@ function DeploymentCell({
             type="button"
             className="dep-more"
             aria-expanded={expanded}
-            onClick={() => setExpanded((v) => !v)}
+            onClick={onToggleArgs}
           >
             {expanded ? 'Show less' : `Show all (${hidden} more)`}
           </button>

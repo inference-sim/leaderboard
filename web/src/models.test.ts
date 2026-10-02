@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   contextMeterFraction,
+  deleteModel,
   familyKey,
   filterModels,
   formatContext,
@@ -11,8 +12,17 @@ import {
   modelOf,
   orgOf,
   precision,
+  reconcileModel,
+  saveModel,
+  validateModel,
 } from './models'
-import type { ModelDetail, ModelInfo } from './models'
+import type { ModelDetail, ModelInfo, ModelSubmission } from './models'
+
+const submission: ModelSubmission = {
+  dir: 'my-model',
+  model_yaml: 'source:\n  repo: Acme/My-Model\n',
+  config_json: '{"architectures":["AcmeForCausalLM"]}',
+}
 
 const catalog: ModelInfo[] = [
   { name: 'qwen/qwen3-14b', moe: false },
@@ -32,6 +42,26 @@ describe('isMoE', () => {
   it('treats an unknown name as dense', () => {
     expect(isMoE(catalog, 'gpt-4')).toBe(false)
     expect(isMoE([], 'qwen/qwen3-14b')).toBe(false)
+  })
+})
+
+describe('reconcileModel', () => {
+  const list: ModelInfo[] = [
+    { name: 'qwen/qwen3-14b', moe: false },
+    { name: 'mistralai/mixtral-8x7b-v0.1', moe: true },
+  ]
+
+  it('keeps a selection that is still in the catalog', () => {
+    expect(reconcileModel(list, 'qwen/qwen3-14b')).toBe('qwen/qwen3-14b')
+  })
+
+  it('reverts to the first model when the selection was deleted', () => {
+    expect(reconcileModel(list, 'acme/removed')).toBe('qwen/qwen3-14b')
+  })
+
+  it('leaves a blank selection and an empty catalog alone', () => {
+    expect(reconcileModel(list, '')).toBe('')
+    expect(reconcileModel([], 'acme/removed')).toBe('acme/removed')
   })
 })
 
@@ -217,5 +247,71 @@ describe('getModelConfig', () => {
       throw new TypeError('Failed to fetch')
     }) as typeof fetch
     await expect(getModelConfig('qwen/qwen3-14b', fakeFetch)).rejects.toThrow(/leaderboard serve/)
+  })
+})
+
+describe('listModels origin', () => {
+  it('carries each model origin through', async () => {
+    const fakeFetch = (async () =>
+      jsonResponse({
+        models: [
+          { name: 'acme/my-model', moe: false, origin: 'user' },
+          { name: 'meta/llama', moe: false, origin: 'base' },
+        ],
+      })) as typeof fetch
+    const got = await listModels(fakeFetch)
+    expect(got.map((m) => m.origin)).toEqual(['user', 'base'])
+  })
+})
+
+describe('validateModel', () => {
+  it('posts the submission to the dry-run endpoint and returns the verdict', async () => {
+    const fakeFetch = (async (url, init) => {
+      expect(String(url)).toBe('/api/models/validate')
+      expect(init?.method).toBe('POST')
+      expect(JSON.parse(String(init?.body))).toEqual(submission)
+      return jsonResponse({ ok: true, canonical_name: 'acme/my-model', moe: false, provider: '', issues: [] })
+    }) as typeof fetch
+    const v = await validateModel(submission, fakeFetch)
+    expect(v.ok).toBe(true)
+    expect(v.canonical_name).toBe('acme/my-model')
+  })
+
+  it('throws the server {error} on a bad request', async () => {
+    const fakeFetch = (async () => jsonResponse({ error: 'could not read the model submission' }, 400)) as typeof fetch
+    await expect(validateModel(submission, fakeFetch)).rejects.toThrow(/could not read/)
+  })
+})
+
+describe('saveModel', () => {
+  it('POSTs to /api/models to create a new model', async () => {
+    const fakeFetch = (async (url, init) => {
+      expect(String(url)).toBe('/api/models')
+      expect(init?.method).toBe('POST')
+      return jsonResponse({ ok: true, canonical_name: 'acme/my-model', moe: false, provider: '', issues: [] })
+    }) as typeof fetch
+    await saveModel(submission, fakeFetch)
+  })
+
+  it('throws the server {error} on a collision (409)', async () => {
+    const fakeFetch = (async () => jsonResponse({ error: 'a model already occupies the directory "my-model"' }, 409)) as typeof fetch
+    await expect(saveModel(submission, fakeFetch)).rejects.toThrow(/already occupies/)
+  })
+})
+
+describe('deleteModel', () => {
+  it('DELETEs /api/models?name= and returns how many runs went with it', async () => {
+    const fakeFetch = (async (url, init) => {
+      expect(String(url)).toBe('/api/models?name=acme%2Fmy-model')
+      expect(init?.method).toBe('DELETE')
+      return jsonResponse({ deleted: 'acme/my-model', runs_deleted: 3 })
+    }) as typeof fetch
+    const result = await deleteModel('acme/my-model', fakeFetch)
+    expect(result.runs_deleted).toBe(3)
+  })
+
+  it('throws the server {error} when the model is read-only (403)', async () => {
+    const fakeFetch = (async () => jsonResponse({ error: 'is a base catalog model and is read-only' }, 403)) as typeof fetch
+    await expect(deleteModel('meta/llama', fakeFetch)).rejects.toThrow(/read-only/)
   })
 })

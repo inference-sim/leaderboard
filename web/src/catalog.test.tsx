@@ -157,6 +157,53 @@ describe('ModelsList', () => {
   })
 })
 
+const mixedOrigin: ModelInfo[] = [
+  { name: 'acme/my-model', moe: false, origin: 'user' },
+  { name: 'meta-llama/llama-3.1-8b-instruct', moe: false, origin: 'base' },
+]
+
+describe('ModelsList provenance', () => {
+  it('colours a user-added card differently and explains it on hover', () => {
+    const html = renderToStaticMarkup(
+      <ModelsList models={mixedOrigin} expanded={null} onToggle={noop} configFor={none} />,
+    )
+    // The one user model's card carries the tint class; the base card does not.
+    expect(html.match(/mcard-user/g)).toHaveLength(1)
+    // Hovering it explains the provenance (a styled data-tip tooltip), rather than a tag.
+    expect(html).toContain('data-tip="Added by a user')
+  })
+
+  it('offers a Delete control only on user-added cards, and never an Edit', () => {
+    const html = renderToStaticMarkup(
+      <ModelsList models={mixedOrigin} expanded={null} onToggle={noop} configFor={none} onDelete={noop} />,
+    )
+    // One user model, so exactly one Delete control; editing a model is not offered at all.
+    expect(html.match(/aria-label="Delete model"/g)).toHaveLength(1)
+    expect(html).not.toContain('aria-label="Edit model"')
+  })
+
+  it('shows no Delete control when no handler is passed', () => {
+    const html = renderToStaticMarkup(
+      <ModelsList models={mixedOrigin} expanded={null} onToggle={noop} configFor={none} />,
+    )
+    expect(html).not.toContain('aria-label="Delete model"')
+  })
+
+  it('pulses the just-added model card', () => {
+    const html = renderToStaticMarkup(
+      <ModelsList
+        models={mixedOrigin}
+        expanded={null}
+        onToggle={noop}
+        configFor={none}
+        highlighted="acme/my-model"
+      />,
+    )
+    expect(html).toContain('id="mcard-revealed"')
+    expect(html).toMatch(/class="mcard[^"]*\brevealed"/)
+  })
+})
+
 describe('ModelConfigView', () => {
   it('shows the model.yaml provenance as tags beside the config.json', () => {
     const detail: ModelDetail = {

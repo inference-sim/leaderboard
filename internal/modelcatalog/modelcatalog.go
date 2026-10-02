@@ -44,6 +44,10 @@ type Model struct {
 	// zero (empty for strings) and the card omits its row rather than showing a fabricated
 	// number.
 	Spec Spec `json:"spec"`
+	// Origin is "user" when the model's directory is present in the user-models store
+	// (added through the web app, authoritative on conflict), else "base" (shipped in the
+	// blis-catalog image). The Catalog tags each card by it and gates Edit/Delete on "user".
+	Origin string `json:"origin"`
 }
 
 // Spec is a model's architecture at a glance, read from config.json. Every field is one of
@@ -95,6 +99,14 @@ type Detail struct {
 	MoE    bool   `json:"moe"`
 	Source Source `json:"source"`
 	Config string `json:"config"`
+	// Origin is "user" when the model is in the user-models store, else "base". Distinct from
+	// Source above (the model.yaml provenance block). The model view uses it to show the
+	// Added/Built-in tag and gate Edit/Delete.
+	Origin string `json:"origin"`
+	// ModelYAML is the raw model.yaml, so the Catalog's edit form can prefill the exact file
+	// a user is editing (the parsed Source block alone would drop any other fields). Empty
+	// when the directory ships no model.yaml.
+	ModelYAML string `json:"model_yaml,omitempty"`
 }
 
 // expertKeys are the config.json keys that mark a model as MoE. A model whose config
@@ -108,7 +120,7 @@ var expertKeys = []string{"num_experts", "n_routed_experts", "num_local_experts"
 // whose model.yaml is missing or whose source.repo carries no "<org>/" prefix cannot be
 // given a canonical name and is skipped: a malformed entry should not appear unnamed in
 // the picker.
-func List(catalogRoot string) ([]Model, error) {
+func List(catalogRoot, userModelsDir string) ([]Model, error) {
 	if catalogRoot == "" {
 		return nil, fmt.Errorf("no model catalog: set BLIS_CATALOG to a blis-catalog clone")
 	}
@@ -117,6 +129,7 @@ func List(catalogRoot string) ([]Model, error) {
 	if err != nil {
 		return nil, fmt.Errorf("reading model catalog %s: %w", modelsDir, err)
 	}
+	userDirs := userModelDirs(userModelsDir)
 
 	models := make([]Model, 0, len(entries))
 	for _, e := range entries {
@@ -133,9 +146,10 @@ func List(catalogRoot string) ([]Model, error) {
 			return nil, err
 		}
 		models = append(models, Model{
-			Name: strings.ToLower(org) + "/" + dir,
-			MoE:  declaresExperts(cfg),
-			Spec: deriveSpec(cfg),
+			Name:   strings.ToLower(org) + "/" + dir,
+			MoE:    declaresExperts(cfg),
+			Spec:   deriveSpec(cfg),
+			Origin: originOf(dir, userDirs),
 		})
 	}
 	sort.Slice(models, func(i, j int) bool { return models[i].Name < models[j].Name })
@@ -147,7 +161,7 @@ func List(catalogRoot string) ([]Model, error) {
 // catalog and matches on the canonical name rather than building a path from the caller's
 // input, so an untrusted name can never read outside the models tree. An unknown name is
 // ErrNotFound (404), an unreadable catalog an error (500).
-func Config(catalogRoot, name string) (Detail, error) {
+func Config(catalogRoot, userModelsDir, name string) (Detail, error) {
 	if catalogRoot == "" {
 		return Detail{}, fmt.Errorf("no model catalog: set BLIS_CATALOG to a blis-catalog clone")
 	}
@@ -156,6 +170,7 @@ func Config(catalogRoot, name string) (Detail, error) {
 	if err != nil {
 		return Detail{}, fmt.Errorf("reading model catalog %s: %w", modelsDir, err)
 	}
+	userDirs := userModelDirs(userModelsDir)
 	for _, e := range entries {
 		if !e.IsDir() {
 			continue
@@ -181,6 +196,12 @@ func Config(catalogRoot, name string) (Detail, error) {
 		if err != nil {
 			return Detail{}, err
 		}
+		// The raw model.yaml, for the edit form's prefill. A missing file is "" (the same way
+		// an absent config.json is), not an error.
+		rawYAML, err := os.ReadFile(filepath.Join(modelsDir, dir, "model.yaml"))
+		if err != nil && !os.IsNotExist(err) {
+			return Detail{}, fmt.Errorf("reading %s: %w", filepath.Join(modelsDir, dir, "model.yaml"), err)
+		}
 		return Detail{
 			Name: name,
 			MoE:  moe,
@@ -190,7 +211,9 @@ func Config(catalogRoot, name string) (Detail, error) {
 				Revision:  my.Source.Revision,
 				Retrieved: my.Source.Retrieved,
 			},
-			Config: cfg,
+			Config:    cfg,
+			Origin:    originOf(dir, userDirs),
+			ModelYAML: string(rawYAML),
 		}, nil
 	}
 	return Detail{}, fmt.Errorf("%q: %w", name, ErrNotFound)
@@ -213,6 +236,36 @@ func readConfigPretty(configPath string) (string, error) {
 		return string(raw), nil
 	}
 	return buf.String(), nil
+}
+
+// userModelDirs returns the set of immediate subdirectory names in the user-models store,
+// so a model can be tagged by whether its directory is user-added. An empty path (no store
+// configured) or a missing/unreadable store is the empty set, not an error: the store is
+// optional, and its absence means every model is base.
+func userModelDirs(userModelsDir string) map[string]bool {
+	dirs := map[string]bool{}
+	if userModelsDir == "" {
+		return dirs
+	}
+	entries, err := os.ReadDir(userModelsDir)
+	if err != nil {
+		return dirs
+	}
+	for _, e := range entries {
+		if e.IsDir() {
+			dirs[e.Name()] = true
+		}
+	}
+	return dirs
+}
+
+// originOf reports whether a model directory is user-added ("user") or shipped by the base
+// catalog image ("base"), by membership in the user-models store.
+func originOf(dir string, userDirs map[string]bool) string {
+	if userDirs[dir] {
+		return "user"
+	}
+	return "base"
 }
 
 // orgOf reads model.yaml in dir and returns the org half of source.repo. ok is false when

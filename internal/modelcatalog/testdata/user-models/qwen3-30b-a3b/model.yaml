@@ -1,0 +1,5 @@
+source:
+  provider: huggingface
+  repo: Qwen/Qwen3-30B-A3B
+  revision: userrev
+  retrieved: "2026-10-01"

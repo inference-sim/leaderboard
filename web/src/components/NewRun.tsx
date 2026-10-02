@@ -18,7 +18,7 @@ import {
 } from '../catalog'
 import { customFieldsFrom, interpret, suggestRunId, suggestWorkloadName } from '../newrun'
 import type { FormValues, Output } from '../newrun'
-import { isMoE, listModels } from '../models'
+import { isMoE, listModels, reconcileModel } from '../models'
 import type { ModelInfo } from '../models'
 import { collapseHardwareAliases, listHardware } from '../hardware'
 import type { HardwareInfo } from '../hardware'
@@ -84,6 +84,12 @@ interface Props {
  * panel beside them answers the question that follows from it, which table does this land
  * in, before anything is run.
  */
+/** ctxOf is the model's maximum context length (its max positional embeddings) from the
+ * catalog, or 0 when the model is unknown or its config stated none. */
+function ctxOf(models: ModelInfo[], name: string): number {
+  return models.find((m) => m.name === name)?.spec?.context ?? 0
+}
+
 export function NewRun({
   groups,
   values,
@@ -141,7 +147,29 @@ export function NewRun({
     let cancelled = false
     listModels().then(
       (ms) => {
-        if (!cancelled) setModels(ms)
+        if (cancelled) return
+        setModels(ms)
+        setValues((v) => {
+          const reconciled = reconcileModel(ms, v.model)
+          if (reconciled !== v.model) {
+            // The selected model is no longer in the catalog (e.g. deleted from the Catalog
+            // tab); revert to one that still exists so the form never carries a model that
+            // cannot run, and default the context cap to that model's maximum. A dense
+            // replacement clears the MoE knobs, as a manual model change does.
+            const ctx = ctxOf(ms, reconciled)
+            return {
+              ...v,
+              model: reconciled,
+              ...(isMoE(ms, reconciled) ? {} : { enableExpertParallel: false, moeCommBackend: '' }),
+              ...(ctx > 0 ? { maxModelLen: String(ctx) } : {}),
+            }
+          }
+          // Model unchanged: default the cap to the model's maximum only while it is still at
+          // auto (0), so a reader who opened the form on a model sees the max filled in.
+          const ctx = ctxOf(ms, v.model)
+          if (ctx > 0 && Number(v.maxModelLen) === 0) return { ...v, maxModelLen: String(ctx) }
+          return v
+        })
       },
       (e) => {
         if (!cancelled) setLoadError(e instanceof Error ? e.message : String(e))
@@ -253,6 +281,12 @@ export function NewRun({
   // a stable shape; a dense model disables them rather than hiding them (blis rejects them on a
   // dense model, and switching to one already clears them to off/empty).
   const modelIsMoE = isMoE(models, values.model)
+  // The selected model's maximum context, used both for the field's tip and as its default.
+  const modelCtx = ctxOf(models, values.model)
+  const maxLenTip =
+    modelCtx > 0
+      ? `The maximum context length (prompt + output) served per request. It cannot exceed ${values.model}'s maximum positional embeddings (${modelCtx.toLocaleString()} tokens), which is the default here. Set a lower value to cap context.`
+      : 'The maximum context length (prompt + output) served per request. It cannot exceed the model’s maximum positional embeddings, which is the default. Set a lower value to cap context.'
 
   // The two workload types the page offers: a saved or preset workload (chosen from the
   // catalog), or a custom distribution defined inline and saved to the catalog on Run. The
@@ -290,10 +324,24 @@ export function NewRun({
   // One serving knob as a number field. min is '0' for the fields where 0 is a valid
   // "off"/auto (max-model-len, long-prefill, draft tokens); step is a
   // fraction for the two ratio knobs (gpu-memory-utilization, acceptance rate).
-  const knobNum = (field: keyof FormValues, label: string, min = '1', step = '1', placeholder?: string) => (
+  const knobNum = (
+    field: keyof FormValues,
+    label: string,
+    min = '1',
+    step = '1',
+    placeholder?: string,
+    tip?: string,
+  ) => (
     <>
       <label className="nrrow">
-        <span className="nrlabel">{label}</span>
+        <span className="nrlabel">
+          {label}
+          {tip && (
+            <span className="info" tabIndex={0} role="note" data-tip={tip} aria-label={tip}>
+              i
+            </span>
+          )}
+        </span>
         <input
           type="number"
           min={min}
@@ -506,15 +554,27 @@ export function NewRun({
                     labelledBy="model-label"
                     value={values.model}
                     onChange={(v) =>
-                      setValues((prev) => ({
-                        ...prev,
-                        model: v,
-                        // A dense model cannot carry the MoE knobs (blis rejects them), so
-                        // switching to one clears them rather than leaving a dead selection.
-                        ...(isMoE(models, v) ? {} : { enableExpertParallel: false, moeCommBackend: '' }),
-                      }))
+                      setValues((prev) => {
+                        const next: FormValues = {
+                          ...prev,
+                          model: v,
+                          // A dense model cannot carry the MoE knobs (blis rejects them), so
+                          // switching to one clears them rather than leaving a dead selection.
+                          ...(isMoE(models, v) ? {} : { enableExpertParallel: false, moeCommBackend: '' }),
+                        }
+                        // Default the context cap to the model's maximum (its max positional
+                        // embeddings), unless the reader set a different one: "different" is
+                        // not 0 (auto) and not the previous model's maximum, so switching
+                        // models re-defaults while a manual cap is kept.
+                        const newCtx = ctxOf(models, v)
+                        const prevCtx = ctxOf(models, prev.model)
+                        const cur = Number(prev.maxModelLen)
+                        if (newCtx > 0 && (cur === 0 || cur === prevCtx)) next.maxModelLen = String(newCtx)
+                        return next
+                      })
                     }
                     options={modelOptions}
+                    searchable
                   />
                 </div>
                 {issueFor('model') && <p className="nrerr">{issueFor('model')!.message}</p>}
@@ -597,7 +657,7 @@ export function NewRun({
                   </p>
                 )}
 
-                {knobNum('maxModelLen', 'Max model length', '0')}
+                {knobNum('maxModelLen', 'Max model length', '0', '1', undefined, maxLenTip)}
               </>,
             )}
 

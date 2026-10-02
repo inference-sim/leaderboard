@@ -34,6 +34,11 @@ export interface ModelInfo {
   name: string
   moe: boolean
   spec?: ModelSpec
+  /** Where the model came from: "user" when it was added through the web app (and is
+   * authoritative on conflict), else "base" (shipped in the blis-catalog image). The Catalog
+   * tags each card by it and offers Edit/Delete only on "user". Absent on older responses is
+   * treated as "base". */
+  origin?: 'base' | 'user'
 }
 
 /** A model's provenance from model.yaml, shown as tags. A field absent from model.yaml is an
@@ -53,6 +58,31 @@ export interface ModelDetail {
   moe: boolean
   source: ModelSource
   config: string
+  /** "user" or "base", as on ModelInfo. */
+  origin?: 'base' | 'user'
+  /** The raw model.yaml, so the edit form can prefill the exact file. Absent when the model
+   * ships none. */
+  model_yaml?: string
+}
+
+/** A proposed user model from the add/edit form: a directory name and the two file bodies.
+ * The canonical name is derived server-side from model.yaml, never sent. Mirrors the server's
+ * modelBody. */
+export interface ModelSubmission {
+  dir: string
+  model_yaml: string
+  config_json: string
+}
+
+/** The verdict POST /api/models/validate returns: whether the model is acceptable, the
+ * derived canonical name / MoE flag / provider, and every reason it is not. Mirrors the
+ * server's modelValidateResponse. */
+export interface ModelValidation {
+  ok: boolean
+  canonical_name: string
+  moe: boolean
+  provider: string
+  issues: string[]
 }
 
 const UNREACHABLE =
@@ -63,6 +93,18 @@ const UNREACHABLE =
  * treated as dense — the knobs stay off rather than being offered speculatively. */
 export function isMoE(models: ModelInfo[], name: string): boolean {
   return models.some((m) => m.name === name && m.moe)
+}
+
+/** reconcileModel returns the model a run form should hold given the current catalog: the
+ * current selection when it is still offered (or '' when nothing is selected yet), otherwise
+ * the first catalog model. So a selection whose model was deleted reverts to a valid one
+ * rather than lingering and failing at run time. An empty catalog leaves the selection
+ * unchanged (there is nothing to revert to). */
+export function reconcileModel(models: ModelInfo[], selected: string): string {
+  const first = models[0]
+  if (selected === '' || !first) return selected
+  if (models.some((m) => m.name === selected)) return selected
+  return first.name
 }
 
 /** listModels fetches the catalog. A fetch rejection is "the server is not running"; an
@@ -121,6 +163,84 @@ export async function getModelConfig(
     throw new Error(message)
   }
   return parsed as ModelDetail
+}
+
+/** readModelResponse parses a model-endpoint response the same way listModels/getModelConfig
+ * do: a fetch rejection is handled by the caller, an HTTP error carries the server's {error}
+ * message, and a success returns the parsed body. */
+async function readModelResponse(res: Response): Promise<unknown> {
+  const text = await res.text()
+  let parsed: unknown = null
+  try {
+    parsed = text ? JSON.parse(text) : null
+  } catch {
+    parsed = null
+  }
+  if (!res.ok) {
+    const message =
+      parsed && typeof parsed === 'object' && 'error' in parsed
+        ? String((parsed as { error: unknown }).error)
+        : `The model server returned HTTP ${res.status}.`
+    throw new Error(message)
+  }
+  return parsed
+}
+
+function jsonPost(method: string, body: unknown): RequestInit {
+  return { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }
+}
+
+/** validateModel is the dry run: it posts a submission and returns the server's verdict
+ * (acceptable or not, with the derived facts and any issues) without writing anything. */
+export async function validateModel(
+  body: ModelSubmission,
+  fetchImpl: typeof fetch = fetch,
+): Promise<ModelValidation> {
+  let res: Response
+  try {
+    res = await fetchImpl('/api/models/validate', jsonPost('POST', body))
+  } catch {
+    throw new Error(UNREACHABLE)
+  }
+  return (await readModelResponse(res)) as ModelValidation
+}
+
+/** saveModel creates a model (POST /api/models). There is no edit: a model's config is what
+ * its runs were produced against, so it is added or deleted, never changed in place. The
+ * server re-validates and runs the blis smoke test before writing. */
+export async function saveModel(
+  body: ModelSubmission,
+  fetchImpl: typeof fetch = fetch,
+): Promise<ModelValidation> {
+  let res: Response
+  try {
+    res = await fetchImpl('/api/models', jsonPost('POST', body))
+  } catch {
+    throw new Error(UNREACHABLE)
+  }
+  return (await readModelResponse(res)) as ModelValidation
+}
+
+/** What DELETE /api/models returns: the deleted model and how many of its leaderboard runs
+ * were removed with it (a model's runs were produced against it, so they go together). */
+export interface ModelDeleteResult {
+  deleted: string
+  runs_deleted: number
+}
+
+/** deleteModel removes a user model by its canonical name, and with it any leaderboard runs
+ * that used the model. The server refuses a base model (403). */
+export async function deleteModel(
+  name: string,
+  fetchImpl: typeof fetch = fetch,
+): Promise<ModelDeleteResult> {
+  let res: Response
+  try {
+    res = await fetchImpl(`/api/models?name=${encodeURIComponent(name)}`, { method: 'DELETE' })
+  } catch {
+    throw new Error(UNREACHABLE)
+  }
+  return (await readModelResponse(res)) as ModelDeleteResult
 }
 
 // ---------- Presentation helpers ----------

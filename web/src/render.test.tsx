@@ -239,35 +239,29 @@ describe('ReadoutTable, single-model workload (mainW: one model, three accelerat
   })
 })
 
-describe('ReadoutTable, KV cache metrics are hidden behind a toggle (§5.2)', () => {
+describe('ReadoutTable, KV cache metrics are always shown', () => {
   const html = renderToStaticMarkup(<ReadoutTable workload={mainW} models={[]} />)
 
-  it('offers a "Show KV cache metrics" toggle in the table tools', () => {
-    expect(html).toContain('Show KV cache metrics')
-    expect(html).toMatch(/aria-label="Show KV cache metrics"/)
-    // aria-pressed reflects the off state, so a screen reader hears it as a toggle.
-    expect(html).toMatch(/aria-pressed="false"/)
+  it('offers no KV cache toggle: the columns are always on', () => {
+    expect(html).not.toContain('KV cache metrics')
   })
 
-  it('renders none of the KV columns on load, so the default readout is unchanged', () => {
+  it('renders all four KV columns, so the group is part of the readout', () => {
     for (const label of ['Cache hit', 'Preempt rate', 'KV alloc fails', 'KV thrash'])
-      expect(html).not.toContain(label)
-    // The uppercased "KV" group header is the colgroup cell text (raw key "kv"); absent by default.
-    expect(html).not.toMatch(/scope="colgroup"[^>]*>kv</)
+      expect(html).toContain(label)
+    // The uppercased "KV" group header is the colgroup cell text (raw key "kv").
+    expect(html).toMatch(/scope="colgroup"[^>]*>kv</)
   })
 
-  it('leaves the table wrapper a non-scroll container by default, so the header freezes to the viewport', () => {
-    // tscroll-x (the horizontal scroll frame) is added only with the wide KV group; without it
-    // the wrapper stays the plain .tscroll that keeps the sticky header against the viewport.
+  it('wraps the table in a scroll frame so a wide readout scrolls in place, not off-screen', () => {
     expect(html).toMatch(/class="tscroll"/)
-    expect(html).not.toContain('tscroll-x')
   })
 
-  it('keeps the four KV columns out of every body row while hidden', () => {
-    // Each data row renders only the visible numeric columns: deployment + 10 = 11 cells,
-    // never the 4 KV cells. (A sweep would add a Load cell; mainW is a single load.)
+  it('renders the four KV cells in every body row', () => {
+    // Each data row renders deployment + 10 base numeric columns + 4 KV = 15 cells.
+    // (A sweep would add a Load cell; mainW is a single load.)
     for (const row of tbodyRows(html)) {
-      expect(cellsOfRow(row)).toHaveLength(11)
+      expect(cellsOfRow(row)).toHaveLength(15)
     }
   })
 })
@@ -639,19 +633,21 @@ describe('Reproduce the blis command (row-level)', () => {
   })
 })
 
-describe('Expand all / Collapse all (bulk reproduce toggle over the table rows)', () => {
+describe('Expand all / Collapse all (bulk toggle over the table rows)', () => {
   const html = renderToStaticMarkup(<ReadoutTable workload={mainW} models={[]} />)
 
-  it('offers both controls above a multi-row table', () => {
+  it('offers both controls above a multi-row table: expand the config, collapse everything', () => {
     expect(html).toContain('Expand all')
     expect(html).toContain('Collapse all')
-    expect(html).toMatch(/aria-label="Expand every row to show its blis command"/)
-    expect(html).toMatch(/aria-label="Collapse every row to hide its blis command"/)
+    // Expand-all opens the deployment cells' hidden args, not the blis command.
+    expect(html).toMatch(/aria-label="Expand every row to show its full configuration"/)
+    expect(html).toMatch(/aria-label="Collapse the command and configuration on every row"/)
   })
 
   it('rests with Collapse all disabled and Expand all enabled, since nothing is open on load', () => {
     const expand = html.match(/<button[^>]*aria-label="Expand every row[^"]*"[^>]*>/)![0]
-    const collapse = html.match(/<button[^>]*aria-label="Collapse every row[^"]*"[^>]*>/)![0]
+    const collapse = html.match(/<button[^>]*aria-label="Collapse the command[^>]*>/)![0]
+    // mainW has rows with hidden args, so Expand-all is live; nothing is open, so Collapse-all rests.
     expect(expand).not.toContain('disabled')
     expect(collapse).toContain('disabled')
   })
@@ -667,7 +663,8 @@ describe('Expand all / Collapse all (bulk reproduce toggle over the table rows)'
     expect(barren).toContain('Expand all')
     expect(barren).toContain('Collapse all')
     const expand = barren.match(/<button[^>]*aria-label="Expand every row[^"]*"[^>]*>/)![0]
-    const collapse = barren.match(/<button[^>]*aria-label="Collapse every row[^"]*"[^>]*>/)![0]
+    const collapse = barren.match(/<button[^>]*aria-label="Collapse the command[^>]*>/)![0]
+    // No rows means no expandable args and nothing open, so both rest disabled.
     expect(expand).toContain('disabled')
     expect(collapse).toContain('disabled')
   })

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
 import {
   contextMeterFraction,
+  deleteModel,
   filterModels,
   formatContext,
   getModelConfig,
@@ -10,13 +11,18 @@ import {
   modelOf,
   orgOf,
   precision,
+  saveModel,
+  validateModel,
   type ModelDetail,
   type ModelInfo,
   type ModelKind,
+  type ModelValidation,
 } from '../models'
 import { collapseHardwareAliases, listHardware, type HardwareInfo } from '../hardware'
 import type { WorkloadGroup } from '../load'
 import { CopyBlock } from './CopyBlock'
+import { ConfirmDialog } from './ConfirmDialog'
+import { ModelEditor, draftToSubmission, emptyModelDraft, type ModelDraft } from './ModelEditor'
 import { Workloads } from './Workloads'
 
 /**
@@ -109,7 +115,7 @@ export function Catalog({
         ))}
       </div>
       {tab === 'models' ? (
-        <ModelsPanel />
+        <ModelsPanel onBoardChanged={onBoardChanged} />
       ) : tab === 'hardware' ? (
         <HardwarePanel />
       ) : (
@@ -145,7 +151,7 @@ type ConfigState =
 
 /** The Models tab body: the models BLIS can run, grouped by provider, each openable to reveal
  * its config.json in place. The Catalog page owns the heading and tab bar above it. */
-function ModelsPanel() {
+function ModelsPanel({ onBoardChanged }: { onBoardChanged?: () => void | Promise<void> }) {
   const [models, setModels] = useState<ModelInfo[] | null>(null)
   const [error, setError] = useState<string | null>(null)
   // Which model is open (only one at a time), and the fetched detail per model, cached so
@@ -158,22 +164,34 @@ function ModelsPanel() {
   const [query, setQuery] = useState('')
   const [kind, setKind] = useState<ModelKind>('all')
 
-  useEffect(() => {
-    let live = true
-    listModels()
-      .then((m) => {
-        if (live) {
-          setModels(m)
-          setError(null)
-        }
-      })
-      .catch((e) => {
-        if (live) setError(e instanceof Error ? e.message : String(e))
-      })
-    return () => {
-      live = false
+  // Add-model editor state. `editing` holds the draft while the modal is open, else null.
+  // There is no edit flow: a model is added or deleted, never changed in place (its config is
+  // what its runs were produced against). An action error (a failed delete) is surfaced
+  // inline, separate from the load error that replaces the whole panel.
+  const [editing, setEditing] = useState<ModelDraft | null>(null)
+  const [verdict, setVerdict] = useState<ModelValidation | null>(null)
+  const [validating, setValidating] = useState(false)
+  const [saving, setSaving] = useState(false)
+  const [saveError, setSaveError] = useState<string | null>(null)
+  const [actionError, setActionError] = useState<string | null>(null)
+  const [pendingDelete, setPendingDelete] = useState<string | null>(null)
+  // The just-added model's canonical name, highlighted (scrolled to and pulsed) so the reader
+  // sees what they added; cleared after the pulse.
+  const [highlight, setHighlight] = useState<string | null>(null)
+  const highlightTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  const refresh = useCallback(async () => {
+    try {
+      setModels(await listModels())
+      setError(null)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
     }
   }, [])
+
+  useEffect(() => {
+    refresh()
+  }, [refresh])
 
   // Load the open model's config the first time it is opened. Keyed on `expanded` alone; the
   // requested-set guard makes it fire once per model, and setting state after unmount is a
@@ -197,32 +215,162 @@ function ModelsPanel() {
     setExpanded((cur) => (cur === name ? null : name))
   }, [])
 
-  if (error) return <CatalogError message={error} />
-  if (models === null) return <p className="dek">Reading the model catalog.</p>
-  // An empty catalog is a misconfiguration, distinct from a filter that matched nothing:
-  // ModelsList carries the BLIS_CATALOG pointer for the former.
-  if (models.length === 0) {
-    return <ModelsList models={[]} expanded={expanded} onToggle={toggle} configFor={(n) => configs[n]} />
+  // Once the just-added model is in the loaded list, scroll its card into view and pulse it,
+  // then clear the highlight after the pulse. Keyed on the models list so it fires after the
+  // refresh that follows a save.
+  useEffect(() => {
+    if (!highlight || !models?.some((m) => m.name === highlight)) return
+    document.getElementById('mcard-revealed')?.scrollIntoView({ block: 'center', behavior: 'smooth' })
+    if (highlightTimer.current) clearTimeout(highlightTimer.current)
+    highlightTimer.current = setTimeout(() => setHighlight(null), 2000)
+  }, [highlight, models])
+
+  useEffect(() => () => { if (highlightTimer.current) clearTimeout(highlightTimer.current) }, [])
+
+  const openAdd = () => {
+    setEditing(emptyModelDraft())
+    setVerdict(null)
+    setSaveError(null)
   }
+
+  const closeEditor = () => {
+    setEditing(null)
+    setVerdict(null)
+    setSaveError(null)
+  }
+
+  const onValidate = async () => {
+    if (!editing) return
+    setValidating(true)
+    try {
+      setVerdict(await validateModel(draftToSubmission(editing)))
+    } catch (e) {
+      setVerdict(null)
+      setSaveError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setValidating(false)
+    }
+  }
+
+  const onSave = async () => {
+    if (!editing) return
+    setSaving(true)
+    setSaveError(null)
+    try {
+      const result = await saveModel(draftToSubmission(editing))
+      closeEditor()
+      // Clear any filter so the new card is visible, then reveal it once the list reloads.
+      setQuery('')
+      setKind('all')
+      await refresh()
+      setHighlight(result.canonical_name)
+    } catch (e) {
+      setSaveError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const confirmDelete = async () => {
+    const name = pendingDelete
+    if (name == null) return
+    setPendingDelete(null)
+    setActionError(null)
+    try {
+      const result = await deleteModel(name)
+      if (expanded === name) setExpanded(null)
+      await refresh()
+      // Deleting the model also deleted its runs; reload the board so those rows leave the
+      // leaderboard without a manual refresh.
+      if (result.runs_deleted > 0) await onBoardChanged?.()
+    } catch (e) {
+      setActionError(e instanceof Error ? e.message : String(e))
+      await refresh()
+    }
+  }
+
+  // A load failure (catalog unreadable) replaces the panel, as before. Action errors stay
+  // inline below, so a failed delete does not blank the catalog.
+  if (error && models === null) return <CatalogError message={error} />
+  if (models === null) return <p className="dek">Reading the model catalog.</p>
+
   const shown = filterModels(models, query, kind)
   return (
     <>
-      <ModelsToolbar
-        query={query}
-        onQuery={setQuery}
-        kind={kind}
-        onKind={setKind}
-        shown={shown.length}
-        total={models.length}
-      />
-      {shown.length === 0 ? (
-        <p className="dek empty">No models match that filter.</p>
+      {actionError && <p className="dek issue">{actionError}</p>}
+
+      {models.length === 0 ? (
+        // An empty catalog is a misconfiguration, distinct from a filter that matched
+        // nothing: ModelsList carries the BLIS_CATALOG pointer for the former.
+        <ModelsList models={[]} expanded={expanded} onToggle={toggle} configFor={(n) => configs[n]} />
       ) : (
-        <ModelsList
-          models={shown}
-          expanded={expanded}
-          onToggle={toggle}
-          configFor={(name) => configs[name]}
+        <>
+          <ModelsToolbar
+            query={query}
+            onQuery={setQuery}
+            kind={kind}
+            onKind={setKind}
+            shown={shown.length}
+            total={models.length}
+          />
+          {shown.length === 0 ? (
+            <p className="dek empty">No models match that filter.</p>
+          ) : (
+            <ModelsList
+              models={shown}
+              expanded={expanded}
+              onToggle={toggle}
+              configFor={(name) => configs[name]}
+              onDelete={setPendingDelete}
+              highlighted={highlight}
+            />
+          )}
+        </>
+      )}
+
+      <ConfirmDialog
+        open={pendingDelete !== null}
+        title="Delete model?"
+        confirmLabel="Delete"
+        onConfirm={confirmDelete}
+        onCancel={() => setPendingDelete(null)}
+      >
+        Delete <code className="mono">{pendingDelete}</code>? This removes the model you added
+        from the catalog and the picker, and permanently deletes any leaderboard runs that used
+        it. The base catalog is not affected. This cannot be undone.
+      </ConfirmDialog>
+
+      {/* The Add-a-model trigger: a fixed bottom-right pill, like the board's Compare control.
+          It opens the editor modal. */}
+      <div className="comparebar">
+        <button type="button" className="cmpbtn addmodel-fab" onClick={openAdd}>
+          <svg
+            width="15"
+            height="15"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2.4"
+            strokeLinecap="round"
+            aria-hidden="true"
+          >
+            <path d="M12 5v14M5 12h14" />
+          </svg>
+          Add a model
+        </button>
+      </div>
+
+      {editing && (
+        <ModelEditor
+          draft={editing}
+          verdict={verdict}
+          validating={validating}
+          saving={saving}
+          saveError={saveError}
+          onChange={setEditing}
+          onValidate={onValidate}
+          onSave={onSave}
+          onCancel={closeEditor}
         />
       )}
     </>
@@ -299,12 +447,19 @@ export function ModelsList({
   expanded,
   onToggle,
   configFor,
+  onDelete,
+  highlighted = null,
 }: {
   models: ModelInfo[]
   expanded: string | null
   onToggle: (name: string) => void
   /** The load state of a model's config, or undefined before it has been opened. */
   configFor: (name: string) => ConfigState | undefined
+  /** Delete a user-added model. Omitted (read-only view) means no card shows the control;
+   * when present, only user-added cards do. */
+  onDelete?: (name: string) => void
+  /** The canonical name of a just-added model to pulse and scroll to, or null. */
+  highlighted?: string | null
 }) {
   if (models.length === 0) {
     return (
@@ -330,6 +485,8 @@ export function ModelsList({
                 open={m.name === expanded}
                 onToggle={onToggle}
                 config={configFor(m.name)}
+                onDelete={onDelete}
+                highlighted={m.name === highlighted}
               />
             ))}
           </div>
@@ -350,18 +507,38 @@ function ModelCard({
   open,
   onToggle,
   config,
+  onDelete,
+  highlighted = false,
 }: {
   model: ModelInfo
   open: boolean
   onToggle: (name: string) => void
   config: ConfigState | undefined
+  onDelete?: (name: string) => void
+  highlighted?: boolean
 }) {
   const spec = model.spec ?? {}
   const org = orgOf(model.name)
   const context = formatContext(spec.context)
   const meterPct = spec.context ? Math.max(2, contextMeterFraction(spec.context) * 100) : 0
+  // A model with no origin (an older server) reads as base. Delete shows only on a user-added
+  // card and only when the parent passed a handler (a read-only list passes none). A model is
+  // added or deleted, never edited: editing its config would invalidate the runs filed under
+  // it.
+  const isUser = model.origin === 'user'
+  const showDelete = isUser && onDelete
   return (
-    <div className={`mcard${open ? ' open' : ''}`}>
+    <div
+      className={`mcard${open ? ' open' : ''}${isUser ? ' mcard-user' : ''}${highlighted ? ' revealed' : ''}`}
+      id={highlighted ? 'mcard-revealed' : undefined}
+      // A styled hover/focus tooltip (data-tip, wired globally by initTooltips) explaining the
+      // blue tint, rather than a native title, which does not show reliably.
+      data-tip={
+        isUser
+          ? 'Added by a user. It persists across restarts and takes precedence over the base catalog if an update ships the same name.'
+          : undefined
+      }
+    >
       <button
         type="button"
         className="mcard-face"
@@ -395,6 +572,34 @@ function ModelCard({
         </div>
         <ModelSpecs model={model} />
       </button>
+      {/* The delete control sits outside the face button (a button cannot nest buttons): a
+          trash icon on a user-added card. A base model is read-only, like a built-in
+          workload. There is no edit — a model is added or deleted, never changed in place. */}
+      {showDelete && (
+        <div className="mcard-actions">
+          <button
+            type="button"
+            className="mcard-trash"
+            aria-label="Delete model"
+            title="Delete this model"
+            onClick={() => onDelete(model.name)}
+          >
+            <svg
+              width="15"
+              height="15"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="1.9"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              aria-hidden="true"
+            >
+              <path d="M3 6h18M8 6V4a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v2m2 0v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6M10 11v6M14 11v6" />
+            </svg>
+          </button>
+        </div>
+      )}
       {open && <div className="mcard-detail">{renderConfig(config)}</div>}
     </div>
   )
