@@ -343,17 +343,8 @@ function ModelsPanel({ onBoardChanged }: { onBoardChanged?: () => void | Promise
       {/* The Add-a-model trigger: a fixed bottom-right pill, like the board's Compare control.
           It opens the editor modal. */}
       <div className="comparebar">
-        <button type="button" className="cmpbtn addmodel-fab" onClick={openAdd}>
-          <svg
-            width="15"
-            height="15"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2.4"
-            strokeLinecap="round"
-            aria-hidden="true"
-          >
+        <button type="button" className="cmpbtn" onClick={openAdd}>
+          <svg className="cmpico" viewBox="0 0 24 24" aria-hidden="true">
             <path d="M12 5v14M5 12h14" />
           </svg>
           Add a model

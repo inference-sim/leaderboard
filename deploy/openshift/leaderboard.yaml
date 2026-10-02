@@ -151,6 +151,19 @@ spec:
             # default is this env var; keep it inside the /data mount.
             - name: LEADERBOARD_RESULTS
               value: /data/results
+            # Deployment-level dependency versions the web nav rail shows (served at
+            # /api/version). serve AUTO-DETECTS blis (the bundled checkout keeps its .git) and
+            # the catalog (the image carries a VERSION file), so those are left empty to use the
+            # detected commit. The leaderboard binary is built with its .git stripped, so it has
+            # no build stamp: set LEADERBOARD_VERSION to the release here (it tracks the image
+            # tag). Any value set here OVERRIDES auto-detection — e.g. to show a tag instead of a
+            # commit. Declared-grade, not verified; an empty, undetectable value shows "unknown".
+            - name: LEADERBOARD_VERSION
+              value: "0.1.7"
+            - name: BLIS_VERSION
+              value: ""
+            - name: BLIS_CATALOG_VERSION
+              value: ""
           # Set the entrypoint explicitly to the bare binary so `args` below ARE the
           # whole command. Kubernetes appends `args` to the image ENTRYPOINT, so if the
           # image bakes `serve -addr ... -blis ...` into its entrypoint (as older images

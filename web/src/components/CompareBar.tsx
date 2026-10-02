@@ -1,3 +1,15 @@
+// Compare: two panels side by side, in the app's stroked line-icon vocabulary (24x24,
+// currentColor). A split frame reads as "set these two against each other", distinct from
+// the leaderboard's ranked bars and the catalog's grid of squares.
+function CompareIcon() {
+  return (
+    <svg className="cmpico" viewBox="0 0 24 24" aria-hidden="true">
+      <rect x="3" y="5" width="18" height="14" rx="2" />
+      <path d="M12 5v14" />
+    </svg>
+  )
+}
+
 interface CompareBarProps {
   /** Whether compare mode is on. */
   active: boolean
@@ -24,6 +36,7 @@ export function CompareBar({ active, count, total, onToggle, onSelectAll, onClea
     return (
       <div className="comparebar">
         <button type="button" className="cmpbtn" aria-pressed={false} onClick={onToggle}>
+          <CompareIcon />
           Compare
         </button>
       </div>
