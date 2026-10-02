@@ -95,6 +95,18 @@ export function isMoE(models: ModelInfo[], name: string): boolean {
   return models.some((m) => m.name === name && m.moe)
 }
 
+/** reconcileModel returns the model a run form should hold given the current catalog: the
+ * current selection when it is still offered (or '' when nothing is selected yet), otherwise
+ * the first catalog model. So a selection whose model was deleted reverts to a valid one
+ * rather than lingering and failing at run time. An empty catalog leaves the selection
+ * unchanged (there is nothing to revert to). */
+export function reconcileModel(models: ModelInfo[], selected: string): string {
+  const first = models[0]
+  if (selected === '' || !first) return selected
+  if (models.some((m) => m.name === selected)) return selected
+  return first.name
+}
+
 /** listModels fetches the catalog. A fetch rejection is "the server is not running"; an
  * HTTP error carries the server's {error} message. fetchImpl is injectable so the call is
  * unit-tested without a server, the same shape as workloads.listWorkloads. */

@@ -18,7 +18,7 @@ import {
 } from '../catalog'
 import { customFieldsFrom, interpret, suggestRunId, suggestWorkloadName } from '../newrun'
 import type { FormValues, Output } from '../newrun'
-import { isMoE, listModels } from '../models'
+import { isMoE, listModels, reconcileModel } from '../models'
 import type { ModelInfo } from '../models'
 import { collapseHardwareAliases, listHardware } from '../hardware'
 import type { HardwareInfo } from '../hardware'
@@ -141,7 +141,19 @@ export function NewRun({
     let cancelled = false
     listModels().then(
       (ms) => {
-        if (!cancelled) setModels(ms)
+        if (cancelled) return
+        setModels(ms)
+        // If the selected model is no longer in the catalog (e.g. it was deleted from the
+        // Catalog tab), revert to a model that still exists, so the form never carries a
+        // model that cannot run. A dense replacement clears the MoE knobs, as a manual
+        // model change does.
+        setValues((v) => {
+          const next = reconcileModel(ms, v.model)
+          if (next === v.model) return v
+          return isMoE(ms, next)
+            ? { ...v, model: next }
+            : { ...v, model: next, enableExpertParallel: false, moeCommBackend: '' }
+        })
       },
       (e) => {
         if (!cancelled) setLoadError(e instanceof Error ? e.message : String(e))

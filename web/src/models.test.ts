@@ -12,6 +12,7 @@ import {
   modelOf,
   orgOf,
   precision,
+  reconcileModel,
   saveModel,
   validateModel,
 } from './models'
@@ -41,6 +42,26 @@ describe('isMoE', () => {
   it('treats an unknown name as dense', () => {
     expect(isMoE(catalog, 'gpt-4')).toBe(false)
     expect(isMoE([], 'qwen/qwen3-14b')).toBe(false)
+  })
+})
+
+describe('reconcileModel', () => {
+  const list: ModelInfo[] = [
+    { name: 'qwen/qwen3-14b', moe: false },
+    { name: 'mistralai/mixtral-8x7b-v0.1', moe: true },
+  ]
+
+  it('keeps a selection that is still in the catalog', () => {
+    expect(reconcileModel(list, 'qwen/qwen3-14b')).toBe('qwen/qwen3-14b')
+  })
+
+  it('reverts to the first model when the selection was deleted', () => {
+    expect(reconcileModel(list, 'acme/removed')).toBe('qwen/qwen3-14b')
+  })
+
+  it('leaves a blank selection and an empty catalog alone', () => {
+    expect(reconcileModel(list, '')).toBe('')
+    expect(reconcileModel([], 'acme/removed')).toBe('acme/removed')
   })
 })
 

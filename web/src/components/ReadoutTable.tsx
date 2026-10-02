@@ -178,7 +178,22 @@ export function ReadoutTable({
     }),
     [workload.loadAxis.kind],
   )
-  const repro = useReproToggles(rows)
+  // The reproduce panels are keyed over every ranked row; the args bulk-expand is keyed over
+  // just the rows whose deployment cell actually has hidden fields to show (a cell with
+  // nothing past "show all" has no toggle), so Expand-all rests disabled when none do.
+  const reproKeys = useMemo(() => rows.map(reproKey), [rows])
+  const argKeys = useMemo(
+    () =>
+      rows
+        .filter((r) => {
+          const spec = deploymentSpec(r, varying)
+          return spec.knobs.length > KNOBS_BEFORE_COLLAPSE || spec.rest.length > 0
+        })
+        .map(reproKey),
+    [rows, varying],
+  )
+  const repro = useRowToggles(reproKeys)
+  const args = useRowToggles(argKeys)
   // The table is replaced by a short note only when a target removed every complete row and
   // there are no disqualified rows to show either; a group with only disqualified runs (a
   // windowed sweep) still renders them inline, so it is never mistaken for empty.
@@ -222,6 +237,7 @@ export function ReadoutTable({
             sort={sort}
             onRemoveSort={onRemoveSort ?? (() => {})}
             repro={repro}
+            args={args}
             showControls={true}
           />
 
@@ -272,6 +288,8 @@ export function ReadoutTable({
                     showLoad={showLoad}
                     open={repro.isOpen(record)}
                     onToggleRepro={() => repro.toggle(record)}
+                    argsOpen={args.isOpen(record)}
+                    onToggleArgs={() => args.toggle(record)}
                     revealed={revealedKey === runKey(record)}
                     onDelete={showDelete ? onDelete : undefined}
                     compareMode={compareMode}
@@ -308,6 +326,8 @@ export function ReadoutTable({
                         showLoad={showLoad}
                         open={repro.isOpen(record)}
                         onToggleRepro={() => repro.toggle(record)}
+                        argsOpen={args.isOpen(record)}
+                        onToggleArgs={() => args.toggle(record)}
                         revealed={revealedKey === runKey(record)}
                         onDelete={showDelete ? onDelete : undefined}
                         compareMode={compareMode}
@@ -343,14 +363,15 @@ function reproKey(record: RunRecord): string {
 }
 
 /**
- * Owns which rows have their reproduce (blis command) panel open. Each row still toggles
- * on its own click; this only adds a shared handle so one control can open or close every
- * row at once. Keys not in the current `rows` (a filter narrowed them away) simply never
- * render — the set is not pruned, so a row that returns comes back in the state it left.
+ * Owns which rows have a given panel open — used once for the reproduce (blis command)
+ * panels and once for the deployment cells' expanded args. Each row still toggles on its own
+ * click; this only adds a shared handle so one control can open or close every row at once.
+ * `keys` are the rows the bulk buttons act on (and read their resting state from); a key not
+ * in it still toggles on click, and the set is never pruned, so a row that a filter narrowed
+ * away comes back in the state it left.
  */
-function useReproToggles(rows: RunRecord[]) {
+function useRowToggles(keys: string[]) {
   const [open, setOpen] = useState<Set<string>>(() => new Set())
-  const keys = useMemo(() => rows.map(reproKey), [rows])
   const isOpen = (record: RunRecord) => open.has(reproKey(record))
   const toggle = (record: RunRecord) =>
     setOpen((prev) => {
@@ -365,38 +386,42 @@ function useReproToggles(rows: RunRecord[]) {
     toggle,
     expandAll: () => setOpen(new Set(keys)),
     collapseAll: () => setOpen(new Set()),
-    // Over the visible rows only, so the bulk buttons reflect what is on screen. With no
-    // rows both read true, so the always-shown control rests with both buttons disabled.
+    // allOpen is over the bulk keys only, so Expand-all rests disabled once every row it
+    // governs is open (and when there are no such rows). anyOpen covers every open panel,
+    // including a disqualified row opened on its own, so Collapse-all is live whenever
+    // anything at all is showing.
     allOpen: keys.every((k) => open.has(k)),
-    noneOpen: keys.every((k) => !open.has(k)),
+    anyOpen: open.size > 0,
   }
 }
 
 /**
- * Expand-all / collapse-all for the table's reproduce panels. Each button disables itself
- * once it would be a no-op (everything already open, or already closed), which doubles as
- * a resting-state read of whether any command is showing. The disqualified band keeps its
- * own per-run toggles; this control is the table's rows only.
+ * Expand-all / collapse-all over the table rows. Expand all opens the deployment cells' hidden
+ * args (the "show all" fields) — not the reproduce command, which stays a per-row click.
+ * Collapse all closes everything: any open reproduce panel and any expanded args. Each button
+ * disables itself when it would be a no-op (every expandable cell already open; nothing open at
+ * all), which doubles as a resting-state read. The disqualified band keeps its own per-run
+ * toggles; the bulk expand governs the table's ranked rows, but collapse clears every row.
  */
-function ReproControls({
-  allOpen,
-  noneOpen,
+function RowControls({
+  expandDisabled,
+  collapseDisabled,
   onExpandAll,
   onCollapseAll,
 }: {
-  allOpen: boolean
-  noneOpen: boolean
+  expandDisabled: boolean
+  collapseDisabled: boolean
   onExpandAll: () => void
   onCollapseAll: () => void
 }) {
   return (
-    <div className="rowtools" role="group" aria-label="Reproduce commands for every row">
+    <div className="rowtools" role="group" aria-label="Expand or collapse every row">
       <button
         type="button"
         className="rowtool"
         onClick={onExpandAll}
-        disabled={allOpen}
-        aria-label="Expand every row to show its blis command"
+        disabled={expandDisabled}
+        aria-label="Expand every row to show its full configuration"
       >
         <span className="car" aria-hidden="true">
           ▾
@@ -407,8 +432,8 @@ function ReproControls({
         type="button"
         className="rowtool"
         onClick={onCollapseAll}
-        disabled={noneOpen}
-        aria-label="Collapse every row to hide its blis command"
+        disabled={collapseDisabled}
+        aria-label="Collapse the command and configuration on every row"
       >
         <span className="car" aria-hidden="true">
           ▸
@@ -428,11 +453,13 @@ function TableTools({
   sort,
   onRemoveSort,
   repro,
+  args,
   showControls,
 }: {
   sort: SortSpec[]
   onRemoveSort: (key: string) => void
-  repro: ReturnType<typeof useReproToggles>
+  repro: ReturnType<typeof useRowToggles>
+  args: ReturnType<typeof useRowToggles>
   showControls: boolean
 }) {
   if (sort.length === 0 && !showControls) return null
@@ -441,11 +468,16 @@ function TableTools({
       <SortNote sort={sort} onRemove={onRemoveSort} />
       {showControls && (
         <div className="rowtools">
-          <ReproControls
-            allOpen={repro.allOpen}
-            noneOpen={repro.noneOpen}
-            onExpandAll={repro.expandAll}
-            onCollapseAll={repro.collapseAll}
+          <RowControls
+            // Expand all opens the cells' hidden args; collapse all closes args and reproduce
+            // panels alike.
+            expandDisabled={args.allOpen}
+            collapseDisabled={!repro.anyOpen && !args.anyOpen}
+            onExpandAll={args.expandAll}
+            onCollapseAll={() => {
+              repro.collapseAll()
+              args.collapseAll()
+            }}
           />
         </div>
       )}
@@ -539,6 +571,8 @@ function DataRow({
   showLoad,
   open,
   onToggleRepro,
+  argsOpen,
+  onToggleArgs,
   revealed,
   onDelete,
   compareMode,
@@ -563,6 +597,10 @@ function DataRow({
    * the table so the expand-all / collapse-all control can drive every row at once. */
   open: boolean
   onToggleRepro: () => void
+  /** Whether this row's deployment cell is expanded to show its hidden args, and how to flip
+   * it. Lives in the table too, so expand-all drives every cell's args at once. */
+  argsOpen: boolean
+  onToggleArgs: () => void
   /** Whether this row is the one a reveal is currently highlighting (§7). */
   revealed: boolean
   /** Opens the delete confirmation for this run, or undefined when deletion is not offered. */
@@ -613,6 +651,8 @@ function DataRow({
           reproOpen={open}
           onToggleRepro={onToggleRepro}
           reproPanelId={panelId}
+          expanded={argsOpen}
+          onToggleArgs={onToggleArgs}
           onDelete={onDelete}
           dq={dq}
         />
@@ -650,6 +690,8 @@ function DeploymentCell({
   reproOpen,
   onToggleRepro,
   reproPanelId,
+  expanded,
+  onToggleArgs,
   onDelete,
   dq = false,
 }: {
@@ -661,13 +703,16 @@ function DeploymentCell({
   reproOpen: boolean
   onToggleRepro: () => void
   reproPanelId: string
+  /** Whether the cell is expanded to show its hidden args ("show all"), and how to flip it.
+   *  Owned by the table so expand-all / collapse-all can drive every cell at once. */
+  expanded: boolean
+  onToggleArgs: () => void
   /** Opens the delete confirmation for this run, or undefined when deletion is not offered. */
   onDelete?: (record: RunRecord) => void
   /** Whether this is a disqualified run: leads the cell with a ⚠ marker (the row's non-color
    *  flag; the reasons live in the expanded why-block). */
   dq?: boolean
 }) {
-  const [expanded, setExpanded] = useState(false)
   const spec = deploymentSpec(record, varying)
   const knobs = expanded ? spec.knobs : spec.knobs.slice(0, KNOBS_BEFORE_COLLAPSE)
   const hidden = spec.knobs.length - knobs.length + spec.rest.length
@@ -728,7 +773,7 @@ function DeploymentCell({
             type="button"
             className="dep-more"
             aria-expanded={expanded}
-            onClick={() => setExpanded((v) => !v)}
+            onClick={onToggleArgs}
           >
             {expanded ? 'Show less' : `Show all (${hidden} more)`}
           </button>

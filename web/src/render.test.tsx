@@ -633,19 +633,21 @@ describe('Reproduce the blis command (row-level)', () => {
   })
 })
 
-describe('Expand all / Collapse all (bulk reproduce toggle over the table rows)', () => {
+describe('Expand all / Collapse all (bulk toggle over the table rows)', () => {
   const html = renderToStaticMarkup(<ReadoutTable workload={mainW} models={[]} />)
 
-  it('offers both controls above a multi-row table', () => {
+  it('offers both controls above a multi-row table: expand the config, collapse everything', () => {
     expect(html).toContain('Expand all')
     expect(html).toContain('Collapse all')
-    expect(html).toMatch(/aria-label="Expand every row to show its blis command"/)
-    expect(html).toMatch(/aria-label="Collapse every row to hide its blis command"/)
+    // Expand-all opens the deployment cells' hidden args, not the blis command.
+    expect(html).toMatch(/aria-label="Expand every row to show its full configuration"/)
+    expect(html).toMatch(/aria-label="Collapse the command and configuration on every row"/)
   })
 
   it('rests with Collapse all disabled and Expand all enabled, since nothing is open on load', () => {
     const expand = html.match(/<button[^>]*aria-label="Expand every row[^"]*"[^>]*>/)![0]
-    const collapse = html.match(/<button[^>]*aria-label="Collapse every row[^"]*"[^>]*>/)![0]
+    const collapse = html.match(/<button[^>]*aria-label="Collapse the command[^>]*>/)![0]
+    // mainW has rows with hidden args, so Expand-all is live; nothing is open, so Collapse-all rests.
     expect(expand).not.toContain('disabled')
     expect(collapse).toContain('disabled')
   })
@@ -661,7 +663,8 @@ describe('Expand all / Collapse all (bulk reproduce toggle over the table rows)'
     expect(barren).toContain('Expand all')
     expect(barren).toContain('Collapse all')
     const expand = barren.match(/<button[^>]*aria-label="Expand every row[^"]*"[^>]*>/)![0]
-    const collapse = barren.match(/<button[^>]*aria-label="Collapse every row[^"]*"[^>]*>/)![0]
+    const collapse = barren.match(/<button[^>]*aria-label="Collapse the command[^>]*>/)![0]
+    // No rows means no expandable args and nothing open, so both rest disabled.
     expect(expand).toContain('disabled')
     expect(collapse).toContain('disabled')
   })
