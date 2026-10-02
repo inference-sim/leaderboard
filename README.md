@@ -12,19 +12,67 @@ candidate deployments; `leaderboard run` executes them and writes
 disqualified runs shown beneath it. The design and its evidence are in
 `docs/superpowers/specs/` and `prototypes/`.
 
-## Dependency: BLIS
+## Dependencies
 
-This repo does not simulate anything itself. It consumes the JSON output of the
-`blis` binary from a sibling checkout:
+This repo does not simulate anything itself. It stands on three first-party
+dependencies, each versioned on its own and each declared to a running deployment
+through an environment variable (see [Environment variables](#environment-variables)):
+
+| Dependency | What it is | How it is located |
+|---|---|---|
+| **leaderboard** | this repo — the Go pipeline (`internal/`, `cmd/leaderboard`) and the web app (`web/`) | the binary you build / the image you run |
+| **blis** | the upstream [BLIS](https://github.com/inference-sim/inference-sim) simulator (Go), consumed as a sibling checkout | `-blis` flag / the bundled checkout in the image |
+| **blis-catalog** | the model catalog, a separate [repo](https://github.com/inference-sim/blis-catalog) (no in-repo models since inference-sim#1797) | `$BLIS_CATALOG` or `--catalog` (no default, no search path) |
+
+The expected sibling layout for local work:
 
 ```
 go/src/inference-sim/
 ├── inference-sim/   # upstream BLIS simulator (Go)
+├── blis-catalog/    # model catalog (clone it once; see below)
 └── leaderboard/     # this repo
 ```
 
 BLIS is a CPU-only, deterministic discrete-event simulator — same flags and seed
 produce the same numbers, so results are reproducible without GPUs.
+
+### Environment variables
+
+The pipeline and server are configured entirely through environment variables (a few
+also have an equivalent CLI flag, which wins when set). Declare them in your shell with
+`export NAME=value`; in a container with `ENV` / `docker run -e NAME=value`; and in the
+OpenShift deployment through the container's `env:` block (see
+`deploy/openshift/leaderboard.yaml`).
+
+| Variable | Flag | Default | Purpose |
+|---|---|---|---|
+| `BLIS_CATALOG` | `--catalog` (blis) | *(none — required for any run)* | Path to a `blis-catalog` clone. `blis` has no default and no search path, so a run is refused without it. The server reads it at startup and every `blis` subprocess it spawns inherits it. |
+| `LEADERBOARD_RESULTS` | `-out` | `~/leaderboard-results` | Where `results/<group_id>/<run_id>.json` is read and written. Point it at the repo (`results`) for local dev, or a persistent volume in a deployment. |
+| `LEADERBOARD_USER_MODELS` | `-user-models` | `<out>/user-models` | The pristine store for models added through the web app, re-overlaid onto the catalog on each boot. |
+| `LEADERBOARD_MAX_UPLOAD_MB` | `-max-upload-mb` | ~1 GiB | Cap for a trace upload to `/api/traces`, in MiB. Raise it for large Weka/OTel corpora. |
+| `LEADERBOARD_VERSION` | *(env only)* | *(auto-detect, else `unknown`)* | Display-only override: the leaderboard build the web app reports. |
+| `BLIS_VERSION` | *(env only)* | *(auto-detect, else `unknown`)* | Display-only override: the `blis` build the app reports. |
+| `BLIS_CATALOG_VERSION` | *(env only)* | *(auto-detect, else `unknown`)* | Display-only override: the catalog version the app reports. |
+
+The last three show as small text beside the project links in the web app's left nav rail
+(served at `GET /api/version`), stating which build of each dependency the running server is
+made of. Each value is free-form — a tag (`v1.2.3`), a commit (`abc1234`), a date, or any
+combination — and is shown **verbatim**.
+
+They resolve in order: **the env var wins** (set it to show a tag, or to correct a wrong
+auto-detect); otherwise the server **auto-detects** at startup —
+
+- `leaderboard` from the binary's embedded VCS stamp (`go build` from a git checkout records
+  it automatically; an image built from a tree with `.git` stripped has none, so set the env
+  var there — the OpenShift deployment does),
+- `blis` from the bundled checkout's `git HEAD` (the image ships blis's `.git`),
+- `catalog` from a `VERSION` file bundled with it (written by `deploy/openshift/build.sh`), or
+  its `git HEAD` for a local checkout that still has one;
+
+and failing both it shows `unknown`. Auto-detected or declared, these are **not verified** —
+nothing proves the string matches the artifact actually serving — so treat them as a label,
+not a guarantee. With no server at all (the static committed board), the links show without
+versions.
 
 ### Getting a `blis` binary
 

@@ -1855,6 +1855,11 @@ tr.revealed td,
   display: flex;
   align-items: center;
   gap: 10px;
+  /* Repo-name labels are long; the version rides beside the name when it fits and wraps just
+     beneath it when it doesn't, so a long "commit-dirty" value never clips or widens the rail.
+     row-gap tightens the wrapped line (gap would otherwise push it a full 10px down). */
+  flex-wrap: wrap;
+  row-gap: 1px;
   padding: 8px 12px;
   border-radius: 3px;
   color: var(--muted);
@@ -1955,6 +1960,12 @@ tr.revealed td,
     gap: 4px;
     padding-top: 0;
     border-top: none;
+  }
+
+  /* The versions are provenance, not navigation: no room beside the names in the tight top
+     bar, so they drop out on narrow viewports (still served at /api/version). */
+  .railver {
+    display: none;
   }
 }
 
@@ -6093,4 +6104,26 @@ table.readout tbody tr.dqline.cmphl td.lft {
   border: 1px dashed var(--line);
   border-radius: 3px;
   font-size: 12px;
+}
+
+/* The deployment version beside a project name in the rail foot (e.g. `Source  v0.1.7`):
+   quiet provenance, so tiny mono type in the muted rest color, pushed to the link's right
+   edge. It truncates with an ellipsis so a long "tag (commit)" value never widens the rail.
+   Rendered only when /api/version answered, so the static build shows the links alone. */
+.railver {
+  margin-left: auto;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  font-weight: 400;
+  color: var(--muted);
+}
+
+/* Collapsed, the rail is an icon strip with no room for text: the version drops out beside
+   the nav label it rides with. */
+.sidebar.collapsed .railver {
+  display: none;
 }

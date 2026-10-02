@@ -72,6 +72,15 @@ ENV BLIS_CATALOG=/app/inference-sim/blis-catalog
 # bare `docker run` agree without repeating the path in args; the Deployment sets
 # the same LEADERBOARD_RESULTS explicitly.
 ENV LEADERBOARD_RESULTS=/data/results
+# Deployment-level dependency versions, shown in the web nav rail and served at /api/version.
+# serve AUTO-DETECTS blis (its bundled checkout keeps .git) and the catalog (build.sh writes a
+# VERSION file into it) at startup, so those two need nothing here. The leaderboard binary is
+# built from a tree with its .git stripped (build.sh), so it carries NO build stamp — set
+# LEADERBOARD_VERSION (the Deployment does) to show the release. Any value here overrides the
+# auto-detected one. Display-only and declared-grade, not verified.
+ENV LEADERBOARD_VERSION=
+ENV BLIS_VERSION=
+ENV BLIS_CATALOG_VERSION=
 ENTRYPOINT ["/app/leaderboard"]
 # Overridden by the Deployment's args; kept in sync so `docker run` behaves the same.
 CMD ["serve", "-addr=:8080", "-blis=/app/inference-sim", "-workloads=/data/workloads.yaml", "-max-upload-mb=4096"]

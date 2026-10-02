@@ -75,6 +75,15 @@ ENV BLIS_CATALOG=/app/inference-sim/blis-catalog
 # Results location is chosen by env, not baked into the entrypoint: mount a volume
 # over /app/results, or override LEADERBOARD_RESULTS to a different persisted path.
 ENV LEADERBOARD_RESULTS=/app/results
+# Deployment-level dependency versions, shown in the web nav rail and served at
+# /api/version. Left empty on purpose: serve AUTO-DETECTS each at startup — the leaderboard
+# binary's build VCS stamp (this image is built with its .git in context), the bundled blis
+# checkout's git HEAD, and the blis-catalog's git HEAD. Set one of these to OVERRIDE the
+# detected value (e.g. `docker run -e LEADERBOARD_VERSION=v0.1.7`), for instance to show a
+# release tag instead of a commit. Display-only and declared-grade, not verified.
+ENV LEADERBOARD_VERSION=
+ENV BLIS_VERSION=
+ENV BLIS_CATALOG_VERSION=
 # ENTRYPOINT is the bare binary; the subcommand and its flags live in CMD. This way a
 # `docker run … <args>` or a Kubernetes `args:` REPLACES the command instead of being
 # appended to it — appending would duplicate the positional `serve` and make Go's flag

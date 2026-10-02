@@ -25,6 +25,9 @@ import { LiveRunBanner } from './components/LiveRunBanner'
 import { Toast } from './components/Toast'
 import { Catalog } from './components/Catalog'
 import { ErrorBoundary } from './components/ErrorBoundary'
+import { RailVersion } from './components/RailVersion'
+import { fetchVersion } from './version'
+import type { Versions } from './version'
 import { emptyFilterNoun, showLoadFilter } from './filter'
 import { initialValues, saveThenRun } from './newrun'
 import type { FormValues, Output } from './newrun'
@@ -87,6 +90,17 @@ function BlisIcon() {
   )
 }
 
+// blis-catalog is the third project the board stands on (the model catalog repo), so it gets
+// its own stroked mark alongside Source and BLIS: stacked sheets, the collection it holds.
+// Distinct from the main nav's grid CatalogIcon (which marks the in-app Catalog view).
+function CatalogRepoIcon() {
+  return (
+    <svg className="navico" viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M12 4 3 8l9 4 9-4-9-4zM3 12l9 4 9-4M3 16l9 4 9-4" />
+    </svg>
+  )
+}
+
 const VIEWS: { view: View; hash: string; label: string; icon: ReactNode }[] = [
   { view: 'board', hash: '#/', label: 'Leaderboard', icon: <BoardIcon /> },
   { view: 'catalog', hash: '#/catalog', label: 'Catalog', icon: <CatalogIcon /> },
@@ -133,6 +147,10 @@ export function App() {
   // the static committed board (no server) shows no trash button. It starts false and is
   // set the first time /api/results answers.
   const [serverAvailable, setServerAvailable] = useState(false)
+  // The deployment versions for the footer, or null when there is no /api/version to answer
+  // (the static committed board served with no backend, or a serve too old to have the route).
+  // Null hides the footer entirely, so the static build is visually unchanged.
+  const [versions, setVersions] = useState<Versions | null>(null)
   // The run awaiting a delete confirmation, and the last delete failure to show. The
   // confirmation and the destructive call live here at the root, beside the records and the
   // live run a delete may have to clear, rather than in the table that renders the button.
@@ -204,6 +222,15 @@ export function App() {
   useEffect(() => {
     reload()
   }, [reload])
+
+  // Fetch the deployment versions once on mount, the same way results are fetched. A
+  // rejection (no server, or a serve predating the route) leaves `versions` null and the
+  // footer unrendered, mirroring how a dead server hides the delete affordance.
+  useEffect(() => {
+    fetchVersion()
+      .then(setVersions)
+      .catch(() => setVersions(null))
+  }, [])
 
   const onReveal = useCallback((record: RunRecord) => {
     setRevealTarget({ groupId: record.group_id, runId: record.run_id })
@@ -314,6 +341,10 @@ export function App() {
             </a>
           ))}
         </nav>
+        {/* The three projects the board stands on, each linking to its repo. The deployment
+            version of each (from /api/version) rides beside its name as small muted text,
+            rendered only when a server answered — the static build shows the links alone.
+            Both the label and the version drop out when the rail collapses to icons (CSS). */}
         <div className="railfoot">
           <a
             href="https://github.com/inference-sim/leaderboard"
@@ -323,7 +354,8 @@ export function App() {
             title={collapsed ? 'Leaderboard source on GitHub' : undefined}
           >
             <GithubIcon />
-            <span className="navlabel">Source</span>
+            <span className="navlabel">leaderboard</span>
+            {versions && <RailVersion value={versions.leaderboard} />}
           </a>
           <a
             href="https://github.com/inference-sim/inference-sim/"
@@ -333,7 +365,19 @@ export function App() {
             title={collapsed ? 'BLIS simulator on GitHub' : undefined}
           >
             <BlisIcon />
-            <span className="navlabel">BLIS</span>
+            <span className="navlabel">inference-sim</span>
+            {versions && <RailVersion value={versions.blis} />}
+          </a>
+          <a
+            href="https://github.com/inference-sim/blis-catalog"
+            target="_blank"
+            rel="noreferrer"
+            aria-label="BLIS model catalog on GitHub"
+            title={collapsed ? 'BLIS model catalog on GitHub' : undefined}
+          >
+            <CatalogRepoIcon />
+            <span className="navlabel">blis-catalog</span>
+            {versions && <RailVersion value={versions.catalog} />}
           </a>
         </div>
       </aside>

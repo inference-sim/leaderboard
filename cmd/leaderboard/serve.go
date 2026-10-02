@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"runtime/debug"
 	"sort"
 	"strconv"
 	"strings"
@@ -78,7 +79,12 @@ type server struct {
 	// maxUploadBytes caps a trace upload to /api/traces. 0 means the built-in default
 	// (defaultMaxUpload); cmdServe sets it from -max-upload-mb / $LEADERBOARD_MAX_UPLOAD_MB.
 	maxUploadBytes int64
-	execute        func(req runRequest) (schema.Record, error)
+	// versions is the deployment-level provenance /api/version serves and the web nav rail
+	// shows. A field so a test can set it directly without the environment; production
+	// reads it from LEADERBOARD_VERSION / BLIS_VERSION / BLIS_CATALOG_VERSION in cmdServe,
+	// the same os.Getenv pattern as catalogRoot.
+	versions versions
+	execute  func(req runRequest) (schema.Record, error)
 	// validateSpec hands a raw inline WorkloadSpec to blis to surface its own parse and
 	// semantic errors (§5). nil error means blis accepts it.
 	validateSpec func(spec map[string]any) error
@@ -143,6 +149,12 @@ func cmdServe(args []string) error {
 		// together (§4.2).
 		traceStore:     traceingest.Store(filepath.Join(filepath.Dir(catPath), "traces")),
 		maxUploadBytes: int64(*maxUploadMB) << 20,
+		// Deployment-level provenance for the nav rail: an explicit env var per dependency,
+		// else auto-detected (this binary's build VCS stamp, the blis checkout's git HEAD, the
+		// catalog's VERSION file / git HEAD), else "" (rendered as "unknown"). No flag: these
+		// have no behavioural effect, so a flag would add surface for nothing. See the design doc.
+		versions: resolveVersions(os.Getenv, debug.ReadBuildInfo, blisrun.GitProvenance,
+			os.ReadFile, c.blisDir, os.Getenv("BLIS_CATALOG")),
 	}
 	s.execute = s.runOnce
 	s.validateSpec = s.validateSpecWithBlis
@@ -181,6 +193,10 @@ func (s *server) routes() *http.ServeMux {
 	mux.HandleFunc("POST /api/models/validate", s.handleModelValidate)
 	mux.HandleFunc("DELETE /api/models", s.handleModelDelete)
 	mux.HandleFunc("GET /api/hardware", s.handleHardware)
+	// Deployment-level dependency versions for the web nav rail. A dedicated endpoint, not
+	// folded into /api/results, so the server-less static build simply lacks it and the
+	// versions are omitted beside the rail links (web/src/components/RailVersion).
+	mux.HandleFunc("GET /api/version", s.handleVersion)
 	// Serve the built web app when it exists, so `leaderboard serve` is the whole
 	// thing in one process. In development the Vite dev server proxies /api here
 	// instead, and this static handler is never reached.

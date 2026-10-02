@@ -51,11 +51,21 @@ if [ -z "${CATALOG_SRC}" ]; then
   fi
 fi
 git clone --quiet --depth 1 "${CATALOG_SRC}" "${CTX}/blis-catalog"
+# Capture the catalog's cloned commit BEFORE stripping .git, and record it in a VERSION file
+# bundled with the catalog. serve reads <BLIS_CATALOG>/VERSION to auto-detect the catalog
+# version when BLIS_CATALOG_VERSION is unset (the catalog's .git is stripped below, so git is
+# not available at runtime). See the deployment version-display design.
+CATALOG_REF="$(git -C "${CTX}/blis-catalog" rev-parse --short=8 HEAD)"
+printf '%s\n' "${CATALOG_REF}" > "${CTX}/blis-catalog/VERSION"
 rm -rf "${CTX}/blis-catalog/.git"   # config-only; no provenance needed, keep the image lean
 
 echo ">> upstream provenance in image: $(git -C "${CTX}/inference-sim" rev-parse --short=8 HEAD)"
 echo ">> shallow .git size: $(du -sh "${CTX}/inference-sim/.git" | cut -f1)"
 echo ">> model catalog: ${CATALOG_SRC} ($(find "${CTX}/blis-catalog/models" -maxdepth 1 -mindepth 1 -type d 2>/dev/null | wc -l | tr -d ' ') models)"
+# The refs this image auto-detects at runtime (blis from its bundled .git, catalog from the
+# VERSION file above). Printed so an operator can override them with env vars if they prefer a
+# tag over a commit, and to show what the deployed nav rail will report.
+echo ">> this image reports BLIS_VERSION=$(git -C "${CTX}/inference-sim" rev-parse --short=8 HEAD) and BLIS_CATALOG_VERSION=${CATALOG_REF} (override via env to taste)"
 
 echo ">> building ${IMAGE} for ${PLATFORM}"
 # docker's daemon/buildx is not always up on this host; podman is daemon-less and
