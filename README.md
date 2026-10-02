@@ -39,8 +39,9 @@ produce the same numbers, so results are reproducible without GPUs.
 ### Which blis and blis-catalog versions to use
 
 This repo pins the two upstream versions it is built and tested against in the root
-[`.env`](.env) (currently `blis` at `main`, `blis-catalog` at `0.1.1`), along with the
-repo URL for each. That file is the single source of truth, shared by both audiences: a
+[`.env`](.env) (a specific commit of each, plus the repo URL). blis and blis-catalog
+co-evolve, so both are pinned to a matching known-good pair and bumped together, never
+one at a time. That file is the single source of truth, shared by both audiences: a
 given leaderboard commit declares its known-good pair there, and bumping a value updates
 both of the paths below at once.
 
@@ -94,8 +95,8 @@ the working directory. The model catalog is external and must be located explici
 repo. The leaderboard image bundles it; for a raw run, clone it once.
 
 ```bash
-# ref pinned in the root .env (BLIS_CATALOG_REF)
-git clone --branch 0.1.1 https://github.com/inference-sim/blis-catalog.git
+# pinned commit is in the root .env (BLIS_CATALOG_REF); this clones main for a quick look
+git clone https://github.com/inference-sim/blis-catalog.git
 export BLIS_CATALOG="$PWD/blis-catalog"
 cd ../inference-sim
 ./blis run --model qwen/qwen3-14b --hardware H100 --tp 1 \
@@ -189,8 +190,8 @@ released image rather than hardcoding versions here:
 
 ```bash
 source .env   # BLIS_REPO, BLIS_REF, BLIS_CATALOG_REPO, BLIS_CATALOG_REF
-git clone --branch "$BLIS_REF"         "$BLIS_REPO"         upstream
-git clone --branch "$BLIS_CATALOG_REF" "$BLIS_CATALOG_REPO" blis-catalog
+git clone "$BLIS_REPO" upstream             && git -C upstream     checkout "$BLIS_REF"
+git clone "$BLIS_CATALOG_REPO" blis-catalog && git -C blis-catalog checkout "$BLIS_CATALOG_REF"
 docker build -t leaderboard:dev .
 docker run -p 8080:8080 -v "$PWD/results:/app/results" leaderboard:dev
 ```
