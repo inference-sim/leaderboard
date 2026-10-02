@@ -24,6 +24,18 @@ interface Props {
   className?: string
   /** Disables the whole control: the trigger cannot be opened and reads as inactive. */
   disabled?: boolean
+  /** When set, the open list carries a filter box the reader can type into to narrow a long
+   * list (e.g. the model catalog). Off by default, so other selects are unchanged. */
+  searchable?: boolean
+}
+
+/** filterOptions narrows a list to those whose label or value contains the query (case- and
+ * space-insensitive at the ends). A blank query returns the list unchanged. Exported so the
+ * filtering is unit-tested without driving the component's open state. */
+export function filterOptions(options: SelectOption[], query: string): SelectOption[] {
+  const q = query.trim().toLowerCase()
+  if (!q) return options
+  return options.filter((o) => `${o.label} ${o.value}`.toLowerCase().includes(q))
 }
 
 /**
@@ -32,6 +44,9 @@ interface Props {
  * It is the listbox/combobox ARIA pattern: focus stays on the trigger, the active option is
  * tracked with aria-activedescendant, and every option stays in the DOM (hidden until open)
  * so the markup renders the same on the server and in tests as it does live.
+ *
+ * With `searchable`, the open list gains a filter input the reader can type into; focus moves
+ * to it while open and the keyboard navigation runs from there.
  */
 export function Select({
   value,
@@ -43,14 +58,19 @@ export function Select({
   placeholder,
   className,
   disabled,
+  searchable,
 }: Props) {
   const [open, setOpen] = useState(false)
   const [active, setActive] = useState(0)
+  const [query, setQuery] = useState('')
   const rootRef = useRef<HTMLDivElement>(null)
+  const searchRef = useRef<HTMLInputElement>(null)
   const listId = useId()
 
-  const selectedIndex = options.findIndex((o) => o.value === value)
-  const selected = selectedIndex >= 0 ? options[selectedIndex] : null
+  // The trigger always shows the selection from the full list (even when the filter would
+  // hide it); navigation and choosing run over the filtered rows.
+  const selected = options.find((o) => o.value === value) ?? null
+  const rows = searchable && open ? filterOptions(options, query) : options
 
   // Close when the focus or a click leaves the control.
   useEffect(() => {
@@ -62,16 +82,23 @@ export function Select({
     return () => document.removeEventListener('mousedown', onDown)
   }, [open])
 
-  const firstEnabled = () => {
-    const i = options.findIndex((o) => !o.disabled)
+  // Focus the filter box when a searchable list opens, so the reader can type straight away.
+  useEffect(() => {
+    if (open && searchable) searchRef.current?.focus()
+  }, [open, searchable])
+
+  const firstEnabledIn = (list: SelectOption[]) => {
+    const i = list.findIndex((o) => !o.disabled)
     return i < 0 ? 0 : i
   }
   const openList = () => {
-    setActive(selectedIndex >= 0 ? selectedIndex : firstEnabled())
+    setQuery('')
+    const sel = options.findIndex((o) => o.value === value)
+    setActive(sel >= 0 ? sel : firstEnabledIn(options))
     setOpen(true)
   }
   const choose = (i: number) => {
-    const opt = options[i]
+    const opt = rows[i]
     if (!opt || opt.disabled) return
     onChange(opt.value)
     setOpen(false)
@@ -79,14 +106,21 @@ export function Select({
   const move = (delta: number) =>
     setActive((a) => {
       let n = a
-      for (let step = 0; step < options.length; step++) {
-        n = (n + delta + options.length) % options.length
-        if (!options[n]?.disabled) return n
+      for (let step = 0; step < rows.length; step++) {
+        n = (n + delta + rows.length) % rows.length
+        if (!rows[n]?.disabled) return n
       }
       return a
     })
+  const lastEnabled = () => {
+    for (let i = rows.length - 1; i >= 0; i--) if (!rows[i]?.disabled) return i
+    return 0
+  }
 
-  const onKeyDown = (e: React.KeyboardEvent) => {
+  // Shared navigation for the trigger (closed, and open when not searchable) and the filter
+  // box (open when searchable). `typing` is true for the filter box, where Space must type a
+  // space rather than choose the active option.
+  const navKeys = (e: React.KeyboardEvent, typing: boolean) => {
     switch (e.key) {
       case 'ArrowDown':
         e.preventDefault()
@@ -99,23 +133,24 @@ export function Select({
       case 'Home':
         if (open) {
           e.preventDefault()
-          setActive(firstEnabled())
+          setActive(firstEnabledIn(rows))
         }
         break
       case 'End':
         if (open) {
           e.preventDefault()
-          for (let i = options.length - 1; i >= 0; i--)
-            if (!options[i]?.disabled) {
-              setActive(i)
-              break
-            }
+          setActive(lastEnabled())
         }
         break
       case 'Enter':
-      case ' ':
         e.preventDefault()
         open ? choose(active) : openList()
+        break
+      case ' ':
+        if (!typing) {
+          e.preventDefault()
+          open ? choose(active) : openList()
+        }
         break
       case 'Escape':
         if (open) {
@@ -142,7 +177,7 @@ export function Select({
         aria-label={ariaLabel}
         aria-labelledby={labelledBy}
         onClick={() => (open ? setOpen(false) : openList())}
-        onKeyDown={onKeyDown}
+        onKeyDown={(e) => navKeys(e, false)}
       >
         <span className={selected ? 'sel-value' : 'sel-value sel-empty'}>
           {selected ? (
@@ -165,34 +200,57 @@ export function Select({
           />
         </svg>
       </button>
-      <ul
-        id={listId}
-        role="listbox"
-        className="sel-list"
-        hidden={!open}
-        tabIndex={-1}
-        aria-activedescendant={open ? `${listId}-${active}` : undefined}
-      >
-        {options.map((o, i) => (
-          <li
-            key={o.value}
-            id={`${listId}-${i}`}
-            role="option"
-            aria-selected={o.value === value}
-            aria-disabled={o.disabled || undefined}
-            className={`sel-opt${i === active && open ? ' active' : ''}${o.value === value ? ' selected' : ''}${o.disabled ? ' disabled' : ''}`}
-            onMouseEnter={() => !o.disabled && setActive(i)}
-            onMouseDown={(e) => {
-              // mousedown, not click: fire before the trigger's blur closes the list.
-              e.preventDefault()
-              choose(i)
+      <div className="sel-pop" hidden={!open}>
+        {searchable && open && (
+          <input
+            ref={searchRef}
+            type="text"
+            className="sel-search"
+            placeholder="Type to filter…"
+            aria-label="Filter options"
+            aria-controls={listId}
+            value={query}
+            onChange={(e) => {
+              setQuery(e.target.value)
+              setActive(firstEnabledIn(filterOptions(options, e.target.value)))
             }}
-          >
-            <span className="sel-opt-label">{o.label}</span>
-            {o.hint && <span className="sel-hint">{o.hint}</span>}
-          </li>
-        ))}
-      </ul>
+            onKeyDown={(e) => navKeys(e, true)}
+          />
+        )}
+        <ul
+          id={listId}
+          role="listbox"
+          className="sel-list"
+          hidden={!open}
+          tabIndex={-1}
+          aria-activedescendant={open ? `${listId}-${active}` : undefined}
+        >
+          {rows.map((o, i) => (
+            <li
+              key={o.value}
+              id={`${listId}-${i}`}
+              role="option"
+              aria-selected={o.value === value}
+              aria-disabled={o.disabled || undefined}
+              className={`sel-opt${i === active && open ? ' active' : ''}${o.value === value ? ' selected' : ''}${o.disabled ? ' disabled' : ''}`}
+              onMouseEnter={() => !o.disabled && setActive(i)}
+              onMouseDown={(e) => {
+                // mousedown, not click: fire before the trigger's blur closes the list.
+                e.preventDefault()
+                choose(i)
+              }}
+            >
+              <span className="sel-opt-label">{o.label}</span>
+              {o.hint && <span className="sel-hint">{o.hint}</span>}
+            </li>
+          ))}
+          {rows.length === 0 && (
+            <li className="sel-opt sel-noopt" aria-disabled>
+              No matches
+            </li>
+          )}
+        </ul>
+      </div>
     </div>
   )
 }

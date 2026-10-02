@@ -2593,21 +2593,53 @@ tr.revealed td,
   transform: rotate(180deg);
 }
 
-.sel-list {
+/* The floating panel that holds the (optional) filter box and the option list. It carries the
+ * surface chrome the list used to; the list inside it scrolls. */
+.sel-pop {
   position: absolute;
   top: calc(100% + 4px);
   left: 0;
   right: 0;
   z-index: 30;
-  margin: 0;
   padding: 4px;
-  list-style: none;
-  max-height: 288px;
-  overflow-y: auto;
   background: var(--panel);
   border: 1px solid var(--line-strong);
   border-radius: 7px;
   box-shadow: 0 8px 24px rgba(23, 28, 26, 0.14);
+}
+
+/* The type-to-filter box at the top of a searchable list. */
+.sel-search {
+  display: block;
+  width: 100%;
+  margin-bottom: 4px;
+  padding: 6px 9px;
+  border: 1px solid var(--line-strong);
+  border-radius: 4px;
+  background: var(--paper);
+  color: var(--ink);
+  font-family: var(--font-mono);
+  font-size: 13px;
+}
+
+.sel-search:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.sel-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  max-height: 264px;
+  overflow-y: auto;
+}
+
+/* A searchable list with no matches reads as a quiet, non-selectable note. */
+.sel-noopt {
+  color: var(--muted);
+  cursor: default;
+  font-family: var(--font-sans);
 }
 
 .sel-opt {

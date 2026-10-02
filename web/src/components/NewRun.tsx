@@ -527,6 +527,7 @@ export function NewRun({
                       }))
                     }
                     options={modelOptions}
+                    searchable
                   />
                 </div>
                 {issueFor('model') && <p className="nrerr">{issueFor('model')!.message}</p>}

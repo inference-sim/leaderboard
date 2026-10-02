@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { renderToStaticMarkup } from 'react-dom/server'
-import { Select } from './components/Select'
+import { Select, filterOptions } from './components/Select'
 import type { SelectOption } from './components/Select'
 
 const opts: SelectOption[] = [
@@ -8,6 +8,28 @@ const opts: SelectOption[] = [
   { value: 'b', label: 'Beta' },
   { value: '', label: 'Custom (define below)' },
 ]
+
+describe('filterOptions', () => {
+  const models: SelectOption[] = [
+    { value: 'qwen/qwen3-14b', label: 'qwen/qwen3-14b' },
+    { value: 'meta-llama/llama-3.1-8b', label: 'meta-llama/llama-3.1-8b' },
+    { value: 'mistralai/mixtral-8x7b', label: 'mistralai/mixtral-8x7b' },
+  ]
+
+  it('returns everything for a blank query', () => {
+    expect(filterOptions(models, '')).toHaveLength(3)
+    expect(filterOptions(models, '   ')).toHaveLength(3)
+  })
+
+  it('matches label or value, case-insensitively', () => {
+    expect(filterOptions(models, 'QWEN').map((o) => o.value)).toEqual(['qwen/qwen3-14b'])
+    expect(filterOptions(models, 'llama').map((o) => o.value)).toEqual(['meta-llama/llama-3.1-8b'])
+  })
+
+  it('is empty when nothing matches', () => {
+    expect(filterOptions(models, 'gpt')).toEqual([])
+  })
+})
 
 describe('Select', () => {
   it('shows the selected option label in the trigger, as a listbox combobox', () => {
