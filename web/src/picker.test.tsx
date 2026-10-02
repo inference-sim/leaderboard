@@ -3,7 +3,14 @@ import { renderToStaticMarkup } from 'react-dom/server'
 import fixture from '../../prototypes/results.json'
 import { loadWorkloads } from './load'
 import type { RunRecord } from './load'
-import { WorkloadPicker } from './components/WorkloadPicker'
+import {
+  WorkloadPicker,
+  ROWS_PER_PAGE,
+  clampPage,
+  columnsForWidth,
+  pageBounds,
+  pageCount,
+} from './components/WorkloadPicker'
 
 const records = fixture as unknown as RunRecord[]
 const workloads = loadWorkloads(records) // the fixture's two workloads (differ by window)
@@ -86,5 +93,52 @@ describe('WorkloadPicker', () => {
       <WorkloadPicker workloads={workloads} selected={workloads[0]!.workloadKey} onSelect={() => {}} />,
     )
     expect(html).toContain('ranked')
+  })
+
+  // Before the gallery is laid out (server render, first paint) the column count is unknown,
+  // so it is a single page of everything: every card is shown and no pager appears.
+  it('shows every workload on one page when the column count is not yet measured', () => {
+    const html = renderToStaticMarkup(
+      <WorkloadPicker workloads={workloads} selected={workloads[0]!.workloadKey} onSelect={() => {}} />,
+    )
+    for (const w of workloads) expect(html).toContain(w.title)
+    expect(html).not.toContain('Page 1 of')
+  })
+})
+
+describe('workload gallery pagination', () => {
+  it('derives columns from the gallery width with the grid track formula', () => {
+    // minmax(240px, 1fr), 12px gap: 240 fits one, 500 fits two (2*240 + 12 = 492), 760
+    // fits three (3*240 + 2*12 = 744).
+    expect(columnsForWidth(240)).toBe(1)
+    expect(columnsForWidth(500)).toBe(2)
+    expect(columnsForWidth(760)).toBe(3)
+    // Even a too-narrow container keeps one column; an unmeasured width is 0 (one page).
+    expect(columnsForWidth(100)).toBe(1)
+    expect(columnsForWidth(0)).toBe(0)
+  })
+
+  it('splits the workloads into pages of three rows of cards', () => {
+    // 4 columns => 12 per page; 20 workloads span two pages.
+    expect(pageCount(20, 4)).toBe(2)
+    expect(pageCount(12, 4)).toBe(1)
+    expect(pageCount(13, 4)).toBe(2)
+    expect(ROWS_PER_PAGE).toBe(3)
+  })
+
+  it('keeps a single page while the column count is unknown', () => {
+    expect(pageCount(20, 0)).toBe(1)
+  })
+
+  it('clamps an out-of-range page into the valid span after a resize shrinks it', () => {
+    expect(clampPage(5, 20, 4)).toBe(1) // only two pages exist
+    expect(clampPage(-1, 20, 4)).toBe(0)
+  })
+
+  it('slices the right cards for each page, with a short final page', () => {
+    expect(pageBounds(20, 4, 0)).toEqual([0, 12])
+    expect(pageBounds(20, 4, 1)).toEqual([12, 20])
+    // Unknown columns: one page spanning everything.
+    expect(pageBounds(20, 0, 0)).toEqual([0, 20])
   })
 })

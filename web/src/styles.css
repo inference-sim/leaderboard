@@ -2049,6 +2049,62 @@ tr.revealed td,
   color: var(--crit-ink);
 }
 
+/* The gallery pages through its workloads three rows at a time; this pager is a quiet
+ * affordance tucked to the top right above the gallery, not a centered control bar. No
+ * rule, muted borderless arrows, a small count between them: present when you look for it,
+ * easy to pass over when you don't. */
+.wpick-pager {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+
+.wpick-arrow {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  color: var(--muted);
+  background: none;
+  border: none;
+  border-radius: 3px;
+  cursor: pointer;
+}
+
+.wpick-arrow svg {
+  width: 15px;
+  height: 15px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.wpick-arrow:hover:not(:disabled) {
+  background: var(--accent-soft);
+  color: var(--accent-ink);
+}
+
+.wpick-arrow:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 1px;
+}
+
+.wpick-arrow:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+.wpick-pageno {
+  font-size: 12px;
+  color: var(--muted);
+}
+
 /* ---------- Tag filters (models, hardware) ----------
  * A workload table can span several models and several accelerators; these narrow it.
  * Each option is a toggle bubble, in the same squared, monospace vocabulary as the
