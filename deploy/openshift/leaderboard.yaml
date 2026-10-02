@@ -100,7 +100,7 @@ spec:
         #      before the server runs, so a crash mid-merge fails the pod and retries the
         #      full copy rather than starting the app on a half-written tree.
         - name: seed-data
-          image: ghcr.io/inference-sim/leaderboard:0.1.7
+          image: ghcr.io/inference-sim/leaderboard:0.1.9
           imagePullPolicy: Always
           command:
             - sh
@@ -129,7 +129,7 @@ spec:
               mountPath: /data
       containers:
         - name: leaderboard
-          image: ghcr.io/inference-sim/leaderboard:0.1.7
+          image: ghcr.io/inference-sim/leaderboard:0.1.9
           imagePullPolicy: Always
           workingDir: /app
           env:
@@ -159,7 +159,7 @@ spec:
             # tag). Any value set here OVERRIDES auto-detection — e.g. to show a tag instead of a
             # commit. Declared-grade, not verified; an empty, undetectable value shows "unknown".
             - name: LEADERBOARD_VERSION
-              value: "0.1.7"
+              value: "0.1.9"
             - name: BLIS_VERSION
               value: ""
             - name: BLIS_CATALOG_VERSION
