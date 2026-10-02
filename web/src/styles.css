@@ -4660,42 +4660,32 @@ button.danger {
 
 /* The two chips at the top-right of a model card stack so the architecture badge and the
  * provenance tag read as separate keys rather than one run of chips. */
-.mcard-tags {
+/* Provenance by colour, not a tag: a user-added card carries a soft accent tint and an
+ * accent border, so a handful of added models stand out from the white base-catalog cards at
+ * a glance. The hover/open/revealed states already use the accent border, so they sit over
+ * this cleanly. The colour convention is spelled out by .model-legend above the grid. */
+.mcard-user {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+}
+
+/* The legend that explains the card colour, shown only when some model is user-added. */
+.model-legend {
   display: flex;
-  flex-direction: column;
-  align-items: flex-end;
-  gap: 5px;
+  align-items: center;
+  gap: 8px;
+  margin: 10px 0 0;
+}
+
+.model-legend-swatch {
   flex: none;
-}
-
-/* The provenance tag: where the model came from, in the same chip box as the MoE/Dense
- * badge. Added (user-ingested) carries the accent so it reads as "yours"; Built-in is the
- * quiet neutral the base catalog's default deserves. */
-.prov {
-  display: inline-block;
-  padding: 1px 7px;
-  border-radius: 10px;
-  font-size: 10.5px;
-  font-weight: 600;
-  letter-spacing: 0.03em;
-  text-transform: uppercase;
-  vertical-align: middle;
-  white-space: nowrap;
-}
-
-.prov-user {
+  width: 15px;
+  height: 15px;
+  border-radius: 3px;
+  background: var(--accent-soft);
   border: 1px solid var(--accent);
-  background: var(--panel);
-  color: var(--accent-ink);
 }
 
-.prov-base {
-  border: 1px solid var(--line);
-  background: var(--paper);
-  color: var(--muted);
-}
-
-/* Edit/Delete on a user-added card, below the face button (a button cannot nest buttons). */
 /* The delete control on a user-added card: a single trash icon, right-aligned below the
  * face. Quiet (muted) at rest, warming to the critical tone on hover. */
 .mcard-actions {

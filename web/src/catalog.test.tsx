@@ -163,12 +163,12 @@ const mixedOrigin: ModelInfo[] = [
 ]
 
 describe('ModelsList provenance', () => {
-  it('tags each card Added or Built-in by origin', () => {
+  it('colours a user-added card differently from a built-in one', () => {
     const html = renderToStaticMarkup(
       <ModelsList models={mixedOrigin} expanded={null} onToggle={noop} configFor={none} />,
     )
-    expect(html).toContain('Added')
-    expect(html).toContain('Built-in')
+    // The one user model's card carries the tint class; the base card does not.
+    expect(html.match(/mcard-user/g)).toHaveLength(1)
   })
 
   it('offers a Delete control only on user-added cards, and never an Edit', () => {
@@ -198,7 +198,7 @@ describe('ModelsList provenance', () => {
       />,
     )
     expect(html).toContain('id="mcard-revealed"')
-    expect(html).toContain('class="mcard revealed"')
+    expect(html).toMatch(/class="mcard[^"]*\brevealed"/)
   })
 })
 
