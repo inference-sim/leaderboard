@@ -20,6 +20,11 @@
   --accent: #1f6e5c;
   --accent-ink: #0f4438;
   --accent-soft: #d9e9e1;
+  /* A user-added model card: a soft blue tint and border, distinct from the accent green
+   * (which marks hover / open / selection, so a green tint read as "selected") and from the
+   * amber warn family. */
+  --user-bg: #e4edf4;
+  --user-line: #6fa0c6;
   --warn-ink: #7a4a12;
   --warn-bg: #f3e3c9;
   --warn-line: #d8b984;
@@ -4660,30 +4665,13 @@ button.danger {
 
 /* The two chips at the top-right of a model card stack so the architecture badge and the
  * provenance tag read as separate keys rather than one run of chips. */
-/* Provenance by colour, not a tag: a user-added card carries a soft accent tint and an
- * accent border, so a handful of added models stand out from the white base-catalog cards at
- * a glance. The hover/open/revealed states already use the accent border, so they sit over
- * this cleanly. The colour convention is spelled out by .model-legend above the grid. */
+/* Provenance by colour, not a tag: a user-added card carries a soft blue tint and border, so
+ * a handful of added models stand out from the white base-catalog cards at a glance. Blue,
+ * not the accent green, so the card does not read as "selected" (hover / open / selection all
+ * use the accent). Hovering the card shows a title explaining it was user-added. */
 .mcard-user {
-  background: var(--accent-soft);
-  border-color: var(--accent);
-}
-
-/* The legend that explains the card colour, shown only when some model is user-added. */
-.model-legend {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin: 10px 0 0;
-}
-
-.model-legend-swatch {
-  flex: none;
-  width: 15px;
-  height: 15px;
-  border-radius: 3px;
-  background: var(--accent-soft);
-  border: 1px solid var(--accent);
+  background: var(--user-bg);
+  border-color: var(--user-line);
 }
 
 /* The delete control on a user-added card: a single trash icon, right-aligned below the

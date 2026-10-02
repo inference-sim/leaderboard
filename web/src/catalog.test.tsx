@@ -163,12 +163,14 @@ const mixedOrigin: ModelInfo[] = [
 ]
 
 describe('ModelsList provenance', () => {
-  it('colours a user-added card differently from a built-in one', () => {
+  it('colours a user-added card differently and explains it on hover', () => {
     const html = renderToStaticMarkup(
       <ModelsList models={mixedOrigin} expanded={null} onToggle={noop} configFor={none} />,
     )
     // The one user model's card carries the tint class; the base card does not.
     expect(html.match(/mcard-user/g)).toHaveLength(1)
+    // Hovering it explains the provenance (a native title), rather than a persistent tag.
+    expect(html).toContain('title="Added by a user')
   })
 
   it('offers a Delete control only on user-added cards, and never an Edit', () => {

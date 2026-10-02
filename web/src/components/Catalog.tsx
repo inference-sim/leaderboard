@@ -292,9 +292,6 @@ function ModelsPanel() {
   if (models === null) return <p className="dek">Reading the model catalog.</p>
 
   const shown = filterModels(models, query, kind)
-  // Whether any model is user-added, so the colour legend only appears when there is a colour
-  // difference on the page to explain.
-  const hasUser = models.some((m) => m.origin === 'user')
   return (
     <>
       {actionError && <p className="dek issue">{actionError}</p>}
@@ -313,14 +310,6 @@ function ModelsPanel() {
             shown={shown.length}
             total={models.length}
           />
-          {hasUser && (
-            <p className="dek model-legend">
-              <span className="model-legend-swatch" aria-hidden="true" />
-              Tinted cards are models you added: they persist across restarts and take
-              precedence over the base catalog if an update ships the same name. The rest are
-              built into the base catalog.
-            </p>
-          )}
           {shown.length === 0 ? (
             <p className="dek empty">No models match that filter.</p>
           ) : (
@@ -538,6 +527,11 @@ function ModelCard({
     <div
       className={`mcard${open ? ' open' : ''}${isUser ? ' mcard-user' : ''}${highlighted ? ' revealed' : ''}`}
       id={highlighted ? 'mcard-revealed' : undefined}
+      title={
+        isUser
+          ? 'Added by a user. It persists across restarts and takes precedence over the base catalog if an update ships the same name.'
+          : undefined
+      }
     >
       <button
         type="button"
