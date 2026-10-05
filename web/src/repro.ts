@@ -10,11 +10,25 @@ import type { RunRecord } from './load'
 /**
  * One flag per line, continued with `\`, so a 25-flag command can be read. Lifted from
  * the New-run screen so the table and that screen render an argv the same way.
+ *
+ * A flag (`--…`) is paired with its value on one line, but a valueless bool flag like
+ * `--enable-expert-parallel` sits on its own line: the next token is another flag, not
+ * its value, so we must not consume it. Pairing two-at-a-time would glue the two flags
+ * together and push the second flag's value onto a line of its own.
  */
 export function shellLines(argv: string[]): string {
   const lines: string[] = [`${argv[0]} ${argv[1]}`]
-  for (let i = 2; i < argv.length; i += 2) {
-    lines.push(`  ${argv[i]} ${argv[i + 1] ?? ''}`.trimEnd())
+  let i = 2
+  while (i < argv.length) {
+    const tok = argv[i] ?? ''
+    const next = argv[i + 1]
+    if (tok.startsWith('--') && next !== undefined && !next.startsWith('--')) {
+      lines.push(`  ${tok} ${next}`)
+      i += 2
+    } else {
+      lines.push(`  ${tok}`)
+      i += 1
+    }
   }
   return lines.join(' \\\n') + '\n'
 }
