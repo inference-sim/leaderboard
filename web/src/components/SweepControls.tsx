@@ -34,6 +34,10 @@ interface Props {
   onAxesChange: (axes: SweepAxes) => void
   /** Replaces the load-level list. */
   onLoadValuesChange: (values: string[]) => void
+  /** The live accelerator names (from NewRun's catalog fetch). When present and non-empty,
+   *  hardware renders as a multi-toggle over these names; otherwise it falls back to the
+   *  free-text chip input, since there is no committed set to toggle over. */
+  hardwareNames?: string[]
 }
 
 /** The three control shapes a swept field takes: a multi-toggle over a closed set (segmented
@@ -55,8 +59,9 @@ const OFF_ON = ['off', 'on'] as const
 
 // The swept fields in the same grouping and order the single-run form uses (NewRun's
 // flagGroup sections), so a reader finds each field where they left it. Model is excluded
-// (it is a candidate dimension the sweep never varies); hardware is a free chip input since
-// its choices come from the live catalog, not a committed set.
+// (it is a candidate dimension the sweep never varies); hardware is declared as a text field
+// here but renders as a multi-toggle when NewRun passes the live catalog names, falling back
+// to a free chip input otherwise (its choices come from the live catalog, not a committed set).
 const GROUPS: Group[] = [
   {
     title: 'Model & sharding',
@@ -153,7 +158,7 @@ function tokens(raw: string): string[] {
   return raw.split(/[\s,]+/).filter((t) => t !== '')
 }
 
-export function SweepControls({ base, axes, loadValues, onAxesChange, onLoadValuesChange }: Props) {
+export function SweepControls({ base, axes, loadValues, onAxesChange, onLoadValuesChange, hardwareNames }: Props) {
   // Fold several typed/pasted tokens onto the axes in one update, so a paste of "1 2 4" adds
   // three values at once. Each step is a pure addAxisValue call; the base is left untouched.
   const addMany = (key: SweepableKey, raw: string) => {
@@ -189,30 +194,46 @@ export function SweepControls({ base, axes, loadValues, onAxesChange, onLoadValu
     </span>
   )
 
-  const renderField = (field: FieldSpec): ReactNode => {
-    if (field.kind === 'toggle') {
-      const selected = new Set(axisValues(field.key, base, axes))
-      return (
-        <div className="nrrow" key={field.key}>
-          {labelWith(field.key, field.label)}
-          <div className="tagrow" role="group" aria-label={field.label}>
-            {field.options.map((opt) => {
-              const value = String(opt)
-              return (
-                <button
-                  type="button"
-                  className="tag"
-                  key={value}
-                  aria-pressed={selected.has(value)}
-                  onClick={() => onAxesChange(toggleAxisValue(axes, field.key, value, base))}
-                >
-                  {display(value)}
-                </button>
-              )
-            })}
-          </div>
+  // The segmented multi-toggle shared by closed-set toggle fields and (when names are
+  // supplied) hardware: one lit/unlit pill per option, each toggled onto its axis.
+  const renderToggle = (
+    key: SweepableKey,
+    label: string,
+    options: readonly (string | number)[],
+  ): ReactNode => {
+    const selected = new Set(axisValues(key, base, axes))
+    return (
+      <div className="nrrow" key={key}>
+        {labelWith(key, label)}
+        <div className="tagrow" role="group" aria-label={label}>
+          {options.map((opt) => {
+            const value = String(opt)
+            return (
+              <button
+                type="button"
+                className="tag"
+                key={value}
+                aria-pressed={selected.has(value)}
+                onClick={() => onAxesChange(toggleAxisValue(axes, key, value, base))}
+              >
+                {display(value)}
+              </button>
+            )
+          })}
         </div>
-      )
+      </div>
+    )
+  }
+
+  const renderField = (field: FieldSpec): ReactNode => {
+    // Hardware's choices come from the live catalog, so it is a free-text chip input by
+    // default; when NewRun passes the fetched names, render it as a multi-toggle over them.
+    if (field.key === 'hardware' && hardwareNames && hardwareNames.length > 0) {
+      return renderToggle(field.key, field.label, hardwareNames)
+    }
+
+    if (field.kind === 'toggle') {
+      return renderToggle(field.key, field.label, field.options)
     }
 
     if (field.kind === 'select') {

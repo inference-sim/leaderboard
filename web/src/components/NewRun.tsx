@@ -501,6 +501,7 @@ export function NewRun({
             base={values}
             axes={sweepAxes}
             loadValues={loadValues}
+            hardwareNames={hardwareNames}
             onAxesChange={onSweepAxesChange}
             onLoadValuesChange={onLoadValuesChange}
           />
