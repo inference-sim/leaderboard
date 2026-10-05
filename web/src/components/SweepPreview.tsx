@@ -3,9 +3,9 @@ import {
   axisValues,
   groupByConfig,
   guardFor,
-  SWEEPABLE_KEYS,
 } from '../sweep'
 import type { SweepAxes, SweepExpansion } from '../sweep'
+import { offeredLoad } from '../load'
 
 /**
  * The output aside in sweep mode, before running: a read-only preview of the matrix the
@@ -35,8 +35,6 @@ export function SweepPreview({
 }) {
   const guard = guardFor(expansion.runs.length)
   const byConfig = groupByConfig(expansion.runs)
-  // The varied keys as a labelled lookup, so the axis summary reads "tp: 1, 8".
-  const keyLabel = (key: (typeof SWEEPABLE_KEYS)[number]) => key
 
   return (
     <aside className="nrout">
@@ -74,7 +72,7 @@ export function SweepPreview({
           <ul>
             {expansion.variedDeploymentKeys.map((key) => (
               <li key={key}>
-                <span className="axiskey">{keyLabel(key)}</span>:{' '}
+                <span className="axiskey">{key}</span>:{' '}
                 {axisValues(key, base, axes).join(', ')}
               </li>
             ))}
@@ -94,9 +92,9 @@ export function SweepPreview({
             <li key={cfg.configKey}>
               <code>{cfg.runId}</code>
               <span className="cfgloads">
-                {cfg.cells.map((cell, i) => (
-                  <span key={cell.output.runId + '-' + i} className="cfgload">
-                    {expansion.loadValues[i]}
+                {cfg.cells.map((cell) => (
+                  <span key={cell.output.runId} className="cfgload">
+                    {offeredLoad(cell.output.group).value}
                   </span>
                 ))}
               </span>
@@ -132,7 +130,7 @@ export function SweepPreview({
         </p>
       )}
       {guard === 'block' && (
-        <p className="guard-block">
+        <p className="guard-block" role="alert">
           {expansion.runs.length} runs is above 100. Narrow an axis before running.
         </p>
       )}
