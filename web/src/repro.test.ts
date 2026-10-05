@@ -17,6 +17,13 @@ describe('shellLines (one flag per line, for a readable command)', () => {
     const out = shellLines(['./blis', 'run', '--verbose'])
     expect(out).toBe('./blis run \\\n  --verbose\n')
   })
+
+  it('puts a valueless flag on its own line and keeps the following flag paired with its value', () => {
+    // A bool flag like --enable-expert-parallel has no value. Pairing argv two-at-a-time
+    // would glue it to the next flag and push that flag's value onto its own line.
+    const out = shellLines(['./blis', 'run', '--enable-expert-parallel', '--tp', '2'])
+    expect(out).toBe('./blis run \\\n  --enable-expert-parallel \\\n  --tp 2\n')
+  })
 })
 
 describe('reproCommand (the exact, verbatim invocation for a run)', () => {
