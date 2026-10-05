@@ -83,3 +83,31 @@ export function sweepHasVariation(base: FormValues, axes: SweepAxes, loadValues:
   if (loadValues.length > 1) return true
   return SWEEPABLE_KEYS.some((k) => axisVaries(k, base, axes))
 }
+
+export function slug(value: string): string {
+  const s = value.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '')
+  return s === '' ? 'none' : s
+}
+
+/** Short token prefix per axis; '' means the value stands alone (hardware). */
+export const AXIS_ABBR: Record<SweepableKey, string> = {
+  hardware: '', tp: 'tp', dp: 'dp', enableExpertParallel: 'ep', moeCommBackend: 'moe',
+  numInstances: 'inst', maxModelLen: 'mml', scheduler: 'sched', preemptionPolicy: 'preempt',
+  maxNumSeqs: 'seqs', maxNumBatchedTokens: 'batch', longPrefillTokenThreshold: 'lpt',
+  kvCacheDtype: 'kvdt', blockSize: 'blk', gpuMemoryUtilization: 'gmu', totalKvBlocks: 'kvblk',
+  kvCpuOffload: 'kvoff', cpuBytesToUse: 'cpub', offloadBlockSize: 'oblk', blocksPerChunk: 'bpc',
+  tokensPerHash: 'tph', evictionPolicy: 'evict', offloadPromptOnly: 'opo',
+  selfDescribingKvEvents: 'sdke', prefillInstances: 'pfi', decodeInstances: 'dei',
+  prefillDecodeInstances: 'pdi', pdDecider: 'dec', pdPrefixThreshold: 'ppt',
+  pdTransferBandwidth: 'tbw', pdTransferBaseLatency: 'tbl', pdTransferContention: 'tc',
+  admissionPolicy: 'adm', routingPolicy: 'route', numSpeculativeTokens: 'spec',
+  speculativeAcceptanceRate: 'sar', speculativeMethod: 'specm',
+}
+
+export function cellToken(key: SweepableKey, value: string): string {
+  return AXIS_ABBR[key] + slug(value)
+}
+
+export function sweepPrefix(base: FormValues, variedKeys: SweepableKey[]): string {
+  return variedKeys.includes('hardware') ? 'sweep' : slug(base.hardware)
+}

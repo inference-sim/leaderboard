@@ -3,6 +3,7 @@ import { initialValues } from './newrun'
 import {
   SWEEPABLE_KEYS, BOOL_AXES, axisValues, toggleAxisValue, addAxisValue,
   removeAxisValue, axisVaries, applyPicks, sweepHasVariation,
+  AXIS_ABBR, slug, sweepPrefix, cellToken,
 } from './sweep'
 
 const base = initialValues()
@@ -68,5 +69,30 @@ describe('axis model', () => {
     expect(sweepHasVariation(base, {}, [base.loadValue])).toBe(false)
     expect(sweepHasVariation(base, toggleAxisValue({}, 'tp', '8', base), [base.loadValue])).toBe(true)
     expect(sweepHasVariation(base, {}, [base.loadValue, '32'])).toBe(true)
+  })
+})
+
+describe('run id pieces', () => {
+  it('slug is filename-safe', () => {
+    expect(slug('H100')).toBe('h100')
+    expect(slug('fcfs')).toBe('fcfs')
+    expect(slug('')).toBe('none')
+    expect(slug('a b/c')).toBe('a-b-c')
+  })
+
+  it('AXIS_ABBR has an entry for every sweepable key', () => {
+    for (const k of SWEEPABLE_KEYS) expect(typeof AXIS_ABBR[k]).toBe('string')
+  })
+
+  it('cellToken combines abbreviation and value', () => {
+    expect(cellToken('hardware', 'H100')).toBe('h100')
+    expect(cellToken('tp', '8')).toBe('tp8')
+    expect(cellToken('scheduler', 'fcfs')).toBe('schedfcfs')
+  })
+
+  it('prefix is the fixed hardware when hardware is not varied, else sweep', () => {
+    const base = initialValues()
+    expect(sweepPrefix({ ...base, hardware: 'H100' }, ['tp'])).toBe('h100')
+    expect(sweepPrefix({ ...base, hardware: 'H100' }, ['hardware', 'tp'])).toBe('sweep')
   })
 })
