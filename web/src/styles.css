@@ -1854,13 +1854,13 @@ tr.revealed td,
 .railfoot a {
   display: flex;
   align-items: center;
-  gap: 10px;
-  /* Repo-name labels are long; the version rides beside the name when it fits and wraps just
-     beneath it when it doesn't, so a long "commit-dirty" value never clips or widens the rail.
-     row-gap tightens the wrapped line (gap would otherwise push it a full 10px down). */
-  flex-wrap: wrap;
-  row-gap: 1px;
-  padding: 8px 12px;
+  gap: 8px;
+  /* Icon, repo name, then version all on one line. The gap and horizontal padding are kept
+     tight (vs the main nav links) so a repo name as long as "inference-sim" plus an 8-char
+     commit — the real values /api/version serves — fit beside each other without crowding the
+     rail's right edge. The version (.railver) truncates only as a last resort for an unusually
+     long operator-set value; normal short hashes and tags show in full. */
+  padding: 8px 8px;
   border-radius: 3px;
   color: var(--muted);
   font-size: 14px;
@@ -6159,16 +6159,21 @@ table.readout tbody tr.dqline.cmphl td.lft {
 
 /* The deployment version beside a project name in the rail foot (e.g. `Source  v0.1.7`):
    quiet provenance, so tiny mono type in the muted rest color, pushed to the link's right
-   edge. It truncates with an ellipsis so a long "tag (commit)" value never widens the rail.
+   edge. It truncates with an ellipsis so a long "tag (commit)" value never spills past the
+   fixed-width rail. min-width:0 is what makes the ellipsis engage: a flex item's default
+   min-width:auto resolves to its content width and overrides max-width, so without this the
+   nowrap string would overflow the rail instead of truncating (same reason .content sets it).
    Rendered only when /api/version answered, so the static build shows the links alone. */
 .railver {
   margin-left: auto;
+  padding-left: 6px;
+  min-width: 0;
   max-width: 100%;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
   font-family: var(--font-mono);
-  font-size: 10.5px;
+  font-size: 10px;
   font-weight: 400;
   color: var(--muted);
 }
