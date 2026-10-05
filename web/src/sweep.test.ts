@@ -6,7 +6,7 @@ import { workloadKey } from './load'
 import {
   SWEEPABLE_KEYS, BOOL_AXES, axisValues, toggleAxisValue, addAxisValue,
   removeAxisValue, axisVaries, applyPicks, sweepHasVariation,
-  AXIS_ABBR, slug, sweepPrefix, cellToken,
+  AXIS_ABBR, slug, sweepPrefix, cellToken, groupByConfig, guardFor, WARN_AT, BLOCK_AT,
 } from './sweep'
 
 const base = initialValues()
@@ -158,5 +158,28 @@ describe('expandSweep', () => {
     expect(e.dropped.length).toBe(1)
     expect(e.dropped[0]!.issues.length).toBeGreaterThan(0)
     expect(e.dropped[0]!.label).toContain('dp')
+  })
+})
+
+describe('grouping and guardrail', () => {
+  it('groupByConfig keeps a config\'s load levels adjacent, first-seen order', () => {
+    const base = initialValues()
+    const e = expandSweep(base, toggleAxisValue({}, 'tp', '8', base), [base.loadValue, '32'],
+      [], [], [], [])
+    const groups = groupByConfig(e.runs)
+    expect(groups.length).toBe(2)
+    expect(groups[0]!.cells.length).toBe(2)       // two load levels for the first config
+    expect(new Set(groups[0]!.cells.map((c) => c.configKey)).size).toBe(1)
+    expect(groups[0]!.runId).toBe(groups[0]!.cells[0]!.output.runId)
+  })
+
+  it('guardFor flips at 32 and 100', () => {
+    expect(WARN_AT).toBe(32)
+    expect(BLOCK_AT).toBe(100)
+    expect(guardFor(32)).toBe('ok')
+    expect(guardFor(33)).toBe('warn')
+    expect(guardFor(100)).toBe('warn')
+    expect(guardFor(101)).toBe('block')
+    expect(guardFor(0)).toBe('ok')
   })
 })

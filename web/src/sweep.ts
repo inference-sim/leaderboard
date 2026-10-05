@@ -218,3 +218,30 @@ export function expandSweep(
     workloadKey: workloadKeyOut,
   }
 }
+
+export interface ConfigGroup { configKey: string; runId: string; cells: SweepCell[] }
+
+/** Group runnable cells by configuration, first-seen order, load levels adjacent. Mirrors
+ *  load.ts byConfig so the preview and progress match the board. */
+export function groupByConfig(runs: SweepCell[]): ConfigGroup[] {
+  const order: string[] = []
+  const map = new Map<string, SweepCell[]>()
+  for (const c of runs) {
+    const g = map.get(c.configKey)
+    if (g) g.push(c)
+    else { map.set(c.configKey, [c]); order.push(c.configKey) }
+  }
+  return order.map((k) => {
+    const cells = map.get(k)!
+    return { configKey: k, runId: cells[0]!.output.runId, cells }
+  })
+}
+
+export type Guard = 'ok' | 'warn' | 'block'
+export const WARN_AT = 32
+export const BLOCK_AT = 100
+export function guardFor(runCount: number): Guard {
+  if (runCount > BLOCK_AT) return 'block'
+  if (runCount > WARN_AT) return 'warn'
+  return 'ok'
+}
