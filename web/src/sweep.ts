@@ -1,4 +1,11 @@
+import type { Output, Issue } from './newrun'
+import { interpret } from './newrun'
 import type { FormValues } from './newrun'
+import type { RunGroup } from './load'
+import { workloadKey, configKey } from './load'
+import type { ProfileBody } from './workloads'
+import type { ModelInfo } from './models'
+import type { HardwareInfo } from './hardware'
 
 /** Deployment-side (plus load-level) fields that a sweep can vary. Everything but the model,
  *  and not the group-side singles (seed, timeout, loadKind, workload selection). The order is
@@ -110,4 +117,104 @@ export function cellToken(key: SweepableKey, value: string): string {
 
 export function sweepPrefix(base: FormValues, variedKeys: SweepableKey[]): string {
   return variedKeys.includes('hardware') ? 'sweep' : slug(base.hardware)
+}
+
+export interface SweepCell { output: Output; configKey: string }
+export interface DroppedCombo { label: string; issues: Issue[] }
+export interface SweepExpansion {
+  runs: SweepCell[]
+  dropped: DroppedCombo[]
+  configCount: number
+  loadCount: number
+  variedDeploymentKeys: SweepableKey[]
+  loadValues: number[]
+  joins: RunGroup | null
+  workloadKey: string | null
+}
+
+export function sweepTarget(key: string, groups: RunGroup[]): RunGroup | null {
+  return groups.find((g) => workloadKey(g.group) === key) ?? null
+}
+
+/** Cartesian product over the per-key value lists, in SWEEPABLE_KEYS order. */
+function configCombos(base: FormValues, axes: SweepAxes): Array<Partial<Record<SweepableKey, string>>> {
+  let combos: Array<Partial<Record<SweepableKey, string>>> = [{}]
+  for (const key of SWEEPABLE_KEYS) {
+    const values = axisValues(key, base, axes)
+    const next: Array<Partial<Record<SweepableKey, string>>> = []
+    for (const combo of combos) for (const v of values) next.push({ ...combo, [key]: v })
+    combos = next
+  }
+  return combos
+}
+
+function uniqueId(wanted: string, taken: Set<string>): string {
+  if (!taken.has(wanted)) { taken.add(wanted); return wanted }
+  for (let n = 2; ; n++) {
+    const candidate = `${wanted}-${n}`
+    if (!taken.has(candidate)) { taken.add(candidate); return candidate }
+  }
+}
+
+function comboLabel(combo: Partial<Record<SweepableKey, string>>, varied: SweepableKey[], load: number): string {
+  const parts = varied.map((k) => `${k}=${combo[k]}`)
+  return `${parts.join(', ') || 'base config'} @ load ${load}`
+}
+
+export function expandSweep(
+  base: FormValues, axes: SweepAxes, loadValues: string[],
+  groups: RunGroup[], profiles: ProfileBody[], models: ModelInfo[], hardware: HardwareInfo[],
+): SweepExpansion {
+  const varied = SWEEPABLE_KEYS.filter((k) => axisVaries(k, base, axes))
+  const loads = (loadValues.length > 0 ? loadValues : [base.loadValue])
+    .map((s) => Number(s)).filter((n) => Number.isFinite(n))
+  const loadList = [...new Set(loads)].sort((a, b) => a - b)
+  const combos = configCombos(base, axes)
+  const prefix = sweepPrefix(base, varied)
+
+  // Seed dedup from every stored row in this board table (all load levels share workloadKey).
+  // We do not yet know the sweep's workloadKey, so seed lazily after the first valid cell.
+  const taken = new Set<string>()
+  const idForConfig = new Map<string, string>()
+  let seededKey: string | null = null
+
+  const runs: SweepCell[] = []
+  const dropped: DroppedCombo[] = []
+
+  for (const combo of combos) {
+    // One run id per config (deployment), assigned on first sight and reused across loads.
+    for (const load of loadList) {
+      const values = applyPicks(base, combo)
+      values.loadValue = String(load)
+      const interp = interpret(values, groups, profiles, models, hardware)
+      if (interp.output === null) {
+        dropped.push({ label: comboLabel(combo, varied, load), issues: interp.issues })
+        continue
+      }
+      const cfgKey = configKey(interp.output.deployment)
+      if (seededKey === null) {
+        seededKey = workloadKey(interp.output.group)
+        for (const g of groups) if (workloadKey(g.group) === seededKey) for (const r of g.records) taken.add(r.run_id)
+      }
+      let id = idForConfig.get(cfgKey)
+      if (id === undefined) {
+        const suffix = varied.map((k) => cellToken(k, combo[k]!)).join('-')
+        id = uniqueId(suffix ? `${prefix}-${suffix}` : prefix, taken)
+        idForConfig.set(cfgKey, id)
+      }
+      const output: Output = { ...interp.output, runId: id }
+      runs.push({ output, configKey: cfgKey })
+    }
+  }
+
+  const workloadKeyOut = seededKey
+  return {
+    runs, dropped,
+    configCount: idForConfig.size,
+    loadCount: loadList.length,
+    variedDeploymentKeys: varied,
+    loadValues: loadList,
+    joins: workloadKeyOut ? sweepTarget(workloadKeyOut, groups) : null,
+    workloadKey: workloadKeyOut,
+  }
 }

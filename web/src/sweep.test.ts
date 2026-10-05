@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import { initialValues } from './newrun'
+import { expandSweep } from './sweep'
+import type { RunGroup } from './load'
+import { workloadKey } from './load'
 import {
   SWEEPABLE_KEYS, BOOL_AXES, axisValues, toggleAxisValue, addAxisValue,
   removeAxisValue, axisVaries, applyPicks, sweepHasVariation,
@@ -94,5 +97,66 @@ describe('run id pieces', () => {
     const base = initialValues()
     expect(sweepPrefix({ ...base, hardware: 'H100' }, ['tp'])).toBe('h100')
     expect(sweepPrefix({ ...base, hardware: 'H100' }, ['hardware', 'tp'])).toBe('sweep')
+  })
+})
+
+describe('expandSweep', () => {
+  const profiles: any[] = []
+  const models: any[] = []
+  const hardware: any[] = []
+  const groups: RunGroup[] = []
+
+  function customBase() {
+    return initialValues()
+  }
+
+  it('a fixed sweep expands to exactly one run', () => {
+    const e = expandSweep(customBase(), {}, [], groups, profiles, models, hardware)
+    expect(e.runs.length).toBe(1)
+    expect(e.configCount).toBe(1)
+    expect(e.loadCount).toBe(1)
+    expect(e.dropped.length).toBe(0)
+  })
+
+  it('product counts multiply configs by load levels', () => {
+    const base = customBase()
+    let axes = toggleAxisValue({}, 'tp', '8', base)
+    const e = expandSweep(base, axes, [base.loadValue, '32', '64'], groups, profiles, models, hardware)
+    expect(e.configCount).toBe(2)
+    expect(e.loadCount).toBe(3)
+    expect(e.runs.length).toBe(6)
+    expect(e.variedDeploymentKeys).toEqual(['tp'])
+  })
+
+  it('every valid cell shares one workloadKey (one-table invariant)', () => {
+    const base = customBase()
+    const e = expandSweep(base, toggleAxisValue({}, 'tp', '8', base), [base.loadValue, '32'],
+      groups, profiles, models, hardware)
+    const keys = new Set(e.runs.map((c) => workloadKey(c.output.group)))
+    expect(keys.size).toBe(1)
+  })
+
+  it('a config shares one run id across its load levels; different configs differ', () => {
+    const base = customBase()
+    const e = expandSweep(base, toggleAxisValue({}, 'tp', '8', base), [base.loadValue, '32'],
+      groups, profiles, models, hardware)
+    const byCfg = new Map<string, Set<string>>()
+    for (const c of e.runs) {
+      const s = byCfg.get(c.configKey) ?? new Set()
+      s.add(c.output.runId); byCfg.set(c.configKey, s)
+    }
+    for (const s of byCfg.values()) expect(s.size).toBe(1)
+    expect(byCfg.size).toBe(2)
+    const ids = [...byCfg.values()].map((s) => [...s][0])
+    expect(new Set(ids).size).toBe(2)
+  })
+
+  it('invalid combinations are dropped with interpret messages', () => {
+    const base = customBase()
+    const e = expandSweep(base, addAxisValue({}, 'dp', '0', base), [], groups, profiles, models, hardware)
+    expect(e.runs.length).toBe(1)
+    expect(e.dropped.length).toBe(1)
+    expect(e.dropped[0]!.issues.length).toBeGreaterThan(0)
+    expect(e.dropped[0]!.label).toContain('dp')
   })
 })
