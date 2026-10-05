@@ -184,7 +184,8 @@ describe('grouping and guardrail', () => {
   })
 })
 
-import { initSweepRun, countsOf, classifyRecord } from './sweep'
+import { initSweepRun, countsOf, classifyRecord, runPool } from './sweep'
+import type { SweepRunCell } from './sweep'
 
 describe('sweep run state', () => {
   it('initSweepRun queues every cell', () => {
@@ -209,5 +210,63 @@ describe('sweep run state', () => {
     run.cells[0]!.status = 'done'
     run.cells[1]!.status = 'failed'
     expect(countsOf(run)).toMatchObject({ done: 1, failed: 1, queued: 0, total: 2 })
+  })
+})
+
+function cells(n: number): SweepRunCell[] {
+  return Array.from({ length: n }, (_, i) => ({
+    runId: `r${i}`, configKey: `c${i}`, output: {} as any,
+    status: 'queued' as const, record: null, message: null,
+  }))
+}
+
+describe('runPool', () => {
+  it('bounds concurrency to four', async () => {
+    const c = cells(12)
+    let inFlight = 0, peak = 0
+    await runPool(c, async () => {
+      inFlight++; peak = Math.max(peak, inFlight)
+      await new Promise((r) => setTimeout(r, 1))
+      inFlight--
+      return { status: { complete: true } } as any
+    }, { concurrency: 4, onUpdate: () => {}, shouldStop: () => false })
+    expect(peak).toBeLessThanOrEqual(4)
+  })
+
+  it('a failed cell does not stop the rest', async () => {
+    const c = cells(5)
+    const seen: number[] = []
+    await runPool(c, async (cell) => {
+      const i = Number(cell.runId.slice(1)); seen.push(i)
+      if (i === 2) throw new Error('422 boom')
+      return { status: { complete: true } } as any
+    }, { concurrency: 2, onUpdate: () => {}, shouldStop: () => false })
+    expect(seen.sort()).toEqual([0, 1, 2, 3, 4])
+  })
+
+  it('reports done / disqualified / failed via onUpdate', async () => {
+    const c = cells(3)
+    const patches: any[] = []
+    await runPool(c, async (cell) => {
+      const i = Number(cell.runId.slice(1))
+      if (i === 0) return { status: { complete: true } } as any
+      if (i === 1) return { status: { complete: false } } as any
+      throw new Error('nope')
+    }, { concurrency: 3, onUpdate: (idx, patch) => patches.push({ idx, ...patch }), shouldStop: () => false })
+    const final = (idx: number) => patches.filter((p) => p.idx === idx).pop()
+    expect(final(0).status).toBe('done')
+    expect(final(1).status).toBe('disqualified')
+    expect(final(2).status).toBe('failed')
+    expect(final(2).message).toContain('nope')
+  })
+
+  it('stop halts cells not yet started', async () => {
+    const c = cells(6)
+    let started = 0
+    await runPool(c, async () => {
+      started++
+      return { status: { complete: true } } as any
+    }, { concurrency: 1, onUpdate: () => {}, shouldStop: () => started >= 2 })
+    expect(started).toBeLessThan(6)
   })
 })

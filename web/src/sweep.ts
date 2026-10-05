@@ -277,3 +277,30 @@ export function countsOf(run: SweepRun) {
   for (const cell of run.cells) c[cell.status] += 1
   return c
 }
+
+/** Run cells through a bounded worker pool. The run function is injected (tests stub it; the
+ *  app passes a postRun wrapper). A rejected run marks that cell failed and never aborts the
+ *  pool. shouldStop halts firing new cells; in-flight cells finish. */
+export async function runPool(
+  cells: SweepRunCell[],
+  runOne: (cell: SweepRunCell) => Promise<RunRecord>,
+  opts: { concurrency?: number; onUpdate: (index: number, patch: Partial<SweepRunCell>) => void; shouldStop: () => boolean },
+): Promise<void> {
+  const concurrency = opts.concurrency ?? 4
+  let next = 0
+  async function worker(): Promise<void> {
+    for (;;) {
+      if (opts.shouldStop()) return
+      const index = next++
+      if (index >= cells.length) return
+      opts.onUpdate(index, { status: 'running' })
+      try {
+        const record = await runOne(cells[index]!)
+        opts.onUpdate(index, { status: classifyRecord(record), record })
+      } catch (e) {
+        opts.onUpdate(index, { status: 'failed', message: e instanceof Error ? e.message : String(e) })
+      }
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(concurrency, cells.length) }, () => worker()))
+}
