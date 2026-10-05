@@ -2868,6 +2868,15 @@ tr.revealed td,
   background: var(--accent);
 }
 
+/* Sweep multi-value controls: chips for number and dropdown axes, a varies badge, the load list. */
+.chiprow { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.chip { display: inline-flex; align-items: center; gap: 4px; padding: 2px 8px; border-radius: 999px;
+  background: var(--chip-bg, rgba(127,127,127,.14)); font-size: 12px; }
+.chip button { border: 0; background: none; cursor: pointer; line-height: 1; font-size: 13px; color: inherit; }
+.chipinput { min-width: 72px; border: 1px dashed var(--border, #8884); border-radius: 999px; padding: 2px 8px; }
+.varies { margin-left: 6px; font-size: 11px; opacity: .7; }
+.modetoggle { margin: 8px 0 4px; }
+
 /* In the Declare-a-run form each segmented control fills its field column, so its cells
  * share the width equally rather than hugging the left. Mirrors the .editor .seg rule
  * below and lines these controls up with the number inputs beside them. Wrapping controls
