@@ -3412,6 +3412,108 @@ details.nrflaggroup > summary:focus-visible {
   border-color: var(--crit-line);
 }
 
+/* Sweep progress ------------------------------------------------------------- */
+
+/* A thin done/total track in the headline verdict; the fill is accent-green and widens
+   as cells land. The numeric count above carries the exact state, so the bar is decorative. */
+.sweepbar {
+  height: 6px;
+  margin: 6px 0 8px;
+  background: var(--paper);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  overflow: hidden;
+}
+
+.sweepbarfill {
+  display: block;
+  height: 100%;
+  background: var(--accent);
+  transition: width 0.2s ease;
+}
+
+.sweeptally {
+  font-size: 13px;
+  color: var(--muted);
+}
+
+/* The per-config load levels, each with its status chip and a view-on-board button that
+   appears once the cell has a record. Mirrors .sweepbreak .cfgloads from the preview. */
+.sweepcells {
+  display: inline-flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.sweepcell {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 7px;
+  font-size: 12px;
+  background: var(--paper);
+  border: 1px solid var(--line);
+  border-radius: 3px;
+}
+
+.sweepcell .cellload {
+  font-family: var(--font-mono);
+  color: var(--muted);
+}
+
+.sweepcell .viewboard {
+  border: 0;
+  background: none;
+  padding: 0;
+  font-size: 12px;
+  color: var(--accent-ink);
+  cursor: pointer;
+  text-decoration: underline;
+}
+
+/* Status chip: a small pill coloured per CellStatus. queued is quiet, running is accent,
+   done is green, disqualified is amber, failed is red. */
+.statuschip {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 7px;
+  font-size: 11px;
+  font-weight: 600;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: var(--panel);
+  color: var(--muted);
+}
+
+.statuschip.running {
+  color: var(--accent-ink);
+  background: var(--accent-soft);
+  border-color: var(--accent);
+}
+
+.statuschip.done {
+  color: var(--accent-ink);
+  background: var(--accent-soft);
+  border-color: var(--accent);
+}
+
+.statuschip.disqualified {
+  color: var(--warn-ink);
+  background: var(--warn-bg);
+  border-color: var(--warn-line);
+}
+
+.statuschip.failed {
+  color: var(--crit-ink);
+  background: var(--crit-bg);
+  border-color: var(--crit-line);
+}
+
+.stopbtn {
+  background: var(--crit-ink);
+  border-color: var(--crit-ink);
+}
+
 /* Run result ---------------------------------------------------------------- */
 
 .runresult {
