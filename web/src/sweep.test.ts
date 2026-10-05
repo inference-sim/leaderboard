@@ -183,3 +183,31 @@ describe('grouping and guardrail', () => {
     expect(guardFor(0)).toBe('ok')
   })
 })
+
+import { initSweepRun, countsOf, classifyRecord } from './sweep'
+
+describe('sweep run state', () => {
+  it('initSweepRun queues every cell', () => {
+    const base = initialValues()
+    const e = expandSweep(base, toggleAxisValue({}, 'tp', '8', base), [base.loadValue], [], [], [], [])
+    const run = initSweepRun(e.runs)
+    expect(run.cells.length).toBe(2)
+    expect(run.cells.every((c) => c.status === 'queued')).toBe(true)
+    expect(run.stopped).toBe(false)
+    expect(countsOf(run)).toEqual({ done: 0, disqualified: 0, failed: 0, running: 0, queued: 2, total: 2 })
+  })
+
+  it('classifyRecord reads status.complete', () => {
+    expect(classifyRecord({ status: { complete: true } } as any)).toBe('done')
+    expect(classifyRecord({ status: { complete: false } } as any)).toBe('disqualified')
+  })
+
+  it('countsOf tallies mixed statuses', () => {
+    const base = initialValues()
+    const e = expandSweep(base, toggleAxisValue({}, 'tp', '8', base), [base.loadValue], [], [], [], [])
+    const run = initSweepRun(e.runs)
+    run.cells[0]!.status = 'done'
+    run.cells[1]!.status = 'failed'
+    expect(countsOf(run)).toMatchObject({ done: 1, failed: 1, queued: 0, total: 2 })
+  })
+})

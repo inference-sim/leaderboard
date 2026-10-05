@@ -6,6 +6,7 @@ import { workloadKey, configKey } from './load'
 import type { ProfileBody } from './workloads'
 import type { ModelInfo } from './models'
 import type { HardwareInfo } from './hardware'
+import type { RunRecord } from './load'
 
 /** Deployment-side (plus load-level) fields that a sweep can vary. Everything but the model,
  *  and not the group-side singles (seed, timeout, loadKind, workload selection). The order is
@@ -244,4 +245,35 @@ export function guardFor(runCount: number): Guard {
   if (runCount > BLOCK_AT) return 'block'
   if (runCount > WARN_AT) return 'warn'
   return 'ok'
+}
+
+export type CellStatus = 'queued' | 'running' | 'done' | 'disqualified' | 'failed'
+export interface SweepRunCell {
+  runId: string
+  configKey: string
+  output: Output
+  status: CellStatus
+  record: RunRecord | null
+  message: string | null
+}
+export interface SweepRun { cells: SweepRunCell[]; stopped: boolean }
+
+export function initSweepRun(runs: SweepCell[]): SweepRun {
+  return {
+    stopped: false,
+    cells: runs.map((c) => ({
+      runId: c.output.runId, configKey: c.configKey, output: c.output,
+      status: 'queued' as CellStatus, record: null, message: null,
+    })),
+  }
+}
+
+export function classifyRecord(record: RunRecord): 'done' | 'disqualified' {
+  return record.status.complete ? 'done' : 'disqualified'
+}
+
+export function countsOf(run: SweepRun) {
+  const c = { done: 0, disqualified: 0, failed: 0, running: 0, queued: 0, total: run.cells.length }
+  for (const cell of run.cells) c[cell.status] += 1
+  return c
 }
