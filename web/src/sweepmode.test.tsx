@@ -9,6 +9,7 @@ const common = {
   customNameEdited: false, onCustomNameEdited: () => {}, running: false, errorMessage: null,
   onRun: () => {}, sweepAxes: {}, onSweepAxesChange: () => {}, loadValues: [],
   onLoadValuesChange: () => {}, sweepRun: null, onRunSweep: () => {}, onStopSweep: () => {},
+  onViewRow: () => {},
 }
 
 describe('mode toggle', () => {

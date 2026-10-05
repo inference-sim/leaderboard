@@ -832,6 +832,7 @@ describe('NewRun', () => {
       sweepRun={null}
       onRunSweep={() => {}}
       onStopSweep={() => {}}
+      onViewRow={() => {}}
     />,
   )
 

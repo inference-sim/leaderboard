@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { Dispatch, ReactNode, SetStateAction } from 'react'
 import { loadCommittedRecords, loadWorkloads, mergeRecords, runKey } from './load'
 import type { RunRecord, WorkloadGroup } from './load'
@@ -15,7 +15,7 @@ import { EmptyFilterNote } from './components/EmptyFilterNote'
 import { SLO_METRICS, emptyTargets, parseTargets } from './slo'
 import type { RawTargets } from './slo'
 import { NewRun } from './components/NewRun'
-import { initSweepRun, sweepHasVariation } from './sweep'
+import { initSweepRun, runPool, sweepHasVariation } from './sweep'
 import type { SweepAxes, SweepCell, SweepRun } from './sweep'
 import { CompareBar } from './components/CompareBar'
 import { ComparePanel } from './components/ComparePanel'
@@ -31,8 +31,10 @@ import { RailVersion } from './components/RailVersion'
 import { fetchVersion } from './version'
 import type { Versions } from './version'
 import { emptyFilterNoun, showLoadFilter } from './filter'
-import { initialValues, saveThenRun } from './newrun'
+import { initialValues, postRun, saveThenRun } from './newrun'
 import type { FormValues, Output } from './newrun'
+import { saveWorkload } from './workloads'
+import type { ProfileBody } from './workloads'
 import { runDeclFromOutput, workloadKeyForGroup } from './liverun'
 import type { LiveRun, RevealTarget } from './liverun'
 
@@ -204,6 +206,16 @@ export function App() {
   const [loadValues, setLoadValues] = useState<string[]>([])
   // The in-flight (or finished) sweep run, or null when no sweep has started.
   const [sweepRun, setSweepRun] = useState<SweepRun | null>(null)
+  // A sweep's up-front workload save failed, so no cell ran. Surfaced in the sweep column
+  // (the single run's "Did not run" aside is not rendered in sweep mode). null means no error.
+  const [sweepError, setSweepError] = useState<string | null>(null)
+  // Set true by stopSweep to halt firing new cells; read by runPool's shouldStop. A ref, not
+  // state, so the running pool sees the change without a re-render closure capturing a stale
+  // value. Reset at the start of each runSweep.
+  const stopRef = useRef(false)
+  // Coalesces the per-cell reloads: each landed cell schedules one reload ~300ms out, clearing
+  // the prior timer, so a burst of cells triggers one fetch rather than one per cell.
+  const reloadTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
 
   // Flips the declaration mode. Switching sweep -> single collapses the sweep inputs back to
   // the single run's own load, so a later re-entry into sweep mode starts clean. The confirm
@@ -298,6 +310,66 @@ export function App() {
     },
     [reload, onReveal],
   )
+
+  // Running a sweep: save the one shared custom workload up front (once, like startRun), then
+  // move to the board and fan the cells out through a bounded pool. Each cell posts the same
+  // /api/run a single run does; its status lands back in sweepRun and a debounced reload brings
+  // the new rows onto the board as they finish. A save failure aborts before any cell runs, so
+  // a workload that could not be saved never produces runs.
+  const debouncedReload = useCallback(() => {
+    clearTimeout(reloadTimer.current)
+    reloadTimer.current = setTimeout(() => {
+      reload()
+    }, 300)
+  }, [reload])
+
+  const runSweep = useCallback(
+    async (runs: SweepCell[], saveProfile: ProfileBody | null) => {
+      setSweepError(null)
+      if (saveProfile) {
+        try {
+          await saveWorkload(saveProfile, null)
+        } catch (e) {
+          // The shared workload could not be saved; do not run any cell, and surface why.
+          setSweepError(e instanceof Error ? e.message : String(e))
+          return
+        }
+        setCatalogToast({ name: saveProfile.name, canView: true })
+      }
+      const run = initSweepRun(runs)
+      setSweepRun(run)
+      stopRef.current = false
+      // Move to the board so the rows appear as they land, matching startRun.
+      window.location.hash = '#/'
+      await runPool(run.cells, (cell) => postRun(cell.output), {
+        onUpdate: (i, patch) => {
+          setSweepRun((prev) =>
+            prev ? { ...prev, cells: prev.cells.map((c, j) => (j === i ? { ...c, ...patch } : c)) } : prev,
+          )
+          debouncedReload()
+        },
+        shouldStop: () => stopRef.current,
+      })
+      // Settle: one final reload once the pool has drained, so the board reflects every landed
+      // cell even if the last debounce was superseded.
+      reload()
+    },
+    [reload, debouncedReload],
+  )
+
+  // Stop the in-flight sweep: no new cells fire (the ref the pool reads), and the panel flips to
+  // its stopped state; cells already in flight finish.
+  const stopSweep = useCallback(() => {
+    stopRef.current = true
+    setSweepRun((r) => (r ? { ...r, stopped: true } : r))
+  }, [])
+
+  // The progress panel's per-cell "view on board" control: reveal that landed row the same way
+  // the live-run banner does, routing to the board so it scrolls and pulses.
+  const onViewRow = useCallback((groupId: string, runId: string) => {
+    setRevealTarget({ groupId, runId })
+    window.location.hash = '#/'
+  }, [])
 
   // A row's trash button asks to delete a run; the actual removal waits on the confirmation
   // modal, so a stray click cannot carry out an irreversible delete. Opening the dialog
@@ -445,10 +517,10 @@ export function App() {
                 loadValues={loadValues}
                 onLoadValuesChange={setLoadValues}
                 sweepRun={sweepRun}
-                // The sweep's pool execution is wired in a later task; for now these seed and
-                // stop the run state so the mode and its inputs round-trip.
-                onRunSweep={(runs: SweepCell[]) => setSweepRun(initSweepRun(runs))}
-                onStopSweep={() => setSweepRun((r) => (r ? { ...r, stopped: true } : r))}
+                onRunSweep={runSweep}
+                onStopSweep={stopSweep}
+                onViewRow={onViewRow}
+                sweepError={sweepError}
               />
             ) : view === 'catalog' ? (
               <Catalog

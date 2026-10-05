@@ -26,12 +26,17 @@ import { workloadParam, workloadsHref } from '../route'
 import { listWorkloads, profileKnobs, profileSummary, profileToGroup } from '../workloads'
 import type { ProfileBody } from '../workloads'
 import type { SweepAxes, SweepCell, SweepRun } from '../sweep'
+import { expandSweep, sweepHasVariation } from '../sweep'
 import { offeredLoad } from '../load'
 import { numeric } from '../format'
 import { shellLines } from '../repro'
 import { CopyBlock } from './CopyBlock'
 import { Select } from './Select'
 import type { SelectOption } from './Select'
+import { SweepControls } from './SweepControls'
+import { SweepPreview } from './SweepPreview'
+import { SweepProgress } from './SweepProgress'
+import { ConfirmDialog } from './ConfirmDialog'
 
 interface Props {
   groups: RunGroup[]
@@ -89,6 +94,12 @@ interface Props {
   onRunSweep: (runs: SweepCell[], saveProfile: ProfileBody | null) => void
   /** Asks App to stop the in-flight sweep. */
   onStopSweep: () => void
+  /** Reveals one landed sweep cell on the board (scroll + pulse the row), driven by the
+   * progress panel's per-cell "view on board" control. */
+  onViewRow: (groupId: string, runId: string) => void
+  /** The sweep's up-front workload save failed, so no cell ran. Shown above the controls, since
+   * the single run's "Did not run" aside is not rendered in sweep mode. */
+  sweepError?: string | null
 }
 
 /**
@@ -127,11 +138,24 @@ export function NewRun({
   onRun,
   mode,
   onModeChange,
+  sweepAxes,
+  onSweepAxesChange,
+  loadValues,
+  onLoadValuesChange,
+  sweepRun,
+  onRunSweep,
+  onStopSweep,
+  onViewRow,
+  sweepError,
 }: Props) {
   const [profiles, setProfiles] = useState<ProfileBody[]>([])
   const [models, setModels] = useState<ModelInfo[]>([])
   const [hardware, setHardware] = useState<HardwareInfo[]>([])
   const [loadError, setLoadError] = useState<string | null>(null)
+  // Guards the sweep -> single collapse: a varied sweep is discarded by switching, so the
+  // click opens this confirm rather than switching outright. Local, since the collapse itself
+  // lives in App's onModeChange.
+  const [confirmCollapse, setConfirmCollapse] = useState(false)
 
   // The catalog is the single source of named workloads (R1). It is fetched with the same
   // call the Workloads tab uses; when it cannot be loaded (no server, a fetch error) the
@@ -253,6 +277,25 @@ export function NewRun({
     () => interpret(values, groups, profiles, models, hardware),
     [values, groups, profiles, models, hardware],
   )
+
+  // The matrix the current form plus axes expand to, driving the sweep preview and the cells
+  // the Run button fans out. Computed from the same catalogs interpret uses, so a dropped
+  // combo in the preview is dropped for the same reason the single form would block.
+  const expansion = useMemo(
+    () => expandSweep(values, sweepAxes, loadValues, groups, profiles, models, hardware),
+    [values, sweepAxes, loadValues, groups, profiles, models, hardware],
+  )
+
+  // Switching sweep -> single discards every axis beyond the first value (App's onModeChange
+  // collapses them). When a sweep actually varies, gate that behind a confirm; otherwise there
+  // is nothing to lose, so switch straight away.
+  const requestSingle = () => {
+    if (mode === 'sweep' && sweepHasVariation(values, sweepAxes, loadValues)) {
+      setConfirmCollapse(true)
+    } else {
+      onModeChange('single')
+    }
+  }
 
   const set = <K extends keyof FormValues>(key: K, value: FormValues[K]) =>
     setValues((v) => ({ ...v, [key]: value }))
@@ -433,7 +476,7 @@ export function NewRun({
           type="button"
           className="tag"
           aria-pressed={mode === 'single'}
-          onClick={() => onModeChange('single')}
+          onClick={requestSingle}
         >
           Single run
         </button>
@@ -447,6 +490,33 @@ export function NewRun({
         </button>
       </div>
 
+      {mode === 'sweep' ? (
+        <div className="nrgrid">
+          {sweepError && (
+            <p className="dek issue" role="alert">
+              {sweepError}
+            </p>
+          )}
+          <SweepControls
+            base={values}
+            axes={sweepAxes}
+            loadValues={loadValues}
+            onAxesChange={onSweepAxesChange}
+            onLoadValuesChange={onLoadValuesChange}
+          />
+          {sweepRun ? (
+            <SweepProgress run={sweepRun} onStop={onStopSweep} onView={onViewRow} />
+          ) : (
+            <SweepPreview
+              expansion={expansion}
+              base={values}
+              axes={sweepAxes}
+              onRun={() => onRunSweep(expansion.runs, expansion.runs[0]?.output.saveProfile ?? null)}
+              running={false}
+            />
+          )}
+        </div>
+      ) : (
       <div className="nrgrid">
         <form className="nrform" onSubmit={(e) => e.preventDefault()}>
           <fieldset className="nrwork">
@@ -849,6 +919,20 @@ export function NewRun({
           )}
         </aside>
       </div>
+      )}
+
+      <ConfirmDialog
+        open={confirmCollapse}
+        title="Switch to a single run?"
+        confirmLabel="Switch"
+        onConfirm={() => {
+          setConfirmCollapse(false)
+          onModeChange('single')
+        }}
+        onCancel={() => setConfirmCollapse(false)}
+      >
+        Switching to a single run keeps only the first value of each varied field.
+      </ConfirmDialog>
     </>
   )
 }
