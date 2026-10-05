@@ -56,7 +56,10 @@ export function SweepProgress({
   onView: (groupId: string, runId: string) => void
 }) {
   const counts = countsOf(run)
-  const inFlight = counts.queued > 0 || counts.running > 0
+  // Once stopped, the pool returns without draining the still-queued cells, so they stay
+  // queued forever. Gate inFlight on !stopped so the Stop button and tab-open hint drop and
+  // the stopped summary renders; in-flight running cells still finish and update normally.
+  const inFlight = !run.stopped && (counts.queued > 0 || counts.running > 0)
   const pct = counts.total > 0 ? Math.round((counts.done + counts.disqualified + counts.failed) / counts.total * 100) : 0
   const landed = counts.done + counts.disqualified + counts.failed
   const rows = groupCells(run.cells)

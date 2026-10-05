@@ -43,4 +43,11 @@ describe('SweepControls', () => {
     expect(html).toContain('32')
     expect(html).toContain('64')
   })
+  it('the base (first) load chip is non-removable; later levels are removable', () => {
+    const html = render({}, [base.loadValue, '32'])
+    // The base load mirrors the deployment-axis base chip: no remove control, so it cannot be
+    // dropped and silently halve the matrix. Later levels keep their remove button.
+    expect(html).not.toContain(`Remove load ${base.loadValue}`)
+    expect(html).toContain('Remove load 32')
+  })
 })

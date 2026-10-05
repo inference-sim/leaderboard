@@ -74,8 +74,8 @@ interface Props {
   /** Hands a validated declaration up to App, which drives the run and the navigation. */
   onRun: (output: Output) => void
   /** Declaration mode: a single run, or a sweep across one or more candidate axes. Lifted to
-   * App so the choice survives navigation, like the form values. The sweep controls, preview,
-   * and progress are added in later tasks; this task renders only the toggle. */
+   * App so the choice survives navigation, like the form values. In sweep mode this drives the
+   * sweep controls, the preview, and the progress panel, all rendered below. */
   mode: 'single' | 'sweep'
   /** Flips the declaration mode. In App, switching sweep -> single collapses the sweep state. */
   onModeChange: (mode: 'single' | 'sweep') => void

@@ -296,7 +296,9 @@ export function SweepControls({ base, axes, loadValues, onAxesChange, onLoadValu
   }
 
   // Load levels: the same removable-chip pattern over loadValues, managed directly (no sweep.ts
-  // axis). Every level is removable; the sweep runs over whatever levels remain.
+  // axis). The first level is the base (the single run's own load) and is non-removable, like
+  // the deployment-axis base chip; the rest are removable, and the sweep runs over whatever
+  // levels remain.
   const addLoads = (raw: string) => {
     const next = [...loadValues]
     for (const t of tokens(raw)) if (!next.includes(t)) next.push(t)
@@ -311,16 +313,18 @@ export function SweepControls({ base, axes, loadValues, onAxesChange, onLoadValu
           {loadValues.length > 1 && variesBadge(loadValues.length)}
         </span>
         <div className="chiprow">
-          {loadValues.map((v) => (
+          {loadValues.map((v, i) => (
             <span className="chip" key={v}>
               {v}
-              <button
-                type="button"
-                aria-label={`Remove load ${v}`}
-                onClick={() => onLoadValuesChange(loadValues.filter((x) => x !== v))}
-              >
-                ×
-              </button>
+              {i > 0 && (
+                <button
+                  type="button"
+                  aria-label={`Remove load ${v}`}
+                  onClick={() => onLoadValuesChange(loadValues.filter((x) => x !== v))}
+                >
+                  ×
+                </button>
+              )}
             </span>
           ))}
           <input

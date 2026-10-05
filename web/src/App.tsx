@@ -195,8 +195,8 @@ export function App() {
   // toast's "View in catalog". Cleared once the highlight has shown (onWorkloadRevealed).
   const [revealWorkload, setRevealWorkload] = useState<string | null>(null)
   // Declaration mode for NewRun: a single run or a sweep. Lifted here so it survives the
-  // navigation to the board, like formValues. The sweep controls, preview, and progress are
-  // wired in later tasks; this holds the toggle state and the sweep inputs it will drive.
+  // navigation to the board, like formValues. It holds the toggle state that drives the sweep
+  // controls, preview, and progress panel (all wired through NewRun) and the sweep inputs below.
   const [mode, setMode] = useState<'single' | 'sweep'>('single')
   // The per-axis chosen values for a sweep (keyed by sweepable field), empty until the reader
   // picks any. Lifted alongside formValues so a bounce back after a run finds them intact.
@@ -216,15 +216,24 @@ export function App() {
   // Coalesces the per-cell reloads: each landed cell schedules one reload ~300ms out, clearing
   // the prior timer, so a burst of cells triggers one fetch rather than one per cell.
   const reloadTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
+  // Guards runSweep against a double-fire during its up-front saveWorkload await: because
+  // sweepRun is set only after the save resolves, a second click in that window would start a
+  // second save of the same profile (the duplicate-profile race the save-once design prevents).
+  const startingRef = useRef(false)
 
   // Flips the declaration mode. Switching sweep -> single collapses the sweep inputs back to
-  // the single run's own load, so a later re-entry into sweep mode starts clean. The confirm
-  // dialog that guards discarding a varied sweep is added in a later task; for now the collapse
-  // is unconditional.
+  // the single run's own load, so a later re-entry into sweep mode starts clean; the collapse
+  // is conditional on the sweep having varied, and NewRun opens its confirm dialog before
+  // asking for it. Entering sweep mode seeds the load axis with the single run's own load as
+  // its first (base) level when it is still empty, so the base load is present and shown first,
+  // symmetric with the collapse and with how the deployment axes carry their base value first.
   const changeMode = useCallback(
     (next: 'single' | 'sweep') => {
       if (next === 'single' && sweepHasVariation(formValues, sweepAxes, loadValues)) {
         setSweepAxes({})
+        setLoadValues([formValues.loadValue])
+      }
+      if (next === 'sweep' && loadValues.length === 0) {
         setLoadValues([formValues.loadValue])
       }
       setMode(next)
@@ -325,34 +334,42 @@ export function App() {
 
   const runSweep = useCallback(
     async (runs: SweepCell[], saveProfile: ProfileBody | null) => {
-      setSweepError(null)
-      if (saveProfile) {
-        try {
-          await saveWorkload(saveProfile, null)
-        } catch (e) {
-          // The shared workload could not be saved; do not run any cell, and surface why.
-          setSweepError(e instanceof Error ? e.message : String(e))
-          return
+      // Re-entry guard: a double-click during the saveWorkload await below must not start a
+      // second save/run of the same sweep. Cleared in finally once the pool resolves or throws.
+      if (startingRef.current) return
+      startingRef.current = true
+      try {
+        setSweepError(null)
+        if (saveProfile) {
+          try {
+            await saveWorkload(saveProfile, null)
+          } catch (e) {
+            // The shared workload could not be saved; do not run any cell, and surface why.
+            setSweepError(e instanceof Error ? e.message : String(e))
+            return
+          }
+          setCatalogToast({ name: saveProfile.name, canView: true })
         }
-        setCatalogToast({ name: saveProfile.name, canView: true })
+        const run = initSweepRun(runs)
+        setSweepRun(run)
+        stopRef.current = false
+        // Move to the board so the rows appear as they land, matching startRun.
+        window.location.hash = '#/'
+        await runPool(run.cells, (cell) => postRun(cell.output), {
+          onUpdate: (i, patch) => {
+            setSweepRun((prev) =>
+              prev ? { ...prev, cells: prev.cells.map((c, j) => (j === i ? { ...c, ...patch } : c)) } : prev,
+            )
+            debouncedReload()
+          },
+          shouldStop: () => stopRef.current,
+        })
+        // Settle: one final reload once the pool has drained, so the board reflects every landed
+        // cell even if the last debounce was superseded.
+        reload()
+      } finally {
+        startingRef.current = false
       }
-      const run = initSweepRun(runs)
-      setSweepRun(run)
-      stopRef.current = false
-      // Move to the board so the rows appear as they land, matching startRun.
-      window.location.hash = '#/'
-      await runPool(run.cells, (cell) => postRun(cell.output), {
-        onUpdate: (i, patch) => {
-          setSweepRun((prev) =>
-            prev ? { ...prev, cells: prev.cells.map((c, j) => (j === i ? { ...c, ...patch } : c)) } : prev,
-          )
-          debouncedReload()
-        },
-        shouldStop: () => stopRef.current,
-      })
-      // Settle: one final reload once the pool has drained, so the board reflects every landed
-      // cell even if the last debounce was superseded.
-      reload()
     },
     [reload, debouncedReload],
   )
