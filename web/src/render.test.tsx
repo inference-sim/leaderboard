@@ -823,6 +823,15 @@ describe('NewRun', () => {
       running={false}
       errorMessage={null}
       onRun={() => {}}
+      mode="single"
+      onModeChange={() => {}}
+      sweepAxes={{}}
+      onSweepAxesChange={() => {}}
+      loadValues={[]}
+      onLoadValuesChange={() => {}}
+      sweepRun={null}
+      onRunSweep={() => {}}
+      onStopSweep={() => {}}
     />,
   )
 

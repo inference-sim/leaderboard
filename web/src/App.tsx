@@ -15,6 +15,8 @@ import { EmptyFilterNote } from './components/EmptyFilterNote'
 import { SLO_METRICS, emptyTargets, parseTargets } from './slo'
 import type { RawTargets } from './slo'
 import { NewRun } from './components/NewRun'
+import { initSweepRun, sweepHasVariation } from './sweep'
+import type { SweepAxes, SweepCell, SweepRun } from './sweep'
 import { CompareBar } from './components/CompareBar'
 import { ComparePanel } from './components/ComparePanel'
 import { selectionInDisplayOrder, toggleSelection } from './compare'
@@ -190,6 +192,33 @@ export function App() {
   // The saved workload the Catalog's Workloads tab should scroll to and highlight, set by the
   // toast's "View in catalog". Cleared once the highlight has shown (onWorkloadRevealed).
   const [revealWorkload, setRevealWorkload] = useState<string | null>(null)
+  // Declaration mode for NewRun: a single run or a sweep. Lifted here so it survives the
+  // navigation to the board, like formValues. The sweep controls, preview, and progress are
+  // wired in later tasks; this holds the toggle state and the sweep inputs it will drive.
+  const [mode, setMode] = useState<'single' | 'sweep'>('single')
+  // The per-axis chosen values for a sweep (keyed by sweepable field), empty until the reader
+  // picks any. Lifted alongside formValues so a bounce back after a run finds them intact.
+  const [sweepAxes, setSweepAxes] = useState<SweepAxes>({})
+  // The offered-load values a sweep varies over, as strings. Empty collapses to the single
+  // run's own loadValue.
+  const [loadValues, setLoadValues] = useState<string[]>([])
+  // The in-flight (or finished) sweep run, or null when no sweep has started.
+  const [sweepRun, setSweepRun] = useState<SweepRun | null>(null)
+
+  // Flips the declaration mode. Switching sweep -> single collapses the sweep inputs back to
+  // the single run's own load, so a later re-entry into sweep mode starts clean. The confirm
+  // dialog that guards discarding a varied sweep is added in a later task; for now the collapse
+  // is unconditional.
+  const changeMode = useCallback(
+    (next: 'single' | 'sweep') => {
+      if (next === 'single' && sweepHasVariation(formValues, sweepAxes, loadValues)) {
+        setSweepAxes({})
+        setLoadValues([formValues.loadValue])
+      }
+      setMode(next)
+    },
+    [formValues, sweepAxes, loadValues],
+  )
 
   const toggleNav = useCallback(() => {
     setCollapsed((c) => {
@@ -409,6 +438,17 @@ export function App() {
                 running={liveRun?.status === 'running'}
                 errorMessage={liveRun?.status === 'error' ? liveRun.message : null}
                 onRun={startRun}
+                mode={mode}
+                onModeChange={changeMode}
+                sweepAxes={sweepAxes}
+                onSweepAxesChange={setSweepAxes}
+                loadValues={loadValues}
+                onLoadValuesChange={setLoadValues}
+                sweepRun={sweepRun}
+                // The sweep's pool execution is wired in a later task; for now these seed and
+                // stop the run state so the mode and its inputs round-trip.
+                onRunSweep={(runs: SweepCell[]) => setSweepRun(initSweepRun(runs))}
+                onStopSweep={() => setSweepRun((r) => (r ? { ...r, stopped: true } : r))}
               />
             ) : view === 'catalog' ? (
               <Catalog

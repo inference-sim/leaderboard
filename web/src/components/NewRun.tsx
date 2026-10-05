@@ -25,6 +25,7 @@ import type { HardwareInfo } from '../hardware'
 import { workloadParam, workloadsHref } from '../route'
 import { listWorkloads, profileKnobs, profileSummary, profileToGroup } from '../workloads'
 import type { ProfileBody } from '../workloads'
+import type { SweepAxes, SweepCell, SweepRun } from '../sweep'
 import { offeredLoad } from '../load'
 import { numeric } from '../format'
 import { shellLines } from '../repro'
@@ -67,6 +68,27 @@ interface Props {
   errorMessage: string | null
   /** Hands a validated declaration up to App, which drives the run and the navigation. */
   onRun: (output: Output) => void
+  /** Declaration mode: a single run, or a sweep across one or more candidate axes. Lifted to
+   * App so the choice survives navigation, like the form values. The sweep controls, preview,
+   * and progress are added in later tasks; this task renders only the toggle. */
+  mode: 'single' | 'sweep'
+  /** Flips the declaration mode. In App, switching sweep -> single collapses the sweep state. */
+  onModeChange: (mode: 'single' | 'sweep') => void
+  /** The per-axis chosen values for a sweep (keyed by sweepable field). Lifted to App. */
+  sweepAxes: SweepAxes
+  /** Replaces the sweep axes. */
+  onSweepAxesChange: (axes: SweepAxes) => void
+  /** The offered-load values a sweep varies over, as strings. Lifted to App. */
+  loadValues: string[]
+  /** Replaces the sweep's load values. */
+  onLoadValuesChange: (values: string[]) => void
+  /** The in-flight (or finished) sweep run, or null when no sweep has started. Lifted to App. */
+  sweepRun: SweepRun | null
+  /** Hands the expanded sweep cells up to App to run, with an optional workload profile to save
+   * first. */
+  onRunSweep: (runs: SweepCell[], saveProfile: ProfileBody | null) => void
+  /** Asks App to stop the in-flight sweep. */
+  onStopSweep: () => void
 }
 
 /**
@@ -103,6 +125,8 @@ export function NewRun({
   running,
   errorMessage,
   onRun,
+  mode,
+  onModeChange,
 }: Props) {
   const [profiles, setProfiles] = useState<ProfileBody[]>([])
   const [models, setModels] = useState<ModelInfo[]>([])
@@ -403,6 +427,25 @@ export function NewRun({
         result, which lands here and on the leaderboard straight away. blis reads its config
         files relative to that checkout, so the server runs it, not the browser.
       </p>
+
+      <div className="modetoggle tagrow" role="group" aria-label="Declaration mode">
+        <button
+          type="button"
+          className="tag"
+          aria-pressed={mode === 'single'}
+          onClick={() => onModeChange('single')}
+        >
+          Single run
+        </button>
+        <button
+          type="button"
+          className="tag"
+          aria-pressed={mode === 'sweep'}
+          onClick={() => onModeChange('sweep')}
+        >
+          Sweep
+        </button>
+      </div>
 
       <div className="nrgrid">
         <form className="nrform" onSubmit={(e) => e.preventDefault()}>
