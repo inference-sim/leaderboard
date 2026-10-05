@@ -3310,6 +3310,108 @@ details.nrflaggroup > summary:focus-visible {
   line-height: 1.5;
 }
 
+/* Sweep preview ------------------------------------------------------------- */
+
+/* The count line leads the preview: it is the one headline number (runs, configs, loads),
+   so it reads a size up from the body copy and sits tight under the heading. */
+.sweepcount {
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.sweepdropped {
+  margin-top: 8px;
+  font-size: 13px;
+}
+
+.sweepdropped summary {
+  cursor: pointer;
+  color: var(--warn-ink);
+}
+
+.sweepdropped .droppedlabel {
+  font-weight: 600;
+}
+
+/* Axes and the per-config breakdown share the panel look of a verdict block but stay quiet:
+   a bordered card, list rows, the swept key in mono so values line up for scanning. */
+.sweepaxes,
+.sweepbreak {
+  padding: 14px 18px;
+  margin-bottom: 20px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 3px;
+}
+
+.sweepaxes h3,
+.sweepbreak h3 {
+  margin: 0 0 8px;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.sweepaxes ul,
+.sweepbreak ul {
+  margin: 0;
+  padding-left: 18px;
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.sweepaxes .axiskey,
+.sweepbreak code {
+  font-family: var(--font-mono);
+  font-weight: 600;
+}
+
+.sweepbreak li {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.sweepbreak .cfgloads {
+  display: inline-flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.sweepbreak .cfgload {
+  padding: 1px 7px;
+  font-size: 12px;
+  color: var(--muted);
+  background: var(--paper);
+  border: 1px solid var(--line);
+  border-radius: 3px;
+}
+
+/* Guardrail notes: amber above the soft limit, red once the hard cap blocks the Run button.
+   The count itself is always in the headline above, so the note only carries the warning. */
+.guard-warn,
+.guard-block {
+  padding: 10px 14px;
+  margin: 0 0 18px;
+  font-size: 13px;
+  line-height: 1.55;
+  border: 1px solid;
+  border-left-width: 4px;
+  border-radius: 3px;
+}
+
+.guard-warn {
+  color: var(--warn-ink);
+  background: var(--warn-bg);
+  border-color: var(--warn-line);
+}
+
+.guard-block {
+  color: var(--crit-ink);
+  background: var(--crit-bg);
+  border-color: var(--crit-line);
+}
+
 /* Run result ---------------------------------------------------------------- */
 
 .runresult {
