@@ -10,7 +10,7 @@ import {
 import type { SweepableKey, SweepAxes } from '../sweep'
 
 /** The small count badge shown beside a label (and on a folded group's summary) once a field
- *  carries more than one value. Exported so the preview and tests can reuse the exact text. */
+ *  carries more than one value. Exported so tests can assert the exact badge text. */
 export function variesBadge(n: number): ReactNode {
   return <span className="varies">varies ({n})</span>
 }
@@ -97,7 +97,7 @@ export function MultiToggle({
   // Render the passed options, then append any selected value not among them (the base, when a
   // caller narrows the option set) so every selected value shows as a lit pill. When the base is
   // one of the options (every live usage: TP_CHOICES, the catalog hardware names) this is exactly
-  // the option list, so the markup matches SweepControls' renderToggle unchanged.
+  // the option list, so only a narrowed option set ever appends an extra pill.
   const optionValues = options.map((opt) => String(opt))
   const pills = [...optionValues, ...selectedList.filter((v) => !optionValues.includes(v))]
   return (
