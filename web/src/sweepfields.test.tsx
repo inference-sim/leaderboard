@@ -33,10 +33,17 @@ describe('sweep field primitives', () => {
     // one remove button for the added value, none for the base chip
     expect((html.match(/aria-label="Remove/g) || []).length).toBe(1)
   })
-  it('ChipList renders each level, base level non-removable', () => {
+  it('ChipList renders each level, all levels removable', () => {
     const html = renderToStaticMarkup(
       <ChipList label="Load levels" values={[base.loadValue, '32']} onChange={() => {}} />)
     expect(html).toContain('32')
-    expect((html.match(/aria-label="Remove/g) || []).length).toBe(1)
+    // every level chip, including the base, now has a remove control
+    expect((html.match(/aria-label="Remove/g) || []).length).toBe(2)
+  })
+  it('ChipList warns and shows no chips when the load list is empty', () => {
+    const html = renderToStaticMarkup(
+      <ChipList label="Load levels" values={[]} onChange={() => {}} />)
+    expect(html).toContain('Add at least one load level')
+    expect((html.match(/class="chip"/g) || []).length).toBe(0)
   })
 })

@@ -167,8 +167,7 @@ export function expandSweep(
   groups: RunGroup[], profiles: ProfileBody[], models: ModelInfo[], hardware: HardwareInfo[],
 ): SweepExpansion {
   const varied = SWEEPABLE_KEYS.filter((k) => axisVaries(k, base, axes))
-  const loads = (loadValues.length > 0 ? loadValues : [base.loadValue])
-    .map((s) => Number(s)).filter((n) => Number.isFinite(n))
+  const loads = loadValues.map((s) => Number(s)).filter((n) => Number.isFinite(n))
   const loadList = [...new Set(loads)].sort((a, b) => a - b)
   const combos = configCombos(base, axes)
   const prefix = sweepPrefix(base, varied)

@@ -192,9 +192,9 @@ export function ChipNumber({ fieldKey, label, base, axes, onAxesChange }: AxisFi
 }
 
 /** The offered-load-level list: the same removable-chip pattern over a plain string[], managed
- *  directly (there is no sweep.ts axis for load). The first level is the base (the single run's
- *  own load) and is non-removable, like the deployment-axis base chip; the rest are removable,
- *  and the sweep runs over whatever levels remain. */
+ *  directly (there is no sweep.ts axis for load). Every level, including the base (the single
+ *  run's own load, seeded on entry), is removable; the sweep runs over whatever levels remain.
+ *  When none remain the control warns and the sweep cannot run. */
 export function ChipList({
   label,
   values,
@@ -216,18 +216,16 @@ export function ChipList({
         {values.length > 1 && variesBadge(values.length)}
       </span>
       <div className="chiprow">
-        {values.map((v, i) => (
+        {values.map((v) => (
           <span className="chip" key={v}>
             {v}
-            {i > 0 && (
-              <button
-                type="button"
-                aria-label={`Remove load ${v}`}
-                onClick={() => onChange(values.filter((x) => x !== v))}
-              >
-                ×
-              </button>
-            )}
+            <button
+              type="button"
+              aria-label={`Remove load ${v}`}
+              onClick={() => onChange(values.filter((x) => x !== v))}
+            >
+              ×
+            </button>
           </span>
         ))}
         <input
@@ -250,6 +248,9 @@ export function ChipList({
           }}
         />
       </div>
+      {values.length === 0 && (
+        <p className="nrerr" role="alert">Add at least one load level to run the sweep.</p>
+      )}
     </div>
   )
 }

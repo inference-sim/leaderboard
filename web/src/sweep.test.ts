@@ -111,11 +111,18 @@ describe('expandSweep', () => {
   }
 
   it('a fixed sweep expands to exactly one run', () => {
-    const e = expandSweep(customBase(), {}, [], groups, profiles, models, hardware)
+    const e = expandSweep(customBase(), {}, [customBase().loadValue], groups, profiles, models, hardware)
     expect(e.runs.length).toBe(1)
     expect(e.configCount).toBe(1)
     expect(e.loadCount).toBe(1)
     expect(e.dropped.length).toBe(0)
+  })
+
+  it('an empty load axis yields no runs', () => {
+    const e = expandSweep(customBase(), {}, [], groups, profiles, models, hardware)
+    expect(e.runs.length).toBe(0)
+    expect(e.loadCount).toBe(0)
+    expect(e.workloadKey).toBe(null)
   })
 
   it('product counts multiply configs by load levels', () => {
@@ -153,7 +160,7 @@ describe('expandSweep', () => {
 
   it('invalid combinations are dropped with interpret messages', () => {
     const base = customBase()
-    const e = expandSweep(base, addAxisValue({}, 'dp', '0', base), [], groups, profiles, models, hardware)
+    const e = expandSweep(base, addAxisValue({}, 'dp', '0', base), [base.loadValue], groups, profiles, models, hardware)
     expect(e.runs.length).toBe(1)
     expect(e.dropped.length).toBe(1)
     expect(e.dropped[0]!.issues.length).toBeGreaterThan(0)
