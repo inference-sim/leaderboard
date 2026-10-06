@@ -19,7 +19,7 @@ export const SWEEPABLE_KEYS = [
   'tokensPerHash', 'evictionPolicy', 'offloadPromptOnly', 'selfDescribingKvEvents',
   'prefillInstances', 'decodeInstances', 'prefillDecodeInstances', 'pdDecider',
   'pdPrefixThreshold', 'pdTransferBandwidth', 'pdTransferBaseLatency', 'pdTransferContention',
-  'admissionPolicy', 'routingPolicy', 'numSpeculativeTokens', 'speculativeAcceptanceRate',
+  'admissionPolicy', 'numSpeculativeTokens', 'speculativeAcceptanceRate',
   'speculativeMethod',
 ] as const
 
@@ -108,7 +108,7 @@ export const AXIS_ABBR: Record<SweepableKey, string> = {
   selfDescribingKvEvents: 'sdke', prefillInstances: 'pfi', decodeInstances: 'dei',
   prefillDecodeInstances: 'pdi', pdDecider: 'dec', pdPrefixThreshold: 'ppt',
   pdTransferBandwidth: 'tbw', pdTransferBaseLatency: 'tbl', pdTransferContention: 'tc',
-  admissionPolicy: 'adm', routingPolicy: 'route', numSpeculativeTokens: 'spec',
+  admissionPolicy: 'adm', numSpeculativeTokens: 'spec',
   speculativeAcceptanceRate: 'sar', speculativeMethod: 'specm',
 }
 

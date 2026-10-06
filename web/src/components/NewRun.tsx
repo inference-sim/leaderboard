@@ -877,14 +877,7 @@ export function NewRun({
               false,
               <>
                 {knobSel('admissionPolicy', 'Admission policy', ADMISSION_POLICIES)}
-                <RoutingCard
-                  values={values}
-                  setValues={setValues}
-                  issueFor={issueFor}
-                  mode={mode}
-                  sweepAxes={sweepAxes}
-                  onSweepAxesChange={onSweepAxesChange}
-                />
+                <RoutingCard values={values} setValues={setValues} issueFor={issueFor} />
               </>,
             )}
 
@@ -1032,22 +1025,14 @@ function RoutingCard({
   values,
   setValues,
   issueFor,
-  mode,
-  sweepAxes,
-  onSweepAxesChange,
 }: {
   values: FormValues
   setValues: Dispatch<SetStateAction<FormValues>>
   issueFor: (field: keyof FormValues) => { message: string } | undefined
-  mode: 'single' | 'sweep'
-  sweepAxes: SweepAxes
-  onSweepAxesChange: (axes: SweepAxes) => void
 }) {
-  // Mirrors NewRun's own guard: a swept candidate axis in sweep mode renders its multi
-  // primitive instead of the single control. routingScorers is not a SweepableKey, so the
-  // weighted scorer tag UI below is unaffected.
-  const swept = (field: keyof FormValues) =>
-    mode === 'sweep' && (SWEEPABLE_KEYS as readonly string[]).includes(field as string)
+  // Routing policy is entangled with the routing scorers (not a sweep axis), so it stays a
+  // single radio control in both modes: keeping it single-valued makes the weighted policy
+  // plus its scorer profile behave exactly like the single-run form.
   const weighted = values.routingPolicy === 'weighted'
   const selected = new Set(values.routingScorers.map((s) => s.name))
 
@@ -1083,36 +1068,25 @@ function RoutingCard({
 
   return (
     <>
-      {swept('routingPolicy') ? (
-        <MultiToggle
-          fieldKey="routingPolicy"
-          label="Routing policy"
-          options={ROUTING_POLICIES}
-          base={values}
-          axes={sweepAxes}
-          onAxesChange={onSweepAxesChange}
-        />
-      ) : (
-        <div className="nrrow">
-          <span className="nrlabel" id="routing-label">
-            Routing policy
-          </span>
-          <div className="seg seg-wrap" role="radiogroup" aria-labelledby="routing-label">
-            {ROUTING_POLICIES.map((policy) => (
-              <label key={policy} className={values.routingPolicy === policy ? 'on' : undefined}>
-                <input
-                  type="radio"
-                  name="routingPolicy"
-                  value={policy}
-                  checked={values.routingPolicy === policy}
-                  onChange={() => setPolicy(policy)}
-                />
-                {policy}
-              </label>
-            ))}
-          </div>
+      <div className="nrrow">
+        <span className="nrlabel" id="routing-label">
+          Routing policy
+        </span>
+        <div className="seg seg-wrap" role="radiogroup" aria-labelledby="routing-label">
+          {ROUTING_POLICIES.map((policy) => (
+            <label key={policy} className={values.routingPolicy === policy ? 'on' : undefined}>
+              <input
+                type="radio"
+                name="routingPolicy"
+                value={policy}
+                checked={values.routingPolicy === policy}
+                onChange={() => setPolicy(policy)}
+              />
+              {policy}
+            </label>
+          ))}
         </div>
-      )}
+      </div>
 
       {weighted && (
         <div className="nrscorers">

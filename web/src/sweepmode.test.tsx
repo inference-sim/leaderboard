@@ -66,8 +66,9 @@ describe('subcard swept fields', () => {
         sweepRun={null}
       />,
     )
-    // RoutingCard: the routing policy is a MultiToggle group (aria-label, not aria-labelledby).
-    expect(html).toContain('aria-label="Routing policy"')
+    // RoutingCard: routing policy is not swept (it is entangled with routing scorers), so it
+    // stays a single radio group even in sweep mode and never renders as a MultiToggle.
+    expect(html).not.toContain('aria-label="Routing policy"')
     // PdCard: a pool count is a chip-number input; decider and contention are MultiToggle groups.
     expect(html).toContain('aria-label="Add Prefill instances"')
     expect(html).toContain('aria-label="Decider"')
@@ -76,6 +77,22 @@ describe('subcard swept fields', () => {
     expect(html).toContain('aria-label="CPU offloading"')
     // CustomCard: the default form is a custom workload, so its load level is a ChipList.
     expect(html).toContain('aria-label="Add a load level"')
+  })
+  it('sweep mode keeps routing policy as a single radio group, not a multi-toggle', () => {
+    const html = renderToStaticMarkup(
+      <NewRun
+        {...common}
+        mode="sweep"
+        values={initialValues()}
+        sweepAxes={{}}
+        loadValues={[initialValues().loadValue]}
+        sweepRun={null}
+      />,
+    )
+    // Routing policy is entangled with routing scorers (not swept), so it stays single-valued
+    // in sweep mode: the radio inputs render, and it is not a MultiToggle tagrow.
+    expect(html).toContain('name="routingPolicy"')
+    expect(html).not.toContain('aria-label="Routing policy"')
   })
   it('single mode keeps each subcard swept control single', () => {
     const html = renderToStaticMarkup(<NewRun {...common} mode="single" values={initialValues()} />)
