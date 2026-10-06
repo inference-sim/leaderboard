@@ -331,3 +331,9 @@ convention that a correction must outlive a code comment.
   AXIS_ABBR) because it is entangled with routing scorers, a weighted-only sub-UI that is not a
   sweep axis. Keeping the policy single lets weighted + scorers behave exactly as in the single
   form. To compare routing policies, run separate sweeps.
+- **The load axis is fully user-controlled; empty means no runs.** The original design seeded the
+  base load as a non-removable first level. On 2026-10-06 that was relaxed: every load-level chip
+  is removable (including the base, still seeded on sweep entry as a default). An empty load list
+  now warns at the control and yields zero runs (Run disabled) rather than falling back to the
+  base load (the `expandSweep` empty-loadValues fallback was removed). The base load is seeded on
+  entry so the common case still works with one click.
