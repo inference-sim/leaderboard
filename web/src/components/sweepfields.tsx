@@ -62,11 +62,12 @@ function chips(
   ))
 }
 
-/** The per-field empty warning, shown when a swept field has had every value removed. The
- *  sweep produces zero runs until a value is added back, mirroring the load-level warning. */
+/** The per-field empty hint, shown inline inside the control row when a swept field has had
+ *  every value removed. The sweep produces zero runs until a value is added back, mirroring
+ *  the load-level hint. */
 function emptyAxisWarning(key: SweepableKey, base: FormValues, axes: SweepAxes): ReactNode {
   return axisValues(key, base, axes).length === 0 ? (
-    <p className="nrerr" role="alert">Add at least one value.</p>
+    <span className="axishint" role="alert">needs a value</span>
   ) : null
 }
 
@@ -123,8 +124,8 @@ export function MultiToggle({
             </button>
           )
         })}
+        {emptyAxisWarning(fieldKey, base, axes)}
       </div>
-      {emptyAxisWarning(fieldKey, base, axes)}
     </div>
   )
 }
@@ -161,8 +162,8 @@ export function ChipSelect({
             </option>
           ))}
         </select>
+        {emptyAxisWarning(fieldKey, base, axes)}
       </div>
-      {emptyAxisWarning(fieldKey, base, axes)}
     </div>
   )
 }
@@ -194,8 +195,8 @@ export function ChipNumber({ fieldKey, label, base, axes, onAxesChange }: AxisFi
             addMany(fieldKey, e.clipboardData.getData('text'), base, axes, onAxesChange)
           }}
         />
+        {emptyAxisWarning(fieldKey, base, axes)}
       </div>
-      {emptyAxisWarning(fieldKey, base, axes)}
     </div>
   )
 }
@@ -256,10 +257,10 @@ export function ChipList({
             addLoads(e.clipboardData.getData('text'))
           }}
         />
+        {values.length === 0 && (
+          <span className="axishint" role="alert">needs a level</span>
+        )}
       </div>
-      {values.length === 0 && (
-        <p className="nrerr" role="alert">Add at least one load level to run the sweep.</p>
-      )}
     </div>
   )
 }

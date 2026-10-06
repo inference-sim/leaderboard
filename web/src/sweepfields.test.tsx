@@ -38,7 +38,8 @@ describe('sweep field primitives', () => {
     const html = renderToStaticMarkup(
       <ChipNumber fieldKey="maxModelLen" label="Max model length"
         base={base} axes={axes} onAxesChange={() => {}} />)
-    expect(html).toContain('Add at least one value')
+    expect(html).toContain('needs a value')
+    expect(html).toContain('class="axishint"')
     expect((html.match(/class="chip"/g) || []).length).toBe(0)
   })
   it('MultiToggle warns when the base is toggled off and nothing else is selected', () => {
@@ -46,7 +47,8 @@ describe('sweep field primitives', () => {
     const html = renderToStaticMarkup(
       <MultiToggle fieldKey="tp" label="Tensor parallel" options={[2, 4, 8]}
         base={base} axes={axes} onAxesChange={() => {}} />)
-    expect(html).toContain('Add at least one value')
+    expect(html).toContain('needs a value')
+    expect(html).toContain('class="axishint"')
     expect((html.match(/aria-pressed="true"/g) || []).length).toBe(0)
   })
   it('ChipList renders each level, all levels removable', () => {
@@ -59,7 +61,8 @@ describe('sweep field primitives', () => {
   it('ChipList warns and shows no chips when the load list is empty', () => {
     const html = renderToStaticMarkup(
       <ChipList label="Load levels" values={[]} onChange={() => {}} />)
-    expect(html).toContain('Add at least one load level')
+    expect(html).toContain('needs a level')
+    expect(html).toContain('class="axishint"')
     expect((html.match(/class="chip"/g) || []).length).toBe(0)
   })
 })

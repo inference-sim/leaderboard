@@ -2875,6 +2875,13 @@ tr.revealed td,
 .chip button { border: 0; background: none; cursor: pointer; line-height: 1; font-size: 13px; color: inherit; }
 .chipinput { min-width: 72px; border: 1px dashed var(--border, #8884); border-radius: 999px; padding: 2px 8px; }
 .varies { margin-left: 6px; font-size: 11px; opacity: .7; }
+.axishint {
+  align-self: center;
+  margin-left: 2px;
+  font-size: 11px;
+  color: var(--warn-ink);
+  white-space: nowrap;
+}
 .modetoggle { margin: 8px 0 4px; }
 
 /* In the Declare-a-run form each segmented control fills its field column, so its cells
