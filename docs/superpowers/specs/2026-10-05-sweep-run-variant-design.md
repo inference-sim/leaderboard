@@ -337,3 +337,9 @@ convention that a correction must outlive a code comment.
   now warns at the control and yields zero runs (Run disabled) rather than falling back to the
   base load (the `expandSweep` empty-loadValues fallback was removed). The base load is seeded on
   entry so the common case still works with one click.
+- **Every swept field's default is removable, not just load.** The original axis model kept each
+  field's base value non-removable (`removeAxisValue` guarded it; the base chip/pill had no remove).
+  On 2026-10-06 that was generalised to match the load axis: the base-guard was removed, so any
+  swept field (segmented, dropdown, number) can have its default de-selected. A field emptied to
+  zero values warns ("Add at least one value.") and makes the sweep produce zero runs; removing a
+  field back down to just its base collapses it to "fixed at base" (normalize deletes the key).
