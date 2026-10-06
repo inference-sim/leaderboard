@@ -326,3 +326,8 @@ convention that a correction must outlive a code comment.
   control becomes multi-valued in Sweep mode (segmented multi-light, dropdown and number/load
   chips) via shared primitives in web/src/components/sweepfields.tsx. SweepControls.tsx is removed.
   sweep.ts, SweepPreview, SweepProgress, and the App orchestration are unchanged.
+- **Routing policy is not swept.** The original "swept dimensions: everything but the model" was
+  narrowed on 2026-10-06: routing policy is kept single-valued (removed from SWEEPABLE_KEYS and
+  AXIS_ABBR) because it is entangled with routing scorers, a weighted-only sub-UI that is not a
+  sweep axis. Keeping the policy single lets weighted + scorers behave exactly as in the single
+  form. To compare routing policies, run separate sweeps.
