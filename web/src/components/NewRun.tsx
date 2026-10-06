@@ -499,23 +499,25 @@ export function NewRun({
         files relative to that checkout, so the server runs it, not the browser.
       </p>
 
-      <div className="modetoggle tagrow" role="group" aria-label="Declaration mode">
-        <button
-          type="button"
-          className="tag"
-          aria-pressed={mode === 'single'}
-          onClick={requestSingle}
-        >
+      <div className="modetoggle seg" role="radiogroup" aria-label="Declaration mode">
+        <label className={mode === 'single' ? 'on' : undefined}>
+          <input
+            type="radio"
+            name="declMode"
+            checked={mode === 'single'}
+            onChange={requestSingle}
+          />
           Single run
-        </button>
-        <button
-          type="button"
-          className="tag"
-          aria-pressed={mode === 'sweep'}
-          onClick={() => onModeChange('sweep')}
-        >
+        </label>
+        <label className={mode === 'sweep' ? 'on' : undefined}>
+          <input
+            type="radio"
+            name="declMode"
+            checked={mode === 'sweep'}
+            onChange={() => onModeChange('sweep')}
+          />
           Sweep
-        </button>
+        </label>
       </div>
 
       {mode === 'sweep' && sweepError && (

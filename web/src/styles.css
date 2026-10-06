@@ -2882,6 +2882,8 @@ tr.revealed td,
   color: var(--warn-ink);
   white-space: nowrap;
 }
+/* The Single / Sweep mode toggle is a `.seg` segmented control; `.modetoggle` only adds the
+ * row's vertical spacing. Keep it margin-only so it does not fight `.seg` (display:flex). */
 .modetoggle { margin: 8px 0 4px; }
 
 /* In the Declare-a-run form each segmented control fills its field column, so its cells
