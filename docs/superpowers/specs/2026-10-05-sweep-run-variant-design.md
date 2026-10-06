@@ -319,3 +319,10 @@ convention that a correction must outlive a code comment.
   levels (each load level is its own stored `group_id`). The preview's single verdict and the
   run-id dedup are computed from `workloadKey` (load stripped), which is the board's one-table
   notion, so a sweep reads as one table even though it writes several `group_id` directories.
+- **The sweep controls are the single form, made multi-valued in place.** This design's
+  "Per-field sweep controls" and "Scope of changes" sections described a dedicated SweepControls
+  panel. That was superseded on 2026-10-06 (see 2026-10-06-sweep-unified-form-design.md): the
+  Declare form renders the same single-run interface in both modes, and each swept field's own
+  control becomes multi-valued in Sweep mode (segmented multi-light, dropdown and number/load
+  chips) via shared primitives in web/src/components/sweepfields.tsx. SweepControls.tsx is removed.
+  sweep.ts, SweepPreview, SweepProgress, and the App orchestration are unchanged.
