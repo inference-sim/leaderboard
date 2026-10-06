@@ -25,15 +25,15 @@ import type { HardwareInfo } from '../hardware'
 import { workloadParam, workloadsHref } from '../route'
 import { listWorkloads, profileKnobs, profileSummary, profileToGroup } from '../workloads'
 import type { ProfileBody } from '../workloads'
-import type { SweepAxes, SweepCell, SweepRun } from '../sweep'
-import { expandSweep, sweepHasVariation } from '../sweep'
+import type { SweepableKey, SweepAxes, SweepCell, SweepRun } from '../sweep'
+import { expandSweep, SWEEPABLE_KEYS, sweepHasVariation } from '../sweep'
 import { offeredLoad } from '../load'
 import { numeric } from '../format'
 import { shellLines } from '../repro'
 import { CopyBlock } from './CopyBlock'
 import { Select } from './Select'
 import type { SelectOption } from './Select'
-import { SweepControls } from './SweepControls'
+import { ChipList, ChipNumber, ChipSelect, MultiToggle } from './sweepfields'
 import { SweepPreview } from './SweepPreview'
 import { SweepProgress } from './SweepProgress'
 import { ConfirmDialog } from './ConfirmDialog'
@@ -388,6 +388,11 @@ export function NewRun({
     hardwareNames.unshift(values.hardware)
   }
 
+  // True when the field is a swept candidate axis in sweep mode, so its control renders its
+  // multi primitive (chips/pills) instead of the single input. Closes over `mode`.
+  const swept = (field: keyof FormValues) =>
+    mode === 'sweep' && (SWEEPABLE_KEYS as readonly string[]).includes(field as string)
+
   // One serving knob as a number field. min is '0' for the fields where 0 is a valid
   // "off"/auto (max-model-len, long-prefill, draft tokens); step is a
   // fraction for the two ratio knobs (gpu-memory-utilization, acceptance rate).
@@ -398,7 +403,18 @@ export function NewRun({
     step = '1',
     placeholder?: string,
     tip?: string,
-  ) => (
+  ) => {
+    if (swept(field))
+      return (
+        <ChipNumber
+          fieldKey={field as SweepableKey}
+          label={label}
+          base={values}
+          axes={sweepAxes}
+          onAxesChange={onSweepAxesChange}
+        />
+      )
+    return (
     <>
       <label className="nrrow">
         <span className="nrlabel">
@@ -421,12 +437,24 @@ export function NewRun({
       </label>
       {issueFor(field) && <p className="nrerr">{issueFor(field)!.message}</p>}
     </>
-  )
+    )
+  }
 
   // One serving knob as a closed dropdown over the names blis accepts (catalog.ts), so
   // the form cannot declare a value the simulator would reject. `disabled` greys it out for a
   // knob that does not apply to the current model (the MoE comm backend on a dense model).
   const knobSel = (field: keyof FormValues, label: string, choices: string[], disabled = false) => {
+    if (swept(field))
+      return (
+        <ChipSelect
+          fieldKey={field as SweepableKey}
+          label={label}
+          options={choices}
+          base={values}
+          axes={sweepAxes}
+          onAxesChange={onSweepAxesChange}
+        />
+      )
     const labelId = `${field}-label`
     return (
       <>
@@ -490,34 +518,11 @@ export function NewRun({
         </button>
       </div>
 
-      {mode === 'sweep' ? (
-        <div className="nrgrid">
-          {sweepError && (
-            <p className="dek issue" role="alert">
-              {sweepError}
-            </p>
-          )}
-          <SweepControls
-            base={values}
-            axes={sweepAxes}
-            loadValues={loadValues}
-            hardwareNames={hardwareNames}
-            onAxesChange={onSweepAxesChange}
-            onLoadValuesChange={onLoadValuesChange}
-          />
-          {sweepRun ? (
-            <SweepProgress run={sweepRun} onStop={onStopSweep} onView={onViewRow} />
-          ) : (
-            <SweepPreview
-              expansion={expansion}
-              base={values}
-              axes={sweepAxes}
-              onRun={() => onRunSweep(expansion.runs, expansion.runs[0]?.output.saveProfile ?? null)}
-              running={false}
-            />
-          )}
-        </div>
-      ) : (
+      {mode === 'sweep' && sweepError && (
+        <p className="dek issue" role="alert">
+          {sweepError}
+        </p>
+      )}
       <div className="nrgrid">
         <form className="nrform" onSubmit={(e) => e.preventDefault()}>
           <fieldset className="nrwork">
@@ -608,20 +613,28 @@ export function NewRun({
                     replayed on its own recorded timing has no level to vary, so it shows nothing. */}
                 {selectedLoadIsSweepable && (
                   <div className="nrload">
-                    <label className="nrrow">
-                      {/* The profile fixes the load kind (rate, concurrency, or a trace's session
-                          pool); only the level is set here. The kind is shown, not switchable — to
-                          change it, define a different workload. */}
-                      <span className="nrlabel">{loadLevelLabel}</span>
-                      <input
-                        type="text"
-                        inputMode={values.loadKind === 'rate' ? 'decimal' : 'numeric'}
-                        value={values.loadValue}
-                        spellCheck={false}
-                        onChange={(e) => set('loadValue', e.target.value)}
-                        aria-invalid={issueFor('loadValue') != null}
+                    {mode === 'sweep' ? (
+                      <ChipList
+                        label={loadLevelLabel}
+                        values={loadValues}
+                        onChange={onLoadValuesChange}
                       />
-                    </label>
+                    ) : (
+                      <label className="nrrow">
+                        {/* The profile fixes the load kind (rate, concurrency, or a trace's session
+                            pool); only the level is set here. The kind is shown, not switchable — to
+                            change it, define a different workload. */}
+                        <span className="nrlabel">{loadLevelLabel}</span>
+                        <input
+                          type="text"
+                          inputMode={values.loadKind === 'rate' ? 'decimal' : 'numeric'}
+                          value={values.loadValue}
+                          spellCheck={false}
+                          onChange={(e) => set('loadValue', e.target.value)}
+                          aria-invalid={issueFor('loadValue') != null}
+                        />
+                      </label>
+                    )}
                     {issueFor('loadValue') && <p className="nrerr">{issueFor('loadValue')!.message}</p>}
                     <p className="nrnote">
                       The load to run this profile at, seeded from the profile. Change it to run the
@@ -693,73 +706,106 @@ export function NewRun({
                 </div>
                 {issueFor('model') && <p className="nrerr">{issueFor('model')!.message}</p>}
 
-                <div className="nrrow">
-                  <span className="nrlabel" id="hw-label">
-                    Accelerator
-                  </span>
-                  <div className="seg seg-wrap" role="radiogroup" aria-labelledby="hw-label">
-                    {hardwareNames.map((name) => (
-                      <label key={name} className={values.hardware === name ? 'on' : undefined}>
-                        <input
-                          type="radio"
-                          name="hardware"
-                          value={name}
-                          checked={values.hardware === name}
-                          onChange={() => set('hardware', name)}
-                        />
-                        {name}
-                      </label>
-                    ))}
+                {swept('hardware') ? (
+                  <MultiToggle
+                    fieldKey="hardware"
+                    label="Accelerator"
+                    options={hardwareNames}
+                    base={values}
+                    axes={sweepAxes}
+                    onAxesChange={onSweepAxesChange}
+                  />
+                ) : (
+                  <div className="nrrow">
+                    <span className="nrlabel" id="hw-label">
+                      Accelerator
+                    </span>
+                    <div className="seg seg-wrap" role="radiogroup" aria-labelledby="hw-label">
+                      {hardwareNames.map((name) => (
+                        <label key={name} className={values.hardware === name ? 'on' : undefined}>
+                          <input
+                            type="radio"
+                            name="hardware"
+                            value={name}
+                            checked={values.hardware === name}
+                            onChange={() => set('hardware', name)}
+                          />
+                          {name}
+                        </label>
+                      ))}
+                    </div>
                   </div>
-                </div>
+                )}
                 {issueFor('hardware') && <p className="nrerr">{issueFor('hardware')!.message}</p>}
 
-                <div className="nrrow">
-                  <span className="nrlabel" id="tp-label">
-                    Tensor parallel
-                  </span>
-                  <div className="seg seg-wrap" role="radiogroup" aria-labelledby="tp-label">
-                    {TP_CHOICES.map((tp) => (
-                      <label key={tp} className={values.tp === String(tp) ? 'on' : undefined}>
-                        <input
-                          type="radio"
-                          name="tp"
-                          value={tp}
-                          checked={values.tp === String(tp)}
-                          onChange={() => set('tp', String(tp))}
-                        />
-                        {tp}
-                      </label>
-                    ))}
+                {swept('tp') ? (
+                  <MultiToggle
+                    fieldKey="tp"
+                    label="Tensor parallel"
+                    options={TP_CHOICES}
+                    base={values}
+                    axes={sweepAxes}
+                    onAxesChange={onSweepAxesChange}
+                  />
+                ) : (
+                  <div className="nrrow">
+                    <span className="nrlabel" id="tp-label">
+                      Tensor parallel
+                    </span>
+                    <div className="seg seg-wrap" role="radiogroup" aria-labelledby="tp-label">
+                      {TP_CHOICES.map((tp) => (
+                        <label key={tp} className={values.tp === String(tp) ? 'on' : undefined}>
+                          <input
+                            type="radio"
+                            name="tp"
+                            value={tp}
+                            checked={values.tp === String(tp)}
+                            onChange={() => set('tp', String(tp))}
+                          />
+                          {tp}
+                        </label>
+                      ))}
+                    </div>
                   </div>
-                </div>
+                )}
                 {issueFor('tp') && <p className="nrerr">{issueFor('tp')!.message}</p>}
 
                 {knobNum('dp', 'Data parallel')}
 
-                <div className="nrrow">
-                  <span className="nrlabel" id="ep-label">
-                    Expert parallel
-                  </span>
-                  <div
-                    className={modelIsMoE ? 'seg' : 'seg disabled'}
-                    role="radiogroup"
-                    aria-labelledby="ep-label"
-                  >
-                    {([['off', false], ['on', true]] as const).map(([label, on]) => (
-                      <label key={label} className={values.enableExpertParallel === on ? 'on' : undefined}>
-                        <input
-                          type="radio"
-                          name="enableExpertParallel"
-                          checked={values.enableExpertParallel === on}
-                          disabled={!modelIsMoE}
-                          onChange={() => set('enableExpertParallel', on)}
-                        />
-                        {label}
-                      </label>
-                    ))}
+                {swept('enableExpertParallel') ? (
+                  <MultiToggle
+                    fieldKey="enableExpertParallel"
+                    label="Expert parallel"
+                    options={['off', 'on']}
+                    base={values}
+                    axes={sweepAxes}
+                    onAxesChange={onSweepAxesChange}
+                  />
+                ) : (
+                  <div className="nrrow">
+                    <span className="nrlabel" id="ep-label">
+                      Expert parallel
+                    </span>
+                    <div
+                      className={modelIsMoE ? 'seg' : 'seg disabled'}
+                      role="radiogroup"
+                      aria-labelledby="ep-label"
+                    >
+                      {([['off', false], ['on', true]] as const).map(([label, on]) => (
+                        <label key={label} className={values.enableExpertParallel === on ? 'on' : undefined}>
+                          <input
+                            type="radio"
+                            name="enableExpertParallel"
+                            checked={values.enableExpertParallel === on}
+                            disabled={!modelIsMoE}
+                            onChange={() => set('enableExpertParallel', on)}
+                          />
+                          {label}
+                        </label>
+                      ))}
+                    </div>
                   </div>
-                </div>
+                )}
                 {issueFor('enableExpertParallel') && (
                   <p className="nrerr">{issueFor('enableExpertParallel')!.message}</p>
                 )}
@@ -848,6 +894,19 @@ export function NewRun({
           </fieldset>
         </form>
 
+        {mode === 'sweep' ? (
+          sweepRun ? (
+            <SweepProgress run={sweepRun} onStop={onStopSweep} onView={onViewRow} />
+          ) : (
+            <SweepPreview
+              expansion={expansion}
+              base={values}
+              axes={sweepAxes}
+              onRun={() => onRunSweep(expansion.runs, expansion.runs[0]?.output.saveProfile ?? null)}
+              running={false}
+            />
+          )
+        ) : (
         <aside className="nrout">
           <div className="verdictwrap" aria-live="polite">
             {output ? (
@@ -919,8 +978,8 @@ export function NewRun({
             </>
           )}
         </aside>
+        )}
       </div>
-      )}
 
       <ConfirmDialog
         open={confirmCollapse}
