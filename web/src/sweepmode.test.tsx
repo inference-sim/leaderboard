@@ -53,3 +53,36 @@ describe('single form in both modes', () => {
     expect(html).not.toContain('runs in one table')
   })
 })
+
+describe('subcard swept fields', () => {
+  it('sweep mode makes each subcard swept control multi', () => {
+    const html = renderToStaticMarkup(
+      <NewRun
+        {...common}
+        mode="sweep"
+        values={initialValues()}
+        sweepAxes={{}}
+        loadValues={[initialValues().loadValue]}
+        sweepRun={null}
+      />,
+    )
+    // RoutingCard: the routing policy is a MultiToggle group (aria-label, not aria-labelledby).
+    expect(html).toContain('aria-label="Routing policy"')
+    // PdCard: a pool count is a chip-number input; decider and contention are MultiToggle groups.
+    expect(html).toContain('aria-label="Add Prefill instances"')
+    expect(html).toContain('aria-label="Decider"')
+    expect(html).toContain('aria-label="Transfer contention"')
+    // KvOffloadCard: the CPU-offloading toggle is a MultiToggle group.
+    expect(html).toContain('aria-label="CPU offloading"')
+    // CustomCard: the default form is a custom workload, so its load level is a ChipList.
+    expect(html).toContain('aria-label="Add a load level"')
+  })
+  it('single mode keeps each subcard swept control single', () => {
+    const html = renderToStaticMarkup(<NewRun {...common} mode="single" values={initialValues()} />)
+    expect(html).not.toContain('aria-label="Routing policy"')
+    expect(html).not.toContain('aria-label="Add Prefill instances"')
+    expect(html).not.toContain('aria-label="Decider"')
+    expect(html).not.toContain('aria-label="CPU offloading"')
+    expect(html).not.toContain('aria-label="Add a load level"')
+  })
+})
