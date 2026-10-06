@@ -39,8 +39,8 @@ function addMany(
   if (next !== axes) onAxesChange(next)
 }
 
-/** The removable-chip row shared by number, select and text axes. axisValues returns the base
- *  value first and it can never be removed (removeAxisValue guards it), so chip 0 shows no x. */
+/** The removable-chip row shared by number, select and text axes. Every chip, including the
+ *  base value (chip 0), is removable; removing every value empties the axis and the field warns. */
 function chips(
   key: SweepableKey,
   base: FormValues,
@@ -48,20 +48,26 @@ function chips(
   onAxesChange: (axes: SweepAxes) => void,
 ): ReactNode[] {
   const values = axisValues(key, base, axes)
-  return values.map((v, i) => (
+  return values.map((v) => (
     <span className="chip" key={v}>
       {display(v)}
-      {i > 0 && (
-        <button
-          type="button"
-          aria-label={`Remove ${display(v)}`}
-          onClick={() => onAxesChange(removeAxisValue(axes, key, v, base))}
-        >
-          ×
-        </button>
-      )}
+      <button
+        type="button"
+        aria-label={`Remove ${display(v)}`}
+        onClick={() => onAxesChange(removeAxisValue(axes, key, v, base))}
+      >
+        ×
+      </button>
     </span>
   ))
+}
+
+/** The per-field empty warning, shown when a swept field has had every value removed. The
+ *  sweep produces zero runs until a value is added back, mirroring the load-level warning. */
+function emptyAxisWarning(key: SweepableKey, base: FormValues, axes: SweepAxes): ReactNode {
+  return axisValues(key, base, axes).length === 0 ? (
+    <p className="nrerr" role="alert">Add at least one value.</p>
+  ) : null
 }
 
 /** The field label with its varies badge once the field carries more than one value. */
@@ -118,12 +124,13 @@ export function MultiToggle({
           )
         })}
       </div>
+      {emptyAxisWarning(fieldKey, base, axes)}
     </div>
   )
 }
 
 /** A chip multi-select over a closed set: chosen values accumulate as removable chips and a
- *  dropdown offers the remaining options. The base value is the first, non-removable chip. */
+ *  dropdown offers the remaining options. Every chip, the base included, is removable. */
 export function ChipSelect({
   fieldKey,
   label,
@@ -155,12 +162,13 @@ export function ChipSelect({
           ))}
         </select>
       </div>
+      {emptyAxisWarning(fieldKey, base, axes)}
     </div>
   )
 }
 
 /** A free number field whose values accumulate as removable chips (Enter or paste adds; split
- *  on whitespace or commas). The base value is the first, non-removable chip. */
+ *  on whitespace or commas). Every chip, the base included, is removable. */
 export function ChipNumber({ fieldKey, label, base, axes, onAxesChange }: AxisFieldProps) {
   return (
     <div className="nrrow">
@@ -187,6 +195,7 @@ export function ChipNumber({ fieldKey, label, base, axes, onAxesChange }: AxisFi
           }}
         />
       </div>
+      {emptyAxisWarning(fieldKey, base, axes)}
     </div>
   )
 }

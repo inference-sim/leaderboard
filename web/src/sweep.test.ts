@@ -38,9 +38,17 @@ describe('axis model', () => {
     expect(a2.tp).toBeUndefined() // collapsed back to just the base -> fixed -> key dropped
   })
 
-  it('toggling the base value off is a no-op (base is always present)', () => {
+  it('toggling the base value off empties the axis', () => {
     const a = toggleAxisValue({}, 'tp', String(base.tp), base)
-    expect(a.tp).toBeUndefined()
+    expect(a.tp).toEqual([])
+  })
+
+  it('removing the base value leaves a present-empty axis; re-adding collapses to fixed', () => {
+    const emptied = removeAxisValue({}, 'maxModelLen', String(base.maxModelLen), base)
+    expect(emptied.maxModelLen).toEqual([])
+    expect(axisValues('maxModelLen', base, emptied)).toEqual([])
+    const readded = addAxisValue(removeAxisValue({}, 'tp', String(base.tp), base), 'tp', String(base.tp), base)
+    expect(readded.tp).toBeUndefined()
   })
 
   it('add splits a pasted list and dedups', () => {
@@ -123,6 +131,14 @@ describe('expandSweep', () => {
     expect(e.runs.length).toBe(0)
     expect(e.loadCount).toBe(0)
     expect(e.workloadKey).toBe(null)
+  })
+
+  it('an emptied swept field yields no runs', () => {
+    const base = customBase()
+    const axes = removeAxisValue({}, 'maxModelLen', String(base.maxModelLen), base)
+    const e = expandSweep(base, axes, [base.loadValue], groups, profiles, models, hardware)
+    expect(e.runs.length).toBe(0)
+    expect(e.configCount).toBe(0)
   })
 
   it('product counts multiply configs by load levels', () => {

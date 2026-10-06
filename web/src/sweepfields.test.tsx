@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { MultiToggle, ChipSelect, ChipNumber, ChipList } from './components/sweepfields'
 import { initialValues } from './newrun'
-import { toggleAxisValue, addAxisValue } from './sweep'
+import { toggleAxisValue, addAxisValue, removeAxisValue } from './sweep'
 
 const base = initialValues()
 
@@ -24,14 +24,30 @@ describe('sweep field primitives', () => {
     expect(html).toContain('chip')
     expect(html).toContain('add a value')
   })
-  it('ChipNumber shows chips and the base chip has no remove', () => {
+  it('ChipNumber shows chips and every chip is removable', () => {
     const axes = addAxisValue({}, 'maxModelLen', '4096', base)
     const html = renderToStaticMarkup(
       <ChipNumber fieldKey="maxModelLen" label="Max model length"
         base={base} axes={axes} onAxesChange={() => {}} />)
     expect(html).toContain('4096')
-    // one remove button for the added value, none for the base chip
-    expect((html.match(/aria-label="Remove/g) || []).length).toBe(1)
+    // a remove button for both the base chip and the added value
+    expect((html.match(/aria-label="Remove/g) || []).length).toBe(2)
+  })
+  it('ChipNumber warns and shows no chips when its axis is empty', () => {
+    const axes = removeAxisValue({}, 'maxModelLen', String(base.maxModelLen), base)
+    const html = renderToStaticMarkup(
+      <ChipNumber fieldKey="maxModelLen" label="Max model length"
+        base={base} axes={axes} onAxesChange={() => {}} />)
+    expect(html).toContain('Add at least one value')
+    expect((html.match(/class="chip"/g) || []).length).toBe(0)
+  })
+  it('MultiToggle warns when the base is toggled off and nothing else is selected', () => {
+    const axes = toggleAxisValue({}, 'tp', String(base.tp), base)
+    const html = renderToStaticMarkup(
+      <MultiToggle fieldKey="tp" label="Tensor parallel" options={[2, 4, 8]}
+        base={base} axes={axes} onAxesChange={() => {}} />)
+    expect(html).toContain('Add at least one value')
+    expect((html.match(/aria-pressed="true"/g) || []).length).toBe(0)
   })
   it('ChipList renders each level, all levels removable', () => {
     const html = renderToStaticMarkup(

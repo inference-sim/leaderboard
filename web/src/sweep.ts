@@ -58,8 +58,6 @@ export function addAxisValue(axes: SweepAxes, key: SweepableKey, value: string, 
 }
 
 export function removeAxisValue(axes: SweepAxes, key: SweepableKey, value: string, base: FormValues): SweepAxes {
-  const bv = baseValue(key, base)
-  if (value === bv) return axes // the base value is always present; cannot remove it
   const next = axisValues(key, base, axes).filter((v) => v !== value)
   return normalize({ ...axes, [key]: next }, key, base)
 }
