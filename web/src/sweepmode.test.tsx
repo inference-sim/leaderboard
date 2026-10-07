@@ -14,21 +14,24 @@ const common = {
 }
 
 describe('mode toggle', () => {
-  it('renders both modes as a radiogroup, Single on by default', () => {
+  it('renders both modes as two option cards, Single on by default', () => {
     const html = renderToStaticMarkup(<NewRun {...common} mode="single" onModeChange={() => {}} />)
     expect(html).toContain('aria-label="Declaration mode"')
-    expect(html).toMatch(/<div class="modetoggle seg" role="radiogroup"/)
+    expect(html).toMatch(/<div class="modecards" role="radiogroup"/)
+    // both card titles and both descriptions render
     expect(html).toContain('Single run')
     expect(html).toContain('Sweep')
-    // the active side carries the `on` class; default mode is single
+    expect(html).toContain('Run one candidate at one load.')
+    expect(html).toContain('Run a matrix across load levels.')
+    // the active card's label carries the `on` class with a checked radio; default is single
     expect(html).toMatch(
-      /<label class="on"><input[^>]*name="declMode"[^>]*checked=""[^>]*\/>Single run<\/label>/,
+      /<label class="on"><input[^>]*name="declMode"[^>]*checked=""[^>]*\/>.*?<span class="mct">Single run<\/span>/,
     )
   })
   it('reflects sweep mode', () => {
     const html = renderToStaticMarkup(<NewRun {...common} mode="sweep" onModeChange={() => {}} />)
     expect(html).toMatch(
-      /<label class="on"><input[^>]*name="declMode"[^>]*checked=""[^>]*\/>Sweep<\/label>/,
+      /<label class="on"><input[^>]*name="declMode"[^>]*checked=""[^>]*\/>.*?<span class="mct">Sweep<\/span>/,
     )
   })
 })

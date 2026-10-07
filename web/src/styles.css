@@ -2882,9 +2882,21 @@ tr.revealed td,
   color: var(--warn-ink);
   white-space: nowrap;
 }
-/* The Single / Sweep mode toggle is a `.seg` segmented control; `.modetoggle` only adds the
- * row's vertical spacing. Keep it margin-only so it does not fight `.seg` (display:flex). */
-.modetoggle { margin: 8px 0 4px; }
+/* The declaration-mode selector: two option cards, the active one accent-outlined and soft-filled.
+   Replaces the old segmented .modetoggle; the hidden radio keeps native radiogroup semantics. */
+.modecards { display: flex; gap: 12px; flex-wrap: wrap; margin: 8px 0 4px; }
+.modecards label { flex: 1 1 200px; min-width: 170px; display: flex; gap: 11px; align-items: flex-start;
+  padding: 13px 14px; border: 1px solid var(--line-strong); border-radius: 7px; background: var(--panel); cursor: pointer; }
+.modecards label:hover { border-color: var(--accent); }
+.modecards label.on { border-color: var(--accent); background: var(--accent-soft); box-shadow: inset 0 0 0 1px var(--accent); }
+.modecards input { position: absolute; opacity: 0; width: 0; height: 0; }
+.modecards .glyph { color: var(--line-strong); margin-top: 1px; flex: none; }
+.modecards label.on .glyph { color: var(--accent); }
+.modecards .mct { display: block; font-family: var(--font-mono); font-size: 13.5px; font-weight: 600; color: var(--ink); }
+.modecards label.on .mct { color: var(--accent-ink); }
+.modecards .mcs { display: block; color: var(--muted); font-size: 12px; margin-top: 2px; line-height: 1.4; }
+.modecards label.on .mcs { color: var(--accent-ink); }
+.modecards label:has(input:focus-visible) { outline: 2px solid var(--focus); outline-offset: 2px; }
 
 /* In the Declare-a-run form each segmented control fills its field column, so its cells
  * share the width equally rather than hugging the left. Mirrors the .editor .seg rule
