@@ -499,53 +499,6 @@ export function NewRun({
         files relative to that checkout, so the server runs it, not the browser.
       </p>
 
-      <div className="modecards" role="radiogroup" aria-label="Declaration mode">
-        <label className={mode === 'single' ? 'on' : undefined}>
-          <input
-            type="radio"
-            name="declMode"
-            checked={mode === 'single'}
-            onChange={requestSingle}
-          />
-          <span className="glyph" aria-hidden="true">
-            <svg width="20" height="20" viewBox="0 0 22 22">
-              <circle cx="11" cy="11" r="4.5" fill="currentColor" />
-            </svg>
-          </span>
-          <span className="mctext">
-            <span className="mct">Single run</span>
-            <span className="mcs">Run one candidate at one load.</span>
-          </span>
-        </label>
-        <label className={mode === 'sweep' ? 'on' : undefined}>
-          <input
-            type="radio"
-            name="declMode"
-            checked={mode === 'sweep'}
-            onChange={() => onModeChange('sweep')}
-          />
-          <span className="glyph" aria-hidden="true">
-            <svg width="20" height="20" viewBox="0 0 22 22">
-              <g fill="currentColor">
-                <circle cx="6" cy="6" r="2" />
-                <circle cx="11" cy="6" r="2" />
-                <circle cx="16" cy="6" r="2" />
-                <circle cx="6" cy="11" r="2" />
-                <circle cx="11" cy="11" r="2" />
-                <circle cx="16" cy="11" r="2" />
-                <circle cx="6" cy="16" r="2" />
-                <circle cx="11" cy="16" r="2" />
-                <circle cx="16" cy="16" r="2" />
-              </g>
-            </svg>
-          </span>
-          <span className="mctext">
-            <span className="mct">Sweep</span>
-            <span className="mcs">Run a matrix across load levels.</span>
-          </span>
-        </label>
-      </div>
-
       {mode === 'sweep' && sweepError && (
         <p className="dek issue" role="alert">
           {sweepError}
@@ -553,6 +506,52 @@ export function NewRun({
       )}
       <div className="nrgrid">
         <form className="nrform" onSubmit={(e) => e.preventDefault()}>
+          <div className="modecards" role="radiogroup" aria-label="Declaration mode">
+            <label className={mode === 'single' ? 'on' : undefined}>
+              <input
+                type="radio"
+                name="declMode"
+                checked={mode === 'single'}
+                onChange={requestSingle}
+              />
+              <span className="glyph" aria-hidden="true">
+                <svg width="20" height="20" viewBox="0 0 22 22">
+                  <circle cx="11" cy="11" r="4.5" fill="currentColor" />
+                </svg>
+              </span>
+              <span className="mctext">
+                <span className="mct">Single run</span>
+                <span className="mcs">Run one candidate at one load.</span>
+              </span>
+            </label>
+            <label className={mode === 'sweep' ? 'on' : undefined}>
+              <input
+                type="radio"
+                name="declMode"
+                checked={mode === 'sweep'}
+                onChange={() => onModeChange('sweep')}
+              />
+              <span className="glyph" aria-hidden="true">
+                <svg width="20" height="20" viewBox="0 0 22 22">
+                  <g fill="currentColor">
+                    <circle cx="6" cy="6" r="2" />
+                    <circle cx="11" cy="6" r="2" />
+                    <circle cx="16" cy="6" r="2" />
+                    <circle cx="6" cy="11" r="2" />
+                    <circle cx="11" cy="11" r="2" />
+                    <circle cx="16" cy="11" r="2" />
+                    <circle cx="6" cy="16" r="2" />
+                    <circle cx="11" cy="16" r="2" />
+                    <circle cx="16" cy="16" r="2" />
+                  </g>
+                </svg>
+              </span>
+              <span className="mctext">
+                <span className="mct">Sweep</span>
+                <span className="mcs">Run a matrix across load levels.</span>
+              </span>
+            </label>
+          </div>
           <fieldset className="nrwork">
             <legend>Work offered</legend>
 

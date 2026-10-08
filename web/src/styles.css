@@ -2884,7 +2884,7 @@ tr.revealed td,
 }
 /* The declaration-mode selector: two option cards, the active one accent-outlined and soft-filled.
    Replaces the old segmented .modetoggle; the hidden radio keeps native radiogroup semantics. */
-.modecards { display: flex; gap: 12px; flex-wrap: wrap; margin: 8px 0 4px; }
+.modecards { display: flex; gap: 12px; flex-wrap: wrap; margin: 0 0 14px; }
 .modecards label { flex: 1 1 200px; min-width: 170px; display: flex; gap: 11px; align-items: flex-start;
   padding: 13px 14px; border: 1px solid var(--line-strong); border-radius: 7px; background: var(--panel); cursor: pointer; }
 .modecards label:hover { border-color: var(--accent); }
