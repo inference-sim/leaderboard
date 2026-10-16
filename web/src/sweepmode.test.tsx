@@ -10,7 +10,7 @@ const common = {
   customNameEdited: false, onCustomNameEdited: () => {}, running: false, errorMessage: null,
   onRun: () => {}, onModeChange: () => {}, sweepAxes: {}, onSweepAxesChange: () => {},
   loadValues: [], onLoadValuesChange: () => {}, sweepRun: null, onRunSweep: () => {},
-  onStopSweep: () => {}, onViewRow: () => {},
+  onStopSweep: () => {}, onResetSweep: () => {}, onViewRow: () => {},
 }
 
 describe('mode toggle', () => {

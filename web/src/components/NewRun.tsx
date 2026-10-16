@@ -94,6 +94,10 @@ interface Props {
   onRunSweep: (runs: SweepCell[], saveProfile: ProfileBody | null) => void
   /** Asks App to stop the in-flight sweep. */
   onStopSweep: () => void
+  /** Clears the finished (or stopped) sweep run, so the progress panel gives way to the preview
+   * and its Run button again. The axes and load values are left intact, so a tweak-and-run-again
+   * is one click. */
+  onResetSweep: () => void
   /** Reveals one landed sweep cell on the board (scroll + pulse the row), driven by the
    * progress panel's per-cell "view on board" control. */
   onViewRow: (groupId: string, runId: string) => void
@@ -145,6 +149,7 @@ export function NewRun({
   sweepRun,
   onRunSweep,
   onStopSweep,
+  onResetSweep,
   onViewRow,
   sweepError,
 }: Props) {
@@ -940,7 +945,7 @@ export function NewRun({
 
         {mode === 'sweep' ? (
           sweepRun ? (
-            <SweepProgress run={sweepRun} onStop={onStopSweep} onView={onViewRow} />
+            <SweepProgress run={sweepRun} onStop={onStopSweep} onView={onViewRow} onReset={onResetSweep} />
           ) : (
             <SweepPreview
               expansion={expansion}

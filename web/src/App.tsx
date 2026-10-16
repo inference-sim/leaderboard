@@ -382,6 +382,15 @@ export function App() {
     setSweepRun((r) => (r ? { ...r, stopped: true } : r))
   }, [])
 
+  // Clear a finished (or stopped) sweep so the progress panel gives way to the preview and its
+  // Run button, letting the reader run another sweep. The axes and load values are left intact,
+  // so the matrix persists and running again is one click; only the completed run and any error
+  // are dropped.
+  const resetSweep = useCallback(() => {
+    setSweepRun(null)
+    setSweepError(null)
+  }, [])
+
   // The progress panel's per-cell "view on board" control: reveal that landed row the same way
   // the live-run banner does, routing to the board so it scrolls and pulses.
   const onViewRow = useCallback((groupId: string, runId: string) => {
@@ -537,6 +546,7 @@ export function App() {
                 sweepRun={sweepRun}
                 onRunSweep={runSweep}
                 onStopSweep={stopSweep}
+                onResetSweep={resetSweep}
                 onViewRow={onViewRow}
                 sweepError={sweepError}
               />

@@ -50,10 +50,12 @@ export function SweepProgress({
   run,
   onStop,
   onView,
+  onReset,
 }: {
   run: SweepRun
   onStop: () => void
   onView: (groupId: string, runId: string) => void
+  onReset: () => void
 }) {
   const counts = countsOf(run)
   // Once stopped, the pool returns without draining the still-queued cells, so they stay
@@ -124,6 +126,11 @@ export function SweepProgress({
               ? `Stopped after ${landed} of ${counts.total} runs. The runs that landed are on the board.`
               : `All ${counts.total} runs landed on the board: ${counts.done} ranked, ${counts.disqualified} disqualified, ${counts.failed} failed.`}
           </p>
+          <div className="nrrun">
+            <button type="button" className="runbtn" onClick={onReset}>
+              New sweep
+            </button>
+          </div>
         </div>
       )}
     </aside>

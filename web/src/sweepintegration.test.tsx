@@ -28,6 +28,7 @@ const common = {
   sweepRun: null,
   onRunSweep: () => {},
   onStopSweep: () => {},
+  onResetSweep: () => {},
   onViewRow: () => {},
 } as any
 
