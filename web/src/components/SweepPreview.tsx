@@ -5,7 +5,6 @@ import {
   guardFor,
 } from '../sweep'
 import type { SweepAxes, SweepExpansion } from '../sweep'
-import { offeredLoad } from '../load'
 
 /**
  * The output aside in sweep mode, before running: a read-only preview of the matrix the
@@ -91,16 +90,6 @@ export function SweepPreview({
           {byConfig.map((cfg) => (
             <li key={cfg.configKey}>
               <code>{cfg.runId}</code>
-              <span className="cfgloads">
-                {cfg.cells.map((cell) => (
-                  <span
-                    key={`${cell.output.runId}-${offeredLoad(cell.output.group).value}`}
-                    className="cfgload"
-                  >
-                    {offeredLoad(cell.output.group).value}
-                  </span>
-                ))}
-              </span>
             </li>
           ))}
         </ul>

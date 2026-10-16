@@ -3393,20 +3393,6 @@ details.nrflaggroup > summary:focus-visible {
   flex-wrap: wrap;
 }
 
-.sweepbreak .cfgloads {
-  display: inline-flex;
-  gap: 6px;
-  flex-wrap: wrap;
-}
-
-.sweepbreak .cfgload {
-  padding: 1px 7px;
-  font-size: 12px;
-  color: var(--muted);
-  background: var(--paper);
-  border: 1px solid var(--line);
-  border-radius: 3px;
-}
 
 /* Guardrail notes: amber above the soft limit, red once the hard cap blocks the Run button.
    The count itself is always in the headline above, so the note only carries the warning. */
@@ -3459,7 +3445,7 @@ details.nrflaggroup > summary:focus-visible {
 }
 
 /* The per-config load levels, each with its status chip and a view-on-board button that
-   appears once the cell has a record. Mirrors .sweepbreak .cfgloads from the preview. */
+   appears once the cell has a record. */
 .sweepcells {
   display: inline-flex;
   gap: 8px;
