@@ -829,6 +829,8 @@ describe('NewRun', () => {
       onSweepAxesChange={() => {}}
       loadValues={[]}
       onLoadValuesChange={() => {}}
+      sweepName=""
+      onSweepNameChange={() => {}}
       sweepRun={null}
       onRunSweep={() => {}}
       onStopSweep={() => {}}

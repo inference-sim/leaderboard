@@ -227,6 +227,13 @@ export interface Output {
   resultPath: string | null
 }
 
+/** The sweep a cell belongs to, threaded into postRun so each cell's /api/run body carries the
+ * shared sweep_id and the optional sweep_label. Minted once per sweep (web/src/sweep.ts). */
+export interface SweepRef {
+  id: string
+  label?: string
+}
+
 export interface Interpretation {
   issues: Issue[]
   /** null while any issue is blocking: an unrunnable declaration is not offered. */
@@ -1461,7 +1468,11 @@ export function argvFor(
  * is not running comes back as a fetch rejection, which the caller renders as "start
  * the server" rather than a stack trace.
  */
-export async function postRun(output: Output, fetchImpl: typeof fetch = fetch): Promise<RunRecord> {
+export async function postRun(
+  output: Output,
+  fetchImpl: typeof fetch = fetch,
+  sweep?: SweepRef,
+): Promise<RunRecord> {
   let res: Response
   try {
     res = await fetchImpl('/api/run', {
@@ -1473,6 +1484,10 @@ export async function postRun(output: Output, fetchImpl: typeof fetch = fetch): 
         run_id: output.runId,
         workload_name: output.workloadName,
         trace_meta: output.traceMeta,
+        // Stamped only for a sweep's cell: all cells of one sweep send the same id, and the
+        // optional name as sweep_label. A single run omits both, so its body is unchanged and
+        // the server (omitempty) writes no sweep fields onto the record.
+        ...(sweep ? { sweep_id: sweep.id, sweep_label: sweep.label ?? '' } : {}),
       }),
     })
   } catch {

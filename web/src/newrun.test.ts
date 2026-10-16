@@ -1101,6 +1101,37 @@ describe('postRun', () => {
     expect(sentName).toBe('burst')
   })
 
+  it('stamps sweep_id and sweep_label on the body when a sweep ref is given', async () => {
+    let body: Record<string, unknown> | null = null
+    const fakeFetch = (async (_url, init) => {
+      body = JSON.parse(String(init?.body))
+      return new Response(JSON.stringify({ run_id: 'r', group_id: 'g' }), { status: 200 })
+    }) as typeof fetch
+    await postRun(output, fakeFetch, { id: 'swp-abc-xyz', label: 'H100 vs A100' })
+    expect(body!.sweep_id).toBe('swp-abc-xyz')
+    expect(body!.sweep_label).toBe('H100 vs A100')
+  })
+
+  it('sends an empty sweep_label when the sweep is unnamed, and omits both for a single run', async () => {
+    let swept: Record<string, unknown> | null = null
+    let single: Record<string, unknown> | null = null
+    const capture = (into: 'swept' | 'single') =>
+      (async (_url, init) => {
+        const parsed = JSON.parse(String(init?.body))
+        if (into === 'swept') swept = parsed
+        else single = parsed
+        return new Response(JSON.stringify({ run_id: 'r', group_id: 'g' }), { status: 200 })
+      }) as typeof fetch
+    await postRun(output, capture('swept'), { id: 'swp-1' })
+    await postRun(output, capture('single'))
+    expect(swept!.sweep_id).toBe('swp-1')
+    expect(swept!.sweep_label).toBe('')
+    // A single run carries no sweep fields at all, so its body is byte-for-byte what it was
+    // before sweeps existed.
+    expect('sweep_id' in single!).toBe(false)
+    expect('sweep_label' in single!).toBe(false)
+  })
+
   it('throws the server {error} on a rejected declaration', async () => {
     const fakeFetch = (async () =>
       new Response(JSON.stringify({ error: 'hardware "B200" is not in hardware_config.json' }), {

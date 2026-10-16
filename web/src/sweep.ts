@@ -2,7 +2,7 @@ import type { Output, Issue } from './newrun'
 import { interpret } from './newrun'
 import type { FormValues } from './newrun'
 import type { RunGroup } from './load'
-import { workloadKey, configKey } from './load'
+import { workloadKey, configKey, offeredLoad } from './load'
 import type { ProfileBody } from './workloads'
 import type { ModelInfo } from './models'
 import type { HardwareInfo } from './hardware'
@@ -273,6 +273,192 @@ export function countsOf(run: SweepRun) {
   const c = { done: 0, disqualified: 0, failed: 0, running: 0, queued: 0, total: run.cells.length }
   for (const cell of run.cells) c[cell.status] += 1
   return c
+}
+
+// --- Sweeps as entities: minting an id, and grouping records into sweeps for the By-sweep
+// list. A sweep is identified by a top-level sweep_id on each of its records (provenance,
+// never part of the comparability key); these helpers mint that id and read it back. ---
+
+/** A short, time-ordered sweep id: `swp-` + base36(now) + a short random suffix. The time
+ *  component is lexicographically and numerically sortable, so the By-sweep list can order
+ *  newest-first and show a date without a separate timestamp field; the id is otherwise an
+ *  opaque grouping key. `now` and `rand` are injectable so the format and uniqueness are
+ *  unit-testable. Minted once per "Run sweep" click (a preview that is never run mints none). */
+export function mintSweepId(now: number = Date.now(), rand: () => string = randomSuffix): string {
+  return `swp-${now.toString(36)}-${rand()}`
+}
+
+/** Six base36 characters of randomness, so two sweeps minted in the same millisecond still
+ *  differ. Padded so the suffix is always present even on an unlucky short draw. */
+function randomSuffix(): string {
+  return Math.random().toString(36).slice(2, 8).padEnd(6, '0')
+}
+
+/** The Date encoded in a sweep id's time component, or null when the id is not one this app
+ *  minted (a hand-written value, or a future format). Only the list's sort and date read it;
+ *  grouping treats the whole id as opaque. */
+export function sweepDate(sweepId: string): Date | null {
+  const m = /^swp-([0-9a-z]+)-/.exec(sweepId)
+  if (!m) return null
+  const ms = parseInt(m[1]!, 36)
+  return Number.isFinite(ms) && ms > 0 ? new Date(ms) : null
+}
+
+/** One sweep as the By-sweep list shows it: its id, the user's label (or null), the derived
+ *  one-line summary shown when unnamed, the workload it targeted, its date and run count, and
+ *  its records (the subset the scoped view renders). */
+export interface SweepEntry {
+  sweepId: string
+  label: string | null
+  /** What the list shows as the heading: the label when present, else the derived summary. */
+  title: string
+  /** The workload the sweep targeted, as a short label: its catalog name, else its shape. */
+  workload: string
+  date: Date | null
+  runCount: number
+  records: RunRecord[]
+}
+
+/** Short, human labels for the deployment fields a sweep commonly varies. A field not listed
+ *  falls back to its raw key, so a newly added axis still appears rather than vanishing. */
+const DEPLOYMENT_AXIS_LABEL: Record<string, string> = {
+  tp: 'tp',
+  dp: 'dp',
+  num_instances: 'instances',
+  enable_expert_parallel: 'expert-parallel',
+  moe_comm_backend: 'moe-backend',
+  scheduler: 'scheduler',
+  preemption_policy: 'preemption',
+  max_num_seqs: 'max-seqs',
+  max_num_batched_tokens: 'max-batch',
+  long_prefill_token_threshold: 'long-prefill',
+  kv_cache_dtype: 'kv-dtype',
+  block_size_in_tokens: 'block-size',
+  gpu_memory_utilization: 'gpu-mem',
+  total_kv_blocks: 'kv-blocks',
+  max_model_len: 'max-len',
+  admission_policy: 'admission',
+  routing_policy: 'routing',
+  latency_model: 'latency-model',
+  num_speculative_tokens: 'draft-tokens',
+}
+
+/** Renders a scalar deployment value for the summary. Objects/arrays are not expected here
+ *  (callers only render scalar-varying axes) but are stringified defensively. */
+function renderAxisValue(v: unknown): string {
+  if (v === null || v === undefined) return 'none'
+  if (typeof v === 'boolean') return v ? 'on' : 'off'
+  if (v === '') return 'none'
+  return typeof v === 'object' ? JSON.stringify(v) : String(v)
+}
+
+/** The deployment fields that differ across a sweep's runs, each as "label a/b/c" (model and
+ *  hardware render their values alone, since they are the headline of a comparison). A field
+ *  whose varying values are non-scalar (a disaggregation block, say) is named without values. */
+function variedDeploymentAxes(records: RunRecord[]): string[] {
+  const deps = records.map((r) => r.deployment as unknown as Record<string, unknown>)
+  const keys = new Set<string>()
+  for (const d of deps) for (const k of Object.keys(d)) keys.add(k)
+  const out: string[] = []
+  for (const k of keys) {
+    if (k === 'extra_flags') continue
+    const encoded = deps.map((d) => JSON.stringify(d[k] ?? null))
+    const distinct = [...new Set(encoded)]
+    if (distinct.length <= 1) continue
+    const scalar = distinct.every((e) => {
+      const p = JSON.parse(e)
+      return p === null || typeof p !== 'object'
+    })
+    if (!scalar) {
+      out.push(DEPLOYMENT_AXIS_LABEL[k] ?? k)
+      continue
+    }
+    const values = [...new Set(deps.map((d) => renderAxisValue(d[k])))]
+    // model and hardware are the headline of a candidate comparison, so their values stand
+    // alone; every other field is prefixed with its short label so the axis is unambiguous.
+    if (k === 'model' || k === 'hardware') out.push(values.join('/'))
+    else out.push(`${DEPLOYMENT_AXIS_LABEL[k] ?? k} ${values.join('/')}`)
+  }
+  return out
+}
+
+/** The request count a sweep's workload offered, or null when it declares no single scalar
+ *  (a trace or a cohort-driven spec). Read from the spec's own num_requests (the flat field is
+ *  a placeholder zero for a spec), matching load.ts. */
+function sweepRequestCount(group: RunRecord['group']): number | null {
+  const w = group.workload as { type: string; num_requests?: number; spec?: { num_requests?: unknown } }
+  if (w.type === 'workload-spec' && w.spec && typeof w.spec.num_requests === 'number') {
+    return w.spec.num_requests
+  }
+  return typeof w.num_requests === 'number' && w.num_requests > 0 ? w.num_requests : null
+}
+
+/** The sweep's offered-load levels as "kind a/b/c", or '' when it varies no load. */
+function sweepLoadLevels(records: RunRecord[]): string {
+  const loads = records.map((r) => offeredLoad(r.group))
+  const kind = loads[0]?.kind ?? 'rate'
+  const values = [...new Set(loads.map((l) => l.value))].filter((v) => v > 0).sort((a, b) => a - b)
+  if (values.length <= 1) return ''
+  const unit = kind === 'rate' ? ' req/s' : kind === 'concurrency' || kind === 'sessions' ? ' concurrent' : ''
+  return `load ${values.join('/')}${unit}`
+}
+
+/** The workload a sweep targeted, as a short label for the list: its catalog name when any run
+ *  carries one, else its request-count shape, else the workload type. */
+function sweepWorkloadLabel(records: RunRecord[]): string {
+  for (const r of records) if (r.workload_name) return r.workload_name
+  const first = records[0]!
+  const n = sweepRequestCount(first.group)
+  if (n != null) return `${n.toLocaleString('en-US')} requests`
+  return first.group.workload.type === 'trace' ? 'trace replay' : 'workload'
+}
+
+/** The one-line summary shown for an unnamed sweep: the varied axes, the load levels, and the
+ *  workload shape, joined by a middle dot. It is the fallback for the By-sweep list's heading
+ *  when the reader gave the sweep no name, so two sweeps over the same workload still read apart. */
+export function deriveSweepSummary(records: RunRecord[]): string {
+  const axes = variedDeploymentAxes(records)
+  const loads = sweepLoadLevels(records)
+  const parts = [...axes]
+  if (loads) parts.push(loads)
+  const varied = parts.join(', ')
+  const workload = sweepWorkloadLabel(records)
+  return varied ? `${varied} · ${workload}` : workload
+}
+
+/** Buckets records into sweeps by their top-level sweep_id (records without one are skipped —
+ *  they stay under By workload only), newest-first by the id's time component. Each entry
+ *  carries the label when any run has one, else a derived summary. Pure, so the By-sweep list
+ *  and its tests read the same grouping. */
+export function groupSweeps(records: RunRecord[]): SweepEntry[] {
+  const byId = new Map<string, RunRecord[]>()
+  for (const r of records) {
+    if (!r.sweep_id) continue
+    const bucket = byId.get(r.sweep_id)
+    if (bucket) bucket.push(r)
+    else byId.set(r.sweep_id, [r])
+  }
+  const entries: SweepEntry[] = []
+  for (const [sweepId, recs] of byId) {
+    const label = recs.find((r) => r.sweep_label)?.sweep_label ?? null
+    entries.push({
+      sweepId,
+      label,
+      title: label ?? deriveSweepSummary(recs),
+      workload: sweepWorkloadLabel(recs),
+      date: sweepDate(sweepId),
+      runCount: recs.length,
+      records: recs,
+    })
+  }
+  // Newest sweep first: by the id's embedded time, with a stable id tiebreak so an id with no
+  // parseable time (a hand-written value) sorts deterministically rather than jumping around.
+  entries.sort((a, b) => {
+    const at = a.date?.getTime() ?? 0
+    const bt = b.date?.getTime() ?? 0
+    return bt - at || (a.sweepId < b.sweepId ? 1 : a.sweepId > b.sweepId ? -1 : 0)
+  })
+  return entries
 }
 
 /** Run cells through a bounded worker pool. The run function is injected (tests stub it; the

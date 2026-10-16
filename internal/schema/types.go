@@ -29,6 +29,16 @@ type Record struct {
 	// form must stay byte-for-byte unchanged.
 	WorkloadName string `json:"workload_name,omitempty"`
 
+	// SweepID is the sweep this run belongs to when it was fired as one cell of a sweep,
+	// and SweepLabel the user's optional name for that sweep. They are provenance only: a
+	// top-level sibling of RunID (never inside Group or Deployment), so GroupID — which
+	// hashes only Group (canon.go) — is unchanged by construction, and deployment
+	// twin-detection is unaffected. All of a sweep's cells carry the same pair; two sweeps
+	// over the same workload carry different SweepIDs. Both omitempty, so a single run, a
+	// runs.yaml run, and every record predating this field stay byte-for-byte unchanged.
+	SweepID    string `json:"sweep_id,omitempty"`
+	SweepLabel string `json:"sweep_label,omitempty"`
+
 	Group      Group      `json:"group"`
 	Deployment Deployment `json:"deployment"`
 	Provenance Provenance `json:"provenance"`

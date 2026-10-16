@@ -1,12 +1,14 @@
 import { describe, expect, it } from 'vitest'
+import fixture from '../../prototypes/results.json'
 import { initialValues } from './newrun'
 import { expandSweep } from './sweep'
-import type { RunGroup } from './load'
+import type { RunGroup, RunRecord } from './load'
 import { workloadKey, offeredLoad } from './load'
 import {
   SWEEPABLE_KEYS, BOOL_AXES, axisValues, toggleAxisValue, addAxisValue,
   removeAxisValue, axisVaries, applyPicks, sweepHasVariation,
   AXIS_ABBR, slug, sweepPrefix, cellToken, groupByConfig, guardFor, WARN_AT, BLOCK_AT,
+  mintSweepId, sweepDate, groupSweeps, deriveSweepSummary,
 } from './sweep'
 
 const base = initialValues()
@@ -307,5 +309,78 @@ describe('runPool', () => {
       return { status: { complete: true } } as any
     }, { concurrency: 1, onUpdate: () => {}, shouldStop: () => started >= 2 })
     expect(started).toBeLessThan(6)
+  })
+})
+
+describe('mintSweepId / sweepDate', () => {
+  it('has the documented shape swp-<base36 time>-<suffix>', () => {
+    const id = mintSweepId(1_700_000_000_000, () => 'abc123')
+    expect(id).toBe(`swp-${(1_700_000_000_000).toString(36)}-abc123`)
+    expect(id).toMatch(/^swp-[0-9a-z]+-[0-9a-z]+$/)
+  })
+
+  it('mints distinct ids across many rapid calls (random suffix)', () => {
+    const ids = new Set(Array.from({ length: 500 }, () => mintSweepId()))
+    expect(ids.size).toBe(500)
+  })
+
+  it('round-trips the time component through sweepDate', () => {
+    const now = 1_700_000_123_456
+    expect(sweepDate(mintSweepId(now, () => 'zzzzzz'))?.getTime()).toBe(now)
+  })
+
+  it('sweepDate returns null for an id that is not one we minted', () => {
+    expect(sweepDate('not-a-sweep')).toBeNull()
+    expect(sweepDate('swp--nohead')).toBeNull()
+  })
+})
+
+describe('groupSweeps', () => {
+  const clone = () => JSON.parse(JSON.stringify(fixture)) as RunRecord[]
+
+  it('buckets records by sweep_id, newest first, and skips records without one', () => {
+    const recs = clone().slice(0, 4)
+    recs[0]!.sweep_id = 'swp-1-a' // older (time component 1)
+    recs[1]!.sweep_id = 'swp-1-a'
+    recs[2]!.sweep_id = 'swp-2-b' // newer (time component 2)
+    // recs[3] carries no sweep_id, so it stays under By workload only.
+    const entries = groupSweeps(recs)
+    expect(entries.map((e) => e.sweepId)).toEqual(['swp-2-b', 'swp-1-a'])
+    expect(entries.find((e) => e.sweepId === 'swp-1-a')!.runCount).toBe(2)
+    expect(entries.find((e) => e.sweepId === 'swp-2-b')!.runCount).toBe(1)
+  })
+
+  it('shows the label when any run has one, else a derived summary', () => {
+    const recs = clone().slice(0, 2)
+    recs[0]!.sweep_id = recs[1]!.sweep_id = 'swp-x'
+    recs[0]!.sweep_label = 'My named sweep'
+    const [e] = groupSweeps(recs)
+    expect(e!.label).toBe('My named sweep')
+    expect(e!.title).toBe('My named sweep')
+  })
+
+  it('derives a summary naming the varied hardware axis when unnamed', () => {
+    const recs = clone()
+      .filter((r) => r.group_id === '86575212efc8')
+      .slice(0, 2)
+    recs[0]!.sweep_id = recs[1]!.sweep_id = 'swp-y'
+    recs[0]!.deployment.hardware = 'H100'
+    recs[1]!.deployment.hardware = 'A100'
+    const [e] = groupSweeps(recs)
+    expect(e!.label).toBeNull()
+    expect(e!.title).toContain('H100')
+    expect(e!.title).toContain('A100')
+  })
+
+  it('deriveSweepSummary names the load levels when load varies', () => {
+    const recs = clone()
+      .filter((r) => r.group_id === '86575212efc8')
+      .slice(0, 2)
+    // Two synthetic loads over one workload-spec: offeredLoad reads the spec's aggregate_rate
+    // (the flat load is a placeholder), so vary that; the summary should surface both levels.
+    ;(recs[0]!.group.workload.spec as { aggregate_rate?: number }).aggregate_rate = 4
+    ;(recs[1]!.group.workload.spec as { aggregate_rate?: number }).aggregate_rate = 8
+    const summary = deriveSweepSummary(recs)
+    expect(summary).toContain('4/8')
   })
 })

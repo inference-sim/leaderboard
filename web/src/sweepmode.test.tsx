@@ -9,7 +9,8 @@ const common = {
   onWorkloadInitialized: () => {}, runIdEdited: false, onRunIdEdited: () => {},
   customNameEdited: false, onCustomNameEdited: () => {}, running: false, errorMessage: null,
   onRun: () => {}, onModeChange: () => {}, sweepAxes: {}, onSweepAxesChange: () => {},
-  loadValues: [], onLoadValuesChange: () => {}, sweepRun: null, onRunSweep: () => {},
+  loadValues: [], onLoadValuesChange: () => {}, sweepName: '', onSweepNameChange: () => {},
+  sweepRun: null, onRunSweep: () => {},
   onStopSweep: () => {}, onResetSweep: () => {}, onViewRow: () => {},
 }
 
@@ -112,5 +113,21 @@ describe('subcard swept fields', () => {
     expect(html).not.toContain('aria-label="Decider"')
     expect(html).not.toContain('aria-label="CPU offloading"')
     expect(html).not.toContain('aria-label="Add a load level"')
+  })
+})
+
+describe('sweep name field', () => {
+  it('renders the optional Sweep name field only in sweep mode', () => {
+    const single = renderToStaticMarkup(<NewRun {...common} mode="single" />)
+    expect(single).not.toContain('Sweep name')
+    const sweep = renderToStaticMarkup(<NewRun {...common} mode="sweep" />)
+    expect(sweep).toContain('Sweep name')
+  })
+
+  it('shows the current sweep name value', () => {
+    const html = renderToStaticMarkup(
+      <NewRun {...common} mode="sweep" sweepName="H100 vs A100" />,
+    )
+    expect(html).toContain('value="H100 vs A100"')
   })
 })

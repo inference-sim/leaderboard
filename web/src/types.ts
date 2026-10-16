@@ -55,6 +55,14 @@ export interface BLISLeaderboardRunRecord {
    */
   workload_name?: string;
   /**
+   * The sweep this run belongs to, when it was fired as one cell of a sweep. Provenance only, never part of the comparability key: it is a top-level sibling of run_id (never inside group/deployment), so it cannot affect group_id (hash(group)) or deployment twin-detection. All of a sweep's cells carry the same value; two sweeps over the same workload carry different ones. Absent for a single run, a runs.yaml run, and every pre-existing record.
+   */
+  sweep_id?: string;
+  /**
+   * The user's name for the sweep this run belongs to, shown in the By-sweep list. Display only, like sweep_id a top-level sibling of run_id. Absent when the sweep was unnamed.
+   */
+  sweep_label?: string;
+  /**
    * KV thrashing rate, scraped from BLIS's stdout `=== KV Cache Metrics ===` section (the only KV signal that is neither in the metrics file nor derivable from it). It lives on the record, not in `metrics`, because `metrics` mirrors BLIS's metrics JSON and this value is not in that file. Optional: absent (BLIS omits the whole section when preemption, cache-hit, and thrashing rates are all zero) renders as "—". Lower is better.
    */
   kv_thrashing_rate?: number;

@@ -36,6 +36,11 @@ type RunSpec struct {
 	// size, session_context_growth), from ingest. It is carried onto the record's
 	// trace_meta. nil for a non-trace run.
 	TraceMeta *schema.TraceMeta
+	// SweepID and SweepLabel mark a run fired as one cell of a sweep (the web app mints the
+	// id and offers the optional name). They are carried verbatim onto the record's top-level
+	// sweep_id/sweep_label; empty for a single run, so the record is byte-for-byte unchanged.
+	SweepID    string
+	SweepLabel string
 }
 
 // Runner executes blis from the upstream checkout and assembles records.
@@ -221,6 +226,8 @@ func (r *Runner) Run(g schema.Group, c RunSpec, metricsPath string) (schema.Reco
 		GroupID:       groupID,
 		WorkID:        workID,
 		WorkloadName:  c.WorkloadName,
+		SweepID:       c.SweepID,
+		SweepLabel:    c.SweepLabel,
 		TraceMeta:     c.TraceMeta,
 		Group:         g,
 		Deployment:    c.Deployment,

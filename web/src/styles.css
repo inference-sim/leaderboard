@@ -6403,3 +6403,25 @@ table.readout tbody tr.dqline.cmphl td.lft {
 .sidebar.collapsed .railver {
   display: none;
 }
+
+/* Sweeps as entities. The board's two-tab control (By workload / By sweep) reuses the
+   Catalog subtab vocabulary; .boardtabs only adjusts the spacing above the gallery. */
+.boardtabs {
+  margin: 0 0 20px;
+}
+
+/* The By-sweep tab reuses the workload gallery (.wpick / .wgallery / .wpick-card) as its
+   picker and the ordinary WorkloadSection below it, so the two tabs read identically and only
+   the card content differs. The sweep card's id line sits in the muted .gcount footer; .swid
+   keeps it mono and quiet there. */
+.swid {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+/* The optional-field hint beside the Sweep name label, in the muted tone the form uses for
+   secondary text. */
+.nropt {
+  font-weight: 400;
+  color: var(--muted);
+}

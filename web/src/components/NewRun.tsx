@@ -87,6 +87,11 @@ interface Props {
   loadValues: string[]
   /** Replaces the sweep's load values. */
   onLoadValuesChange: (values: string[]) => void
+  /** The optional name for the sweep, shown only in sweep mode and stamped onto each cell's
+   * record as sweep_label. Lifted to App beside the axes/load values. Not a swept axis. */
+  sweepName: string
+  /** Updates the sweep name. */
+  onSweepNameChange: (name: string) => void
   /** The in-flight (or finished) sweep run, or null when no sweep has started. Lifted to App. */
   sweepRun: SweepRun | null
   /** Hands the expanded sweep cells up to App to run, with an optional workload profile to save
@@ -146,6 +151,8 @@ export function NewRun({
   onSweepAxesChange,
   loadValues,
   onLoadValuesChange,
+  sweepName,
+  onSweepNameChange,
   sweepRun,
   onRunSweep,
   onStopSweep,
@@ -557,6 +564,20 @@ export function NewRun({
               </span>
             </label>
           </div>
+          {mode === 'sweep' && (
+            <label className="nrrow nrsweepname">
+              <span className="nrlabel">
+                Sweep name <span className="nropt">(optional)</span>
+              </span>
+              <input
+                type="text"
+                value={sweepName}
+                placeholder="H100 vs A100 as concurrency climbs"
+                spellCheck={false}
+                onChange={(e) => onSweepNameChange(e.target.value)}
+              />
+            </label>
+          )}
           <fieldset className="nrwork">
             <legend>Work offered</legend>
 
