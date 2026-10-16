@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { Dispatch, ReactNode, SetStateAction } from 'react'
 import { loadCommittedRecords, loadWorkloads, mergeRecords, runKey } from './load'
 import type { RunRecord, WorkloadGroup } from './load'
@@ -7,6 +7,7 @@ import { ReadoutTable } from './components/ReadoutTable'
 import { ConfirmDialog } from './components/ConfirmDialog'
 import { WorkloadHeader } from './components/SpecHeader'
 import { WorkloadPicker } from './components/WorkloadPicker'
+import { CardGallery } from './components/CardGallery'
 import { ModelFilter } from './components/ModelFilter'
 import { HardwareFilter } from './components/HardwareFilter'
 import { LoadFilter } from './components/LoadFilter'
@@ -15,6 +16,8 @@ import { EmptyFilterNote } from './components/EmptyFilterNote'
 import { SLO_METRICS, emptyTargets, parseTargets } from './slo'
 import type { RawTargets } from './slo'
 import { NewRun } from './components/NewRun'
+import { groupSweeps, initSweepRun, mintSweepId, runPool, sweepHasVariation } from './sweep'
+import type { SweepAxes, SweepCell, SweepEntry, SweepRun } from './sweep'
 import { CompareBar } from './components/CompareBar'
 import { ComparePanel } from './components/ComparePanel'
 import { selectionInDisplayOrder, toggleSelection } from './compare'
@@ -29,8 +32,10 @@ import { RailVersion } from './components/RailVersion'
 import { fetchVersion } from './version'
 import type { Versions } from './version'
 import { emptyFilterNoun, showLoadFilter } from './filter'
-import { initialValues, saveThenRun } from './newrun'
+import { initialValues, postRun, saveThenRun } from './newrun'
 import type { FormValues, Output } from './newrun'
+import { saveWorkload } from './workloads'
+import type { ProfileBody } from './workloads'
 import { runDeclFromOutput, workloadKeyForGroup } from './liverun'
 import type { LiveRun, RevealTarget } from './liverun'
 
@@ -190,6 +195,62 @@ export function App() {
   // The saved workload the Catalog's Workloads tab should scroll to and highlight, set by the
   // toast's "View in catalog". Cleared once the highlight has shown (onWorkloadRevealed).
   const [revealWorkload, setRevealWorkload] = useState<string | null>(null)
+  // Declaration mode for NewRun: a single run or a sweep. Lifted here so it survives the
+  // navigation to the board, like formValues. It holds the toggle state that drives the sweep
+  // controls, preview, and progress panel (all wired through NewRun) and the sweep inputs below.
+  const [mode, setMode] = useState<'single' | 'sweep'>('single')
+  // The per-axis chosen values for a sweep (keyed by sweepable field), empty until the reader
+  // picks any. Lifted alongside formValues so a bounce back after a run finds them intact.
+  const [sweepAxes, setSweepAxes] = useState<SweepAxes>({})
+  // The offered-load values a sweep varies over, as strings. Empty collapses to the single
+  // run's own loadValue.
+  const [loadValues, setLoadValues] = useState<string[]>([])
+  // The optional user-chosen name for the next sweep, bound to the "Sweep name" field shown in
+  // sweep mode. It is not a swept axis; it rides onto every cell's record as sweep_label.
+  // Lifted here beside the other sweep inputs so a bounce back after a run finds it intact.
+  const [sweepName, setSweepName] = useState('')
+  // The board's top-level tab: the workload gallery (default) or the By-sweep list. Lifted so a
+  // navigation away and back keeps the reader on the lens they chose.
+  const [boardTab, setBoardTab] = useState<'workload' | 'sweep'>('workload')
+  // The sweep whose scoped table is shown, or null for the By-sweep list. Selecting a sweep in
+  // the list sets it; the back affordance clears it.
+  const [selectedSweepId, setSelectedSweepId] = useState<string | null>(null)
+  // The in-flight (or finished) sweep run, or null when no sweep has started.
+  const [sweepRun, setSweepRun] = useState<SweepRun | null>(null)
+  // A sweep's up-front workload save failed, so no cell ran. Surfaced in the sweep column
+  // (the single run's "Did not run" aside is not rendered in sweep mode). null means no error.
+  const [sweepError, setSweepError] = useState<string | null>(null)
+  // Set true by stopSweep to halt firing new cells; read by runPool's shouldStop. A ref, not
+  // state, so the running pool sees the change without a re-render closure capturing a stale
+  // value. Reset at the start of each runSweep.
+  const stopRef = useRef(false)
+  // Coalesces the per-cell reloads: each landed cell schedules one reload ~300ms out, clearing
+  // the prior timer, so a burst of cells triggers one fetch rather than one per cell.
+  const reloadTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
+  // Guards runSweep against a double-fire during its up-front saveWorkload await: because
+  // sweepRun is set only after the save resolves, a second click in that window would start a
+  // second save of the same profile (the duplicate-profile race the save-once design prevents).
+  const startingRef = useRef(false)
+
+  // Flips the declaration mode. Switching sweep -> single collapses the sweep inputs back to
+  // the single run's own load, so a later re-entry into sweep mode starts clean; the collapse
+  // is conditional on the sweep having varied, and NewRun opens its confirm dialog before
+  // asking for it. Entering sweep mode seeds the load axis with the single run's own load as
+  // its first (base) level when it is still empty, so the base load is present and shown first,
+  // symmetric with the collapse and with how the deployment axes carry their base value first.
+  const changeMode = useCallback(
+    (next: 'single' | 'sweep') => {
+      if (next === 'single' && sweepHasVariation(formValues, sweepAxes, loadValues)) {
+        setSweepAxes({})
+        setLoadValues([formValues.loadValue])
+      }
+      if (next === 'sweep' && loadValues.length === 0) {
+        setLoadValues([formValues.loadValue])
+      }
+      setMode(next)
+    },
+    [formValues, sweepAxes, loadValues],
+  )
 
   const toggleNav = useCallback(() => {
     setCollapsed((c) => {
@@ -270,6 +331,89 @@ export function App() {
     [reload, onReveal],
   )
 
+  // Running a sweep: save the one shared custom workload up front (once, like startRun), then
+  // move to the board and fan the cells out through a bounded pool. Each cell posts the same
+  // /api/run a single run does; its status lands back in sweepRun and a debounced reload brings
+  // the new rows onto the board as they finish. A save failure aborts before any cell runs, so
+  // a workload that could not be saved never produces runs.
+  const debouncedReload = useCallback(() => {
+    clearTimeout(reloadTimer.current)
+    reloadTimer.current = setTimeout(() => {
+      reload()
+    }, 300)
+  }, [reload])
+
+  const runSweep = useCallback(
+    async (runs: SweepCell[], saveProfile: ProfileBody | null) => {
+      // Re-entry guard: a double-click during the saveWorkload await below must not start a
+      // second save/run of the same sweep. Cleared in finally once the pool resolves or throws.
+      if (startingRef.current) return
+      startingRef.current = true
+      try {
+        setSweepError(null)
+        if (saveProfile) {
+          try {
+            await saveWorkload(saveProfile, null)
+          } catch (e) {
+            // The shared workload could not be saved; do not run any cell, and surface why.
+            setSweepError(e instanceof Error ? e.message : String(e))
+            return
+          }
+          setCatalogToast({ name: saveProfile.name, canView: true })
+        }
+        const run = initSweepRun(runs)
+        setSweepRun(run)
+        stopRef.current = false
+        // Mint the sweep's id once, here on the Run click (a preview that is never run mints
+        // none). Every cell posts the same id, plus the optional name as sweep_label, so the
+        // whole matrix is one addressable sweep on the board.
+        const sweepId = mintSweepId()
+        const sweepRef = { id: sweepId, label: sweepName.trim() || undefined }
+        // Stay on the Declare page so the reader watches the live progress panel (the spec's
+        // intent). The board still refreshes underneath via the debounced reload, and each landed
+        // cell offers a view-on-board link, so there is no need to jump away.
+        await runPool(run.cells, (cell) => postRun(cell.output, undefined, sweepRef), {
+          onUpdate: (i, patch) => {
+            setSweepRun((prev) =>
+              prev ? { ...prev, cells: prev.cells.map((c, j) => (j === i ? { ...c, ...patch } : c)) } : prev,
+            )
+            debouncedReload()
+          },
+          shouldStop: () => stopRef.current,
+        })
+        // Settle: one final reload once the pool has drained, so the board reflects every landed
+        // cell even if the last debounce was superseded.
+        reload()
+      } finally {
+        startingRef.current = false
+      }
+    },
+    [reload, debouncedReload, sweepName],
+  )
+
+  // Stop the in-flight sweep: no new cells fire (the ref the pool reads), and the panel flips to
+  // its stopped state; cells already in flight finish.
+  const stopSweep = useCallback(() => {
+    stopRef.current = true
+    setSweepRun((r) => (r ? { ...r, stopped: true } : r))
+  }, [])
+
+  // Clear a finished (or stopped) sweep so the progress panel gives way to the preview and its
+  // Run button, letting the reader run another sweep. The axes and load values are left intact,
+  // so the matrix persists and running again is one click; only the completed run and any error
+  // are dropped.
+  const resetSweep = useCallback(() => {
+    setSweepRun(null)
+    setSweepError(null)
+  }, [])
+
+  // The progress panel's per-cell "view on board" control: reveal that landed row the same way
+  // the live-run banner does, routing to the board so it scrolls and pulses.
+  const onViewRow = useCallback((groupId: string, runId: string) => {
+    setRevealTarget({ groupId, runId })
+    window.location.hash = '#/'
+  }, [])
+
   // A row's trash button asks to delete a run; the actual removal waits on the confirmation
   // modal, so a stray click cannot carry out an irreversible delete. Opening the dialog
   // clears any prior failure note so it does not linger over a fresh attempt.
@@ -311,6 +455,14 @@ export function App() {
   // NewRun takes the board's flat comparability groups for target detection and the flags
   // basis; it fetches the workload catalog it now selects from on its own.
   const groups = useMemo(() => workloads.flatMap((w) => w.groups), [workloads])
+  // The sweeps present on the board, grouped by sweep_id, newest-first. Drives the By-sweep
+  // tab's list and the scoped view's lookup. Runs without a sweep_id never appear here.
+  const sweepEntries = useMemo(() => groupSweeps(records), [records])
+  // The sweep whose section the By-sweep tab shows: the reader's pick when it is still present,
+  // else the first sweep (newest), so the tab opens on a sweep the way By workload opens on the
+  // first workload. null only when there are no sweeps at all.
+  const selectedSweep =
+    sweepEntries.find((e) => e.sweepId === selectedSweepId) ?? sweepEntries[0] ?? null
 
   return (
     <div className="app">
@@ -409,6 +561,20 @@ export function App() {
                 running={liveRun?.status === 'running'}
                 errorMessage={liveRun?.status === 'error' ? liveRun.message : null}
                 onRun={startRun}
+                mode={mode}
+                onModeChange={changeMode}
+                sweepAxes={sweepAxes}
+                onSweepAxesChange={setSweepAxes}
+                loadValues={loadValues}
+                onLoadValuesChange={setLoadValues}
+                sweepName={sweepName}
+                onSweepNameChange={setSweepName}
+                sweepRun={sweepRun}
+                onRunSweep={runSweep}
+                onStopSweep={stopSweep}
+                onResetSweep={resetSweep}
+                onViewRow={onViewRow}
+                sweepError={sweepError}
               />
             ) : view === 'catalog' ? (
               <Catalog
@@ -432,15 +598,41 @@ export function App() {
                     {deleteError}
                   </p>
                 )}
-                <Leaderboard
-                  workloads={workloads}
-                  selectedKey={selectedKey}
-                  onSelect={setSelectedKey}
-                  revealTarget={revealTarget}
-                  onRevealed={onRevealed}
-                  canDelete={serverAvailable}
-                  onDelete={requestDelete}
-                />
+                <BoardTabs tab={boardTab} onTab={setBoardTab} />
+                {boardTab === 'workload' ? (
+                  <Leaderboard
+                    workloads={workloads}
+                    selectedKey={selectedKey}
+                    onSelect={setSelectedKey}
+                    revealTarget={revealTarget}
+                    onRevealed={onRevealed}
+                    canDelete={serverAvailable}
+                    onDelete={requestDelete}
+                  />
+                ) : (
+                  // By sweep mirrors By workload: the sweep gallery is the picker, and the
+                  // selected sweep's section sits below it. The first sweep is selected by
+                  // default (selectedSweep falls back to the first), exactly as the workload
+                  // tab opens on the first workload.
+                  <>
+                    <SweepList
+                      entries={sweepEntries}
+                      selected={selectedSweep?.sweepId ?? null}
+                      onSelect={setSelectedSweepId}
+                    />
+                    {selectedSweep && (
+                      <SweepScope
+                        key={selectedSweep.sweepId}
+                        records={records}
+                        entry={selectedSweep}
+                        revealTarget={revealTarget}
+                        onRevealed={onRevealed}
+                        canDelete={serverAvailable}
+                        onDelete={requestDelete}
+                      />
+                    )}
+                  </>
+                )}
               </>
             )}
           </ErrorBoundary>
@@ -714,5 +906,155 @@ function WorkloadSection({
         }}
       />
     </section>
+  )
+}
+
+/**
+ * The board's two-tab control: By workload (the gallery, the default) and By sweep (the list
+ * of sweeps). It reuses the Catalog's subtab vocabulary so the two tab bars read the same.
+ */
+function BoardTabs({
+  tab,
+  onTab,
+}: {
+  tab: 'workload' | 'sweep'
+  onTab: (t: 'workload' | 'sweep') => void
+}) {
+  const tabs = [
+    { id: 'workload' as const, label: 'By workload' },
+    { id: 'sweep' as const, label: 'By sweep' },
+  ]
+  return (
+    <div className="subtabs boardtabs" role="tablist" aria-label="Leaderboard view">
+      {tabs.map((t) => (
+        <button
+          key={t.id}
+          type="button"
+          role="tab"
+          aria-selected={tab === t.id}
+          className={`subtab${tab === t.id ? ' active' : ''}`}
+          onClick={() => onTab(t.id)}
+        >
+          {t.label}
+        </button>
+      ))}
+    </div>
+  )
+}
+
+/** A sweep's date for the list: a short, unambiguous day. The time component is in the id, but
+ *  the list only needs the day to tell runs apart and order them. */
+function formatSweepDate(d: Date): string {
+  return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
+}
+
+/**
+ * The By-sweep tab's picker: one card per sweep, newest first, in the same gallery the
+ * workload tab uses so the two read identically and only the card differs. Each card shows the
+ * sweep's name (or a derived summary when unnamed), the workload it targeted, its run count,
+ * date, and the sweep_id. The selected card is marked current, like the workload picker's; a
+ * run without a sweep_id never appears here (it stays under By workload).
+ */
+export function SweepList({
+  entries,
+  selected,
+  onSelect,
+}: {
+  entries: SweepEntry[]
+  /** The sweep_id of the currently shown sweep, marked current. null when there are none. */
+  selected: string | null
+  onSelect: (sweepId: string) => void
+}) {
+  if (entries.length === 0) {
+    return (
+      <p className="dek">
+        No sweeps yet. Declare one in <a href="#/declare">Sweep mode</a> and it appears here as a
+        single entity you can return to, share by id, and view on its own.
+      </p>
+    )
+  }
+  const selectedIndex = entries.findIndex((e) => e.sweepId === selected)
+  // The same gallery the workload picker uses, so the two tabs read identically; only the card
+  // differs. The card mirrors the workload card's chrome — a title, a tag row, a muted count
+  // line — carrying the sweep's workload, run count, date and id instead of the ranked counts.
+  return (
+    <CardGallery
+      items={entries}
+      getKey={(e) => e.sweepId}
+      ariaLabel="Sweeps"
+      activeIndex={selectedIndex}
+      renderCard={(e) => {
+        const isCurrent = e.sweepId === selected
+        return (
+          <button
+            type="button"
+            className={isCurrent ? 'wpick-card cur' : 'wpick-card'}
+            aria-current={isCurrent ? 'page' : undefined}
+            onClick={() => onSelect(e.sweepId)}
+          >
+            <span className="wtitle">{e.title}</span>
+            <span className="wtags">
+              <span className="spec-tag tag-workload-spec">{e.workload}</span>
+            </span>
+            <span className="gcount">
+              <span className="ranked">
+                {e.runCount} {e.runCount === 1 ? 'run' : 'runs'}
+              </span>
+              {e.date && <span>{formatSweepDate(e.date)}</span>}
+              <span className="swid mono">{e.sweepId}</span>
+            </span>
+          </button>
+        )
+      }}
+    />
+  )
+}
+
+/**
+ * One sweep's section, scoped: the records whose sweep_id matches, run back through the
+ * existing pipeline (loadWorkloads over the subset) and rendered with the ordinary
+ * WorkloadSection and its Load/Model/Hardware/SLO filter cards — which now operate within the
+ * sweep. It is exactly the section the By-workload tab shows below its gallery, so the two tabs
+ * read identically; the sweep gallery above is the picker. A sweep is one workload by
+ * construction, so this is one section; the map is defensive.
+ */
+export function SweepScope({
+  records,
+  entry,
+  revealTarget,
+  onRevealed,
+  canDelete,
+  onDelete,
+}: {
+  records: RunRecord[]
+  entry: SweepEntry | null
+  revealTarget: RevealTarget | null
+  onRevealed: () => void
+  canDelete: boolean
+  onDelete: (record: RunRecord) => void
+}) {
+  const sweepId = entry?.sweepId ?? null
+  const scoped = useMemo(
+    () => (sweepId ? loadWorkloads(records.filter((r) => r.sweep_id === sweepId)) : []),
+    [records, sweepId],
+  )
+  if (scoped.length === 0) {
+    return (
+      <p className="dek">This sweep has no runs on the board. Its runs may have been deleted.</p>
+    )
+  }
+  return (
+    <>
+      {scoped.map((w) => (
+        <WorkloadSection
+          key={`${sweepId}:${w.workloadKey}`}
+          workload={w}
+          revealTarget={revealTarget}
+          onRevealed={onRevealed}
+          canDelete={canDelete}
+          onDelete={onDelete}
+        />
+      ))}
+    </>
   )
 }

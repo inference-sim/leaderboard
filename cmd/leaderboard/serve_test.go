@@ -74,6 +74,70 @@ func TestHandleRunWritesAndReturns(t *testing.T) {
 	}
 }
 
+// TestHandleRunStampsSweepFields proves the /api/run wire body carries sweep_id/sweep_label
+// through DisallowUnknownFields (they must be declared on runRequest or the POST is rejected)
+// and that the server hands them to the executor, which stamps them onto the record.
+func TestHandleRunStampsSweepFields(t *testing.T) {
+	out := t.TempDir()
+	var gotID, gotLabel string
+	s := &server{
+		outDir: out,
+		execute: func(req runRequest) (schema.Record, error) {
+			gotID, gotLabel = req.SweepID, req.SweepLabel
+			rec := sampleRecord(req.RunID, "abc123")
+			rec.SweepID, rec.SweepLabel = req.SweepID, req.SweepLabel
+			return rec, nil
+		},
+	}
+
+	body, _ := json.Marshal(runRequest{
+		Group:      schema.Group{},
+		Deployment: schema.Deployment{Model: "qwen/qwen3-14b", Hardware: "H100", TP: 1},
+		RunID:      "h100-tp1",
+		SweepID:    "swp-m1-r2",
+		SweepLabel: "H100 vs A100",
+	})
+	rr := httptest.NewRecorder()
+	s.handleRun(rr, httptest.NewRequest(http.MethodPost, "/api/run", bytes.NewReader(body)))
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, body %s", rr.Code, rr.Body.String())
+	}
+	if gotID != "swp-m1-r2" || gotLabel != "H100 vs A100" {
+		t.Fatalf("executor got sweep_id %q sweep_label %q", gotID, gotLabel)
+	}
+	var rec schema.Record
+	if err := json.Unmarshal(rr.Body.Bytes(), &rec); err != nil {
+		t.Fatalf("response is not a record: %v", err)
+	}
+	if rec.SweepID != "swp-m1-r2" || rec.SweepLabel != "H100 vs A100" {
+		t.Fatalf("response sweep fields = %q/%q", rec.SweepID, rec.SweepLabel)
+	}
+}
+
+// TestHandleRunStillRejectsUnknownFields confirms DisallowUnknownFields is intact after the
+// two additions: a truly unknown field is still a 400, so the wire contract has not loosened.
+func TestHandleRunStillRejectsUnknownFields(t *testing.T) {
+	called := false
+	s := &server{
+		outDir: t.TempDir(),
+		execute: func(runRequest) (schema.Record, error) {
+			called = true
+			return schema.Record{}, nil
+		},
+	}
+	body := []byte(`{"run_id":"ok","not_a_field":true}`)
+	rr := httptest.NewRecorder()
+	s.handleRun(rr, httptest.NewRequest(http.MethodPost, "/api/run", bytes.NewReader(body)))
+
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400 for an unknown field", rr.Code)
+	}
+	if called {
+		t.Fatal("executor ran despite an unknown field in the body")
+	}
+}
+
 func TestHandleRunRejectsBadRunID(t *testing.T) {
 	called := false
 	s := &server{

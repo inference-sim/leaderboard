@@ -823,6 +823,19 @@ describe('NewRun', () => {
       running={false}
       errorMessage={null}
       onRun={() => {}}
+      mode="single"
+      onModeChange={() => {}}
+      sweepAxes={{}}
+      onSweepAxesChange={() => {}}
+      loadValues={[]}
+      onLoadValuesChange={() => {}}
+      sweepName=""
+      onSweepNameChange={() => {}}
+      sweepRun={null}
+      onRunSweep={() => {}}
+      onStopSweep={() => {}}
+      onResetSweep={() => {}}
+      onViewRow={() => {}}
     />,
   )
 

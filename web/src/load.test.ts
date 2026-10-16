@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import fixture from '../../prototypes/results.json'
-import { loadGroups, loadKindTag, loadWorkloads, offeredLoad } from './load'
+import { configKey, loadGroups, loadKindTag, loadWorkloads, offeredLoad } from './load'
 import type { RunRecord } from './load'
 
 const records = fixture as unknown as RunRecord[]
@@ -369,5 +369,19 @@ describe('loadKindTag', () => {
 
   it('returns null for a recorded-arrivals trace (no load kind to vary)', () => {
     expect(loadKindTag('recorded')).toBeNull()
+  })
+})
+
+describe('configKey', () => {
+  it('is stable under key order and ignores non-deployment fields', () => {
+    const a = { model: 'm', hardware: 'h100', tp: 2, extra_flags: {} } as any
+    const b = { tp: 2, hardware: 'h100', model: 'm', extra_flags: {} } as any
+    expect(configKey(a)).toBe(configKey(b))
+  })
+
+  it('differs when a deployment field differs', () => {
+    const a = { model: 'm', hardware: 'h100', tp: 2 } as any
+    const b = { model: 'm', hardware: 'h100', tp: 4 } as any
+    expect(configKey(a)).not.toBe(configKey(b))
   })
 })

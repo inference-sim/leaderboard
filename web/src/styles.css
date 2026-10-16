@@ -2868,6 +2868,36 @@ tr.revealed td,
   background: var(--accent);
 }
 
+/* Sweep multi-value controls: chips for number and dropdown axes, a varies badge, the load list. */
+.chiprow { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.chip { display: inline-flex; align-items: center; gap: 4px; padding: 2px 8px; border-radius: 999px;
+  background: var(--chip-bg, rgba(127,127,127,.14)); font-size: 12px; }
+.chip button { border: 0; background: none; cursor: pointer; line-height: 1; font-size: 13px; color: inherit; }
+.chipinput { min-width: 72px; border: 1px dashed var(--border, #8884); border-radius: 999px; padding: 2px 8px; }
+.varies { margin-left: 6px; font-size: 11px; opacity: .7; }
+.axishint {
+  align-self: center;
+  margin-left: 2px;
+  font-size: 11px;
+  color: var(--warn-ink);
+  white-space: nowrap;
+}
+/* The declaration-mode selector: two option cards, the active one accent-outlined and soft-filled.
+   Replaces the old segmented .modetoggle; the hidden radio keeps native radiogroup semantics. */
+.modecards { display: flex; gap: 12px; flex-wrap: wrap; margin: 0 0 14px; }
+.modecards label { flex: 1 1 200px; min-width: 170px; display: flex; gap: 11px; align-items: flex-start;
+  padding: 13px 14px; border: 1px solid var(--line-strong); border-radius: 7px; background: var(--panel); cursor: pointer; }
+.modecards label:hover { border-color: var(--accent); }
+.modecards label.on { border-color: var(--accent); background: var(--accent-soft); box-shadow: inset 0 0 0 1px var(--accent); }
+.modecards input { position: absolute; opacity: 0; width: 0; height: 0; }
+.modecards .glyph { color: var(--line-strong); margin-top: 1px; flex: none; }
+.modecards label.on .glyph { color: var(--accent); }
+.modecards .mct { display: block; font-family: var(--font-mono); font-size: 13.5px; font-weight: 600; color: var(--ink); }
+.modecards label.on .mct { color: var(--accent-ink); }
+.modecards .mcs { display: block; color: var(--muted); font-size: 12px; margin-top: 2px; line-height: 1.4; }
+.modecards label.on .mcs { color: var(--accent-ink); }
+.modecards label:has(input:focus-visible) { outline: 2px solid var(--focus); outline-offset: 2px; }
+
 /* In the Declare-a-run form each segmented control fills its field column, so its cells
  * share the width equally rather than hugging the left. Mirrors the .editor .seg rule
  * below and lines these controls up with the number inputs beside them. Wrapping controls
@@ -3299,6 +3329,196 @@ details.nrflaggroup > summary:focus-visible {
   font-size: 12px;
   color: var(--muted);
   line-height: 1.5;
+}
+
+/* Sweep preview ------------------------------------------------------------- */
+
+/* The count line leads the preview: it is the one headline number (runs, configs, loads),
+   so it reads a size up from the body copy and sits tight under the heading. */
+.sweepcount {
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.sweepdropped {
+  margin-top: 8px;
+  font-size: 13px;
+}
+
+.sweepdropped summary {
+  cursor: pointer;
+  color: var(--warn-ink);
+}
+
+.sweepdropped .droppedlabel {
+  font-weight: 600;
+}
+
+/* Axes and the per-config breakdown share the panel look of a verdict block but stay quiet:
+   a bordered card, list rows, the swept key in mono so values line up for scanning. */
+.sweepaxes,
+.sweepbreak {
+  padding: 14px 18px;
+  margin-bottom: 20px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 3px;
+}
+
+.sweepaxes h3,
+.sweepbreak h3 {
+  margin: 0 0 8px;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.sweepaxes ul,
+.sweepbreak ul {
+  margin: 0;
+  padding-left: 18px;
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.sweepaxes .axiskey,
+.sweepbreak code {
+  font-family: var(--font-mono);
+  font-weight: 600;
+}
+
+.sweepbreak li {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+
+/* Guardrail notes: amber above the soft limit, red once the hard cap blocks the Run button.
+   The count itself is always in the headline above, so the note only carries the warning. */
+.guard-warn,
+.guard-block {
+  padding: 10px 14px;
+  margin: 0 0 18px;
+  font-size: 13px;
+  line-height: 1.55;
+  border: 1px solid;
+  border-left-width: 4px;
+  border-radius: 3px;
+}
+
+.guard-warn {
+  color: var(--warn-ink);
+  background: var(--warn-bg);
+  border-color: var(--warn-line);
+}
+
+.guard-block {
+  color: var(--crit-ink);
+  background: var(--crit-bg);
+  border-color: var(--crit-line);
+}
+
+/* Sweep progress ------------------------------------------------------------- */
+
+/* A thin done/total track in the headline verdict; the fill is accent-green and widens
+   as cells land. The numeric count above carries the exact state, so the bar is decorative. */
+.sweepbar {
+  height: 6px;
+  margin: 6px 0 8px;
+  background: var(--paper);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  overflow: hidden;
+}
+
+.sweepbarfill {
+  display: block;
+  height: 100%;
+  background: var(--accent);
+  transition: width 0.2s ease;
+}
+
+.sweeptally {
+  font-size: 13px;
+  color: var(--muted);
+}
+
+/* The per-config load levels, each with its status chip and a view-on-board button that
+   appears once the cell has a record. */
+.sweepcells {
+  display: inline-flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.sweepcell {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 7px;
+  font-size: 12px;
+  background: var(--paper);
+  border: 1px solid var(--line);
+  border-radius: 3px;
+}
+
+.sweepcell .cellload {
+  font-family: var(--font-mono);
+  color: var(--muted);
+}
+
+.sweepcell .viewboard {
+  border: 0;
+  background: none;
+  padding: 0;
+  font-size: 12px;
+  color: var(--accent-ink);
+  cursor: pointer;
+  text-decoration: underline;
+}
+
+/* Status chip: a small pill coloured per CellStatus. queued is quiet, running is accent,
+   done is green, disqualified is amber, failed is red. */
+.statuschip {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 7px;
+  font-size: 11px;
+  font-weight: 600;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: var(--panel);
+  color: var(--muted);
+}
+
+.statuschip.running {
+  color: var(--accent-ink);
+  background: var(--accent-soft);
+  border-color: var(--accent);
+}
+
+.statuschip.done {
+  color: var(--accent-ink);
+  background: var(--accent-soft);
+  border-color: var(--accent);
+}
+
+.statuschip.disqualified {
+  color: var(--warn-ink);
+  background: var(--warn-bg);
+  border-color: var(--warn-line);
+}
+
+.statuschip.failed {
+  color: var(--crit-ink);
+  background: var(--crit-bg);
+  border-color: var(--crit-line);
+}
+
+.stopbtn {
+  background: var(--crit-ink);
+  border-color: var(--crit-ink);
 }
 
 /* Run result ---------------------------------------------------------------- */
@@ -6182,4 +6402,26 @@ table.readout tbody tr.dqline.cmphl td.lft {
    the nav label it rides with. */
 .sidebar.collapsed .railver {
   display: none;
+}
+
+/* Sweeps as entities. The board's two-tab control (By workload / By sweep) reuses the
+   Catalog subtab vocabulary; .boardtabs only adjusts the spacing above the gallery. */
+.boardtabs {
+  margin: 0 0 20px;
+}
+
+/* The By-sweep tab reuses the workload gallery (.wpick / .wgallery / .wpick-card) as its
+   picker and the ordinary WorkloadSection below it, so the two tabs read identically and only
+   the card content differs. The sweep card's id line sits in the muted .gcount footer; .swid
+   keeps it mono and quiet there. */
+.swid {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+/* The optional-field hint beside the Sweep name label, in the muted tone the form uses for
+   secondary text. */
+.nropt {
+  font-weight: 400;
+  color: var(--muted);
 }

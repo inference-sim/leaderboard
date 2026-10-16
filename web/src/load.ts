@@ -168,7 +168,7 @@ function byConfig(rows: RunRecord[]): RunRecord[] {
   const order: string[] = []
   const groups = new Map<string, RunRecord[]>()
   for (const r of rows) {
-    const key = canonicalJSON(r.deployment)
+    const key = configKey(r.deployment)
     const g = groups.get(key)
     if (g) g.push(r)
     else {
@@ -318,6 +318,13 @@ function canonicalJSON(value: unknown): string {
     a < b ? -1 : 1,
   )
   return `{${entries.map(([k, v]) => `${JSON.stringify(k)}:${canonicalJSON(v)}`).join(',')}}`
+}
+
+/** A configuration's identity for grouping: the canonical JSON of its deployment block.
+ *  The same deployment at different load levels shares this key, so a sweep's load levels
+ *  group into one config. Shared with sweep.ts so the Declare preview groups identically. */
+export function configKey(deployment: RunRecord['deployment']): string {
+  return canonicalJSON(deployment)
 }
 
 /** declaredRequests is the real request count the group offered: for a workload-spec it is

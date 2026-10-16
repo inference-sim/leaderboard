@@ -49,6 +49,14 @@ type runRequest struct {
 	// profile), stored on the record for display. Empty for the custom card, which
 	// names no profile.
 	WorkloadName string `json:"workload_name"`
+	// SweepID and SweepLabel mark a run the web app fired as one cell of a sweep: the browser
+	// mints the id (shared across all of the sweep's cells) and offers the optional name. The
+	// body is decoded with DisallowUnknownFields, so these must be declared here or a sweep
+	// POST would be rejected; the server stamps them onto the record verbatim (empty -> omitted
+	// via omitempty). They are provenance only, never part of group_id, so trusting the client
+	// is acceptable — the same footing as workload_name and trace_meta.
+	SweepID    string `json:"sweep_id"`
+	SweepLabel string `json:"sweep_label"`
 	// TraceMeta is the display and provenance of a trace workload (source, corpus size,
 	// growth), carried onto the record. Present only for a trace run; nil otherwise. It is
 	// display-only (never in group_id), so trusting the client for it is acceptable.
@@ -325,6 +333,8 @@ func (s *server) runOnce(req runRequest) (schema.Record, error) {
 		RunID:        req.RunID,
 		Deployment:   req.Deployment,
 		WorkloadName: req.WorkloadName,
+		SweepID:      req.SweepID,
+		SweepLabel:   req.SweepLabel,
 		TraceMeta:    req.TraceMeta,
 	}, filepath.Join(tmpDir, req.RunID+".json"))
 }
