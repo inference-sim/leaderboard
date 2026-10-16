@@ -353,8 +353,9 @@ export function App() {
         const run = initSweepRun(runs)
         setSweepRun(run)
         stopRef.current = false
-        // Move to the board so the rows appear as they land, matching startRun.
-        window.location.hash = '#/'
+        // Stay on the Declare page so the reader watches the live progress panel (the spec's
+        // intent). The board still refreshes underneath via the debounced reload, and each landed
+        // cell offers a view-on-board link, so there is no need to jump away.
         await runPool(run.cells, (cell) => postRun(cell.output), {
           onUpdate: (i, patch) => {
             setSweepRun((prev) =>
