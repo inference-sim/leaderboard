@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { initialValues } from './newrun'
 import { expandSweep } from './sweep'
 import type { RunGroup } from './load'
-import { workloadKey } from './load'
+import { workloadKey, offeredLoad } from './load'
 import {
   SWEEPABLE_KEYS, BOOL_AXES, axisValues, toggleAxisValue, addAxisValue,
   removeAxisValue, axisVaries, applyPicks, sweepHasVariation,
@@ -172,6 +172,22 @@ describe('expandSweep', () => {
     expect(byCfg.size).toBe(2)
     const ids = [...byCfg.values()].map((s) => [...s][0])
     expect(new Set(ids).size).toBe(2)
+  })
+
+  it('run id alone is not a safe per-load key; run id + offered load is', () => {
+    // One config, several load levels: the three cells share one run id (by design), so run id
+    // alone collides as a React key across the load cells. The offered load is unique within a
+    // config (loadList is deduped), so run id + load uniquely keys each per-load cell.
+    const base = customBase()
+    const e = expandSweep(base, {}, [base.loadValue, '32', '64'], groups, profiles, models, hardware)
+    expect(e.runs.length).toBe(3)
+    expect(e.configCount).toBe(1)
+    const runIds = new Set(e.runs.map((c) => c.output.runId))
+    expect(runIds.size).toBe(1) // shared across the load levels -> unsafe as a key
+    const composite = new Set(
+      e.runs.map((c) => `${c.output.runId}-${offeredLoad(c.output.group).value}`),
+    )
+    expect(composite.size).toBe(3) // unique per load level -> safe as a key
   })
 
   it('invalid combinations are dropped with interpret messages', () => {

@@ -87,7 +87,10 @@ export function SweepProgress({
               <code>{row.runId}</code>
               <span className="sweepcells">
                 {row.cells.map((cell) => (
-                  <span key={cell.runId} className="sweepcell">
+                  <span
+                    key={`${cell.runId}-${offeredLoad(cell.output.group).value}`}
+                    className="sweepcell"
+                  >
                     <span className="cellload">{offeredLoad(cell.output.group).value}</span>
                     <span className={`statuschip ${cell.status}`}>{STATUS_LABEL[cell.status]}</span>
                     {cell.record && (

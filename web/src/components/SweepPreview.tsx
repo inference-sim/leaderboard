@@ -67,7 +67,7 @@ export function SweepPreview({
       <div className="sweepaxes">
         <h3>Axes</h3>
         {expansion.variedDeploymentKeys.length === 0 && expansion.loadValues.length <= 1 ? (
-          <p className="nrnote">Only the load axis varies, or nothing does.</p>
+          <p className="nrnote">No axis varies yet - add values to sweep.</p>
         ) : (
           <ul>
             {expansion.variedDeploymentKeys.map((key) => (
@@ -93,7 +93,10 @@ export function SweepPreview({
               <code>{cfg.runId}</code>
               <span className="cfgloads">
                 {cfg.cells.map((cell) => (
-                  <span key={cell.output.runId} className="cfgload">
+                  <span
+                    key={`${cell.output.runId}-${offeredLoad(cell.output.group).value}`}
+                    className="cfgload"
+                  >
                     {offeredLoad(cell.output.group).value}
                   </span>
                 ))}
