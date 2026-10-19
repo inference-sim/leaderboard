@@ -3,9 +3,9 @@
 # Full-serve image: `leaderboard serve` with a bundled blis checkout, so the
 # container can both display stored results and execute new candidates.
 #
-# blis is the upstream simulator (github.com/jgchn/inference-sim). It resolves
-# defaults.yaml and hardware_config.json relative to its own cwd, and the model
-# catalog via BLIS_CATALOG (the bundled blis-catalog clone; no default). blisrun.
+# blis is the upstream simulator (github.com/jgchn/inference-sim). Since v0.10.0 it
+# resolves the model catalog + hardware via BLIS_CATALOG and coefficient sets via
+# BLIS_REGISTRY (bundled clones; no default), and a run's deployment from a scenario file.
 # GitProvenance shells out to `git` in that checkout on every /api/run request.
 # Both the .git directory and the git binary therefore ship in the runtime image;
 # drop them and the viewer still works but /api/run fails.
@@ -54,13 +54,19 @@ COPY --from=web /app/web/dist ./web/dist
 # Bundled upstream checkout: blis binary, its config files, and .git (required by
 # GitProvenance; git status/rev-parse run against it).
 COPY --from=blis-build /out/blis ./inference-sim/blis
-COPY upstream/defaults.yaml upstream/hardware_config.json ./inference-sim/
+# blis v0.10.0 (#1851) deleted hardware_config.json (hardware now lives in the catalog);
+# defaults.yaml remains.
+COPY upstream/defaults.yaml ./inference-sim/
 COPY upstream/.git ./inference-sim/.git
 # Model catalog: the separate blis-catalog repo (upstream deleted the in-repo
 # model_configs/ tree in inference-sim#1797). blis has no default catalog and no
 # search path, so BLIS_CATALOG (set below) points at this clone-root; it resolves
-# <catalog>/models/<name>/config.json, plus workloads/ and devices/, offline.
+# <catalog>/models/<name>/graph.yaml and hardware/<name>.yaml, plus workloads/ and
+# devices/, offline.
 COPY blis-catalog ./inference-sim/blis-catalog
+# Coefficient sets: the separate blis-registry repo. Since v0.10.0 blis-latency-kernel
+# prices a scenario with coefficient sets resolved from BLIS_REGISTRY (no default).
+COPY blis-registry ./inference-sim/blis-registry
 
 # Empty, writable results dir. serve treats a missing dir as "no results yet";
 # /api/run writes new records here, and a volume can be mounted over it.
@@ -72,6 +78,9 @@ EXPOSE 8080
 # blis resolves the model catalog only via BLIS_CATALOG (no default); point it at
 # the bundled blis-catalog clone-root. Inherited by every blis subprocess serve spawns.
 ENV BLIS_CATALOG=/app/inference-sim/blis-catalog
+# blis-latency-kernel resolves coefficient sets only via BLIS_REGISTRY (no default); point
+# it at the bundled blis-registry clone-root. Inherited by every blis subprocess serve spawns.
+ENV BLIS_REGISTRY=/app/inference-sim/blis-registry
 # Results location is chosen by env, not baked into the entrypoint: mount a volume
 # over /app/results, or override LEADERBOARD_RESULTS to a different persisted path.
 ENV LEADERBOARD_RESULTS=/app/results

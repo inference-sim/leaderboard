@@ -26,7 +26,7 @@ import { workloadParam, workloadsHref } from '../route'
 import { listWorkloads, profileKnobs, profileSummary, profileToGroup } from '../workloads'
 import type { ProfileBody } from '../workloads'
 import type { SweepableKey, SweepAxes, SweepCell, SweepRun } from '../sweep'
-import { expandSweep, SWEEPABLE_KEYS, sweepHasVariation } from '../sweep'
+import { deriveSweepSummaryFromCells, expandSweep, SWEEPABLE_KEYS, sweepHasVariation } from '../sweep'
 import { offeredLoad } from '../load'
 import { numeric } from '../format'
 import { shellLines } from '../repro'
@@ -296,6 +296,14 @@ export function NewRun({
   const expansion = useMemo(
     () => expandSweep(values, sweepAxes, loadValues, groups, profiles, models, hardware),
     [values, sweepAxes, loadValues, groups, profiles, models, hardware],
+  )
+
+  // The name an unnamed sweep would take in the By-sweep list (deriveSweepSummary over its
+  // cells), shown as the Sweep-name placeholder so the reader sees the auto-name they get by
+  // leaving the field blank. Falls back to a static example until the matrix varies (<2 cells).
+  const sweepNamePlaceholder = useMemo(
+    () => deriveSweepSummaryFromCells(expansion.runs) || 'H100 vs A100 as concurrency climbs',
+    [expansion.runs],
   )
 
   // Switching sweep -> single discards every axis beyond the first value (App's onModeChange
@@ -572,7 +580,7 @@ export function NewRun({
               <input
                 type="text"
                 value={sweepName}
-                placeholder="H100 vs A100 as concurrency climbs"
+                placeholder={sweepNamePlaceholder}
                 spellCheck={false}
                 onChange={(e) => onSweepNameChange(e.target.value)}
               />

@@ -36,7 +36,8 @@ rsync -a \
 # inference-sim: shallow clone at the committed HEAD -> real provenance, tiny .git.
 git clone --quiet --depth 1 "file://${INFSIM}" "${CTX}/inference-sim"
 # Overlay working-tree runtime config that may be untracked in that commit.
-cp "${INFSIM}/defaults.yaml" "${INFSIM}/hardware_config.json" "${CTX}/inference-sim/"
+# blis v0.10.0 (#1851) deleted hardware_config.json (hardware now lives in the catalog).
+cp "${INFSIM}/defaults.yaml" "${CTX}/inference-sim/"
 
 # blis-catalog: the model catalog is a separate repo now (upstream deleted the in-repo
 # model_configs/ tree, inference-sim#1797). Bundle a shallow clone; the Dockerfile COPYs
@@ -58,6 +59,21 @@ git clone --quiet --depth 1 "${CATALOG_SRC}" "${CTX}/blis-catalog"
 CATALOG_REF="$(git -C "${CTX}/blis-catalog" rev-parse --short=8 HEAD)"
 printf '%s\n' "${CATALOG_REF}" > "${CTX}/blis-catalog/VERSION"
 rm -rf "${CTX}/blis-catalog/.git"   # config-only; no provenance needed, keep the image lean
+
+# blis-registry: coefficient sets, a separate repo (since blis v0.10.0 / #1851). Bundle a
+# shallow clone; the Dockerfile COPYs it to /app/inference-sim/blis-registry and
+# BLIS_REGISTRY points there. Prefer a local checkout at ../blis-registry, else clone from
+# GitHub. Override with BLIS_REGISTRY_SRC. Keep it a known-good triple with blis+catalog.
+REGISTRY_SRC="${BLIS_REGISTRY_SRC:-}"
+if [ -z "${REGISTRY_SRC}" ]; then
+  if [ -d "${LEADERBOARD}/../blis-registry/.git" ]; then
+    REGISTRY_SRC="file://$(cd "${LEADERBOARD}/../blis-registry" && pwd)"
+  else
+    REGISTRY_SRC="https://github.com/inference-sim/blis-registry.git"
+  fi
+fi
+git clone --quiet --depth 1 "${REGISTRY_SRC}" "${CTX}/blis-registry"
+rm -rf "${CTX}/blis-registry/.git"   # config-only; keep the image lean
 
 echo ">> upstream provenance in image: $(git -C "${CTX}/inference-sim" rev-parse --short=8 HEAD)"
 echo ">> shallow .git size: $(du -sh "${CTX}/inference-sim/.git" | cut -f1)"

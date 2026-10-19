@@ -15,6 +15,13 @@ export LEADERBOARD_RESULTS
 BLIS_CATALOG ?= $(abspath $(BLIS_DIR)/../blis-catalog)
 export BLIS_CATALOG
 
+# Since blis v0.10.0 (#1851) a scenario is priced by blis-latency-kernel using coefficient
+# sets from a blis-registry clone, located only via BLIS_REGISTRY (no default). By
+# convention a sibling of ../inference-sim. Keep it a known-good triple with blis+catalog.
+# `git clone https://github.com/inference-sim/blis-registry.git`.
+BLIS_REGISTRY ?= $(abspath $(BLIS_DIR)/../blis-registry)
+export BLIS_REGISTRY
+
 .PHONY: all test lint build blis drift integration serve web-install web-test web-build web-lint web-dev clean
 
 all: lint test build

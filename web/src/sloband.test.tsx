@@ -27,7 +27,7 @@ describe('SloBand', () => {
     const { hidden } = splitBySlo(main.complete, { e2e_p99_ms: 5000 })
     const html = renderToStaticMarkup(<SloBand hidden={hidden} targets={{ e2e_p99_ms: 5000 }} />)
     // h100-tp1's E2E p99 is 9749.6 ms; the target rendered as 5.00s.
-    expect(html).toContain('H100 tp1')
+    expect(html).toContain('h100 tp1')
     expect(html).toContain('E2E p99')
     expect(html).toContain('9.75s')
     expect(html).toContain('5.00s')

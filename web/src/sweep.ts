@@ -426,6 +426,24 @@ export function deriveSweepSummary(records: RunRecord[]): string {
   return varied ? `${varied} · ${workload}` : workload
 }
 
+/** The same one-line summary, derived from a sweep's preview cells before any run exists, so
+ *  the Sweep-name field can show the name an unnamed sweep would take as its placeholder. The
+ *  cells carry the group/deployment/workloadName the summary reads, so each is adapted to the
+ *  minimal record shape and run through deriveSweepSummary — one source of truth for the text.
+ *  Returns '' when there are fewer than two cells (nothing varies, so there is no summary). */
+export function deriveSweepSummaryFromCells(cells: SweepCell[]): string {
+  if (cells.length < 2) return ''
+  const asRecords = cells.map(
+    (c) =>
+      ({
+        group: c.output.group,
+        deployment: c.output.deployment,
+        workload_name: c.output.workloadName,
+      }) as unknown as RunRecord,
+  )
+  return deriveSweepSummary(asRecords)
+}
+
 /** Buckets records into sweeps by their top-level sweep_id (records without one are skipped —
  *  they stay under By workload only), newest-first by the id's time component. Each entry
  *  carries the label when any run has one, else a derived summary. Pure, so the By-sweep list

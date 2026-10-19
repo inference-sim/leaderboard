@@ -20,7 +20,7 @@ func sampleRecord(runID, groupID string) schema.Record {
 		RunID:         runID,
 		GroupID:       groupID,
 		Group:         schema.Group{},
-		Deployment:    schema.Deployment{Model: "qwen/qwen3-14b", Hardware: "H100", TP: 1},
+		Deployment:    schema.Deployment{Model: "qwen/qwen3-14b", Hardware: "h100", TP: 1},
 	}
 }
 
@@ -40,7 +40,7 @@ func TestHandleRunWritesAndReturns(t *testing.T) {
 
 	body, _ := json.Marshal(runRequest{
 		Group:        schema.Group{},
-		Deployment:   schema.Deployment{Model: "qwen/qwen3-14b", Hardware: "H100", TP: 1},
+		Deployment:   schema.Deployment{Model: "qwen/qwen3-14b", Hardware: "h100", TP: 1},
 		RunID:        "h100-tp1",
 		WorkloadName: "chatbot",
 	})
@@ -92,7 +92,7 @@ func TestHandleRunStampsSweepFields(t *testing.T) {
 
 	body, _ := json.Marshal(runRequest{
 		Group:      schema.Group{},
-		Deployment: schema.Deployment{Model: "qwen/qwen3-14b", Hardware: "H100", TP: 1},
+		Deployment: schema.Deployment{Model: "qwen/qwen3-14b", Hardware: "h100", TP: 1},
 		RunID:      "h100-tp1",
 		SweepID:    "swp-m1-r2",
 		SweepLabel: "H100 vs A100",
@@ -166,7 +166,7 @@ func TestHandleRunSurfacesExecutorError(t *testing.T) {
 			return schema.Record{}, os.ErrPermission
 		},
 	}
-	body, _ := json.Marshal(runRequest{RunID: "ok", Deployment: schema.Deployment{Hardware: "H100", TP: 1}})
+	body, _ := json.Marshal(runRequest{RunID: "ok", Deployment: schema.Deployment{Hardware: "h100", TP: 1}})
 	rr := httptest.NewRecorder()
 	s.handleRun(rr, httptest.NewRequest(http.MethodPost, "/api/run", bytes.NewReader(body)))
 

@@ -43,17 +43,17 @@ const catalogModels: ModelInfo[] = [
 
 /**
  * A stand-in for the catalog the form fetches from GET /api/hardware, read server-side from
- * the upstream hardware_config.json. It carries the names these tests name plus the
+ * the blis-catalog hardware/ dir. It carries the names these tests name plus the
  * A100-80/A100-SXM pair, which upstream defines with identical specs: the server hands each
  * name the other as its alias, exactly as internal/hardware.Entries does, so the membership
  * and duplicate-row checks have the same shape the running app sees.
  */
 const A100_SPEC = { MemoryGiB: 80, TFlopsPeak: 312 }
 const catalogHardware: HardwareInfo[] = [
-  { name: 'A100-80', aliases: ['A100-SXM'], spec: A100_SPEC },
-  { name: 'A100-SXM', aliases: ['A100-80'], spec: A100_SPEC },
-  { name: 'H100', aliases: [], spec: { MemoryGiB: 80, TFlopsPeak: 989.5 } },
-  { name: 'L40S', aliases: [], spec: { MemoryGiB: 48, TFlopsPeak: 362 } },
+  { name: 'a100-80', aliases: ['a100-sxm'], spec: A100_SPEC },
+  { name: 'a100-sxm', aliases: ['a100-80'], spec: A100_SPEC },
+  { name: 'h100', aliases: [], spec: { MemoryGiB: 80, TFlopsPeak: 989.5 } },
+  { name: 'l40s', aliases: [], spec: { MemoryGiB: 48, TFlopsPeak: 362 } },
 ]
 const main = groups.find((g) => g.groupId === '86575212efc8')!
 
@@ -226,10 +226,10 @@ describe('argvFor', () => {
 
 describe('suggestRunId: a descriptive default, so the page is immediately runnable', () => {
   it('names the candidate <hardware>-tp<tp>, lower-cased to a usable filename', () => {
-    expect(suggestRunId(valid({ hardware: 'H100', tp: '8' }), [], [])).toBe('h100-tp8')
+    expect(suggestRunId(valid({ hardware: 'h100', tp: '8' }), [], [])).toBe('h100-tp8')
     // Hardware names carry upper case and dashes; both survive as a valid run_id/filename.
-    expect(suggestRunId(valid({ hardware: 'A100-SXM', tp: '1' }), [], [])).toBe('a100-sxm-tp1')
-    expect(RUN_ID_PATTERN.test(suggestRunId(valid({ hardware: 'A100-SXM', tp: '1' }), [], []))).toBe(true)
+    expect(suggestRunId(valid({ hardware: 'a100-sxm', tp: '1' }), [], [])).toBe('a100-sxm-tp1')
+    expect(RUN_ID_PATTERN.test(suggestRunId(valid({ hardware: 'a100-sxm', tp: '1' }), [], []))).toBe(true)
   })
 
   it('deduplicates against the table it would join, so the default never overwrites a row', () => {
@@ -688,19 +688,19 @@ describe('interpret: refusals', () => {
 
   it('rejects an alias of hardware already in the table, since it is a duplicate row', () => {
     // The fixture has a100-tp1 on A100-SXM; A100-80 is the same specs upstream.
-    const clash = messages(valid({ runId: 'a100-80-tp1', hardware: 'A100-80', tp: '1' })).join(' ')
+    const clash = messages(valid({ runId: 'a100-80-tp1', hardware: 'a100-80', tp: '1' })).join(' ')
     expect(clash).toMatch(/identical specs/)
   })
 
   it('rejects hardware that is not in the upstream catalogue', () => {
-    expect(messages(valid({ hardware: 'B200' })).join(' ')).toMatch(/hardware_config\.json/)
+    expect(messages(valid({ hardware: 'NO-SUCH-GPU' })).join(' ')).toMatch(/blis-catalog hardware\//)
   })
 
   it('accepts an alias name the catalogue knows, since blis does too', () => {
     // A100-80 is a valid upstream name (an alias of A100-SXM), so it passes the membership
     // check; only the duplicate-row guard, when a rival row already holds A100-SXM, refuses it.
     const hwIssue = interpret(
-      valid({ runId: 'a100-80-tp8', hardware: 'A100-80' }),
+      valid({ runId: 'a100-80-tp8', hardware: 'a100-80' }),
       groups,
       [],
       catalogModels,
@@ -714,8 +714,8 @@ describe('interpret: refusals', () => {
     // the accelerator, so an unknown name is not rejected — the same deferral the model check
     // makes. interpret is called without the hardware argument, as the form does before the
     // fetch resolves.
-    const issues = interpret(valid({ hardware: 'B200' }), withCustomTable, [], catalogModels).issues
-    expect(issues.some((i) => /hardware_config\.json/.test(i.message))).toBe(false)
+    const issues = interpret(valid({ hardware: 'NO-SUCH-GPU' }), withCustomTable, [], catalogModels).issues
+    expect(issues.some((i) => /blis-catalog hardware\//.test(i.message))).toBe(false)
   })
 
   it('rejects a model that is not in the catalogue', () => {
@@ -1035,7 +1035,7 @@ describe('interpret: the declaration it writes', () => {
     expect(output.yamlFile).toContain('type: gaussian')
     expect(output.yamlFile).toContain('aggregate_rate: 6')
     expect(output.yamlFile).toContain('max_num_batched_tokens: 8192')
-    expect(output.yamlFile).toContain('- {run_id: h100-tp8, hardware: H100, tp: 8}')
+    expect(output.yamlFile).toContain('- {run_id: h100-tp8, hardware: h100, tp: 8}')
     // arrival_process is a derived field of the flat distribution, absent from a spec run.
     expect(output.yamlFile).not.toContain('arrival_process')
   })
@@ -1134,10 +1134,10 @@ describe('postRun', () => {
 
   it('throws the server {error} on a rejected declaration', async () => {
     const fakeFetch = (async () =>
-      new Response(JSON.stringify({ error: 'hardware "B200" is not in hardware_config.json' }), {
+      new Response(JSON.stringify({ error: 'hardware "nope" is not in the blis-catalog hardware/ dir' }), {
         status: 422,
       })) as typeof fetch
-    await expect(postRun(output, fakeFetch)).rejects.toThrow(/B200/)
+    await expect(postRun(output, fakeFetch)).rejects.toThrow(/nope/)
   })
 
   it('explains how to start the server when the fetch itself fails', async () => {

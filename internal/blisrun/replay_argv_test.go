@@ -8,6 +8,11 @@ import (
 	"github.com/inference-sim/leaderboard/internal/schema"
 )
 
+// replayFor is ReplayArgv with the scenario/registry/catalog paths fixed, mirroring argvFor.
+func replayFor(g schema.Group, d schema.Deployment, metricsPath, traceHeader, traceData, kvOffloadPath string) []string {
+	return ReplayArgv("./blis", scnDir, scnF, reg, cat, g, d, metricsPath, traceHeader, traceData, kvOffloadPath)
+}
+
 func traceGroup() schema.Group {
 	return schema.Group{
 		Seed:            42,
@@ -25,29 +30,20 @@ func traceGroup() schema.Group {
 }
 
 func TestReplayArgvStructure(t *testing.T) {
-	got := ReplayArgv("./blis", traceGroup(), deployment(), "/tmp/m.json", "/store/3f9a/header.yaml", "/store/3f9a/data.csv", "")
+	got := replayFor(traceGroup(), deployment(), "/tmp/m.json", "/store/3f9a/header.yaml", "/store/3f9a/data.csv", "")
 	want := []string{
 		"./blis", "replay",
+		"--scenarios", scnDir, "--scenario", scnF, "--registry", reg, "--catalog", cat,
 		"--trace-header", "/store/3f9a/header.yaml",
 		"--trace-data", "/store/3f9a/data.csv",
 		"--session-mode", "closed-loop",
 		"--concurrent-sessions", "32",
-		"--model", "qwen/qwen3-14b",
-		"--hardware", "H100",
-		"--tp", "2",
 		"--num-instances", "1",
-		"--max-model-len", "40960",
-		"--block-size-in-tokens", "16",
-		"--max-num-seqs", "256",
-		"--max-num-batched-tokens", "8192",
 		"--long-prefill-token-threshold", "0",
 		"--scheduler", "fcfs",
 		"--preemption-policy", "fcfs",
 		"--routing-policy", "round-robin",
 		"--admission-policy", "always-admit",
-		"--kv-cache-dtype", "auto",
-		"--latency-model", "trained-physics",
-		"--gpu-memory-utilization", "0.9",
 		"--seed", "42",
 		"--metrics-path", "/tmp/m.json",
 	}
@@ -60,7 +56,7 @@ func TestReplayArgvStructure(t *testing.T) {
 // from the trace, not a CLI flag). Emitting it makes cobra reject the whole command with
 // a usage dump, so ReplayArgv must never include it.
 func TestReplayArgvOmitsTimeout(t *testing.T) {
-	joined := strings.Join(ReplayArgv("./blis", traceGroup(), deployment(), "/tmp/m.json", "h", "d", ""), " ")
+	joined := strings.Join(replayFor(traceGroup(), deployment(), "/tmp/m.json", "h", "d", ""), " ")
 	if strings.Contains(joined, "--timeout") {
 		t.Errorf("replay argv emitted --timeout, which blis replay does not accept: %s", joined)
 	}
@@ -69,7 +65,7 @@ func TestReplayArgvOmitsTimeout(t *testing.T) {
 // The synthetic-distribution flags are never emitted for a replay: the request stream is
 // the trace, and blis replay does not register --workload/--num-requests/--rate/--prompt-tokens.
 func TestReplayArgvOmitsSyntheticFlags(t *testing.T) {
-	joined := strings.Join(ReplayArgv("./blis", traceGroup(), deployment(), "/tmp/m.json", "h", "d", ""), " ")
+	joined := strings.Join(replayFor(traceGroup(), deployment(), "/tmp/m.json", "h", "d", ""), " ")
 	for _, forbidden := range []string{"--workload ", "--num-requests", "--rate", "--concurrency", "--prompt-tokens", "--output-tokens"} {
 		if strings.Contains(joined, forbidden) {
 			t.Errorf("replay argv emitted synthetic flag %q: %s", forbidden, joined)
@@ -82,7 +78,7 @@ func TestReplayArgvThinkTimeAndPoolKnobs(t *testing.T) {
 	g.Workload.Trace.TotalSessions = 100
 	g.Workload.Trace.ShuffleCorpus = true
 	g.Workload.Trace.ThinkTimeDist = "constant:value=500ms"
-	joined := strings.Join(ReplayArgv("./blis", g, deployment(), "/tmp/m.json", "h", "d", ""), " ")
+	joined := strings.Join(replayFor(g, deployment(), "/tmp/m.json", "h", "d", ""), " ")
 	for _, want := range []string{
 		"--total-sessions 100", "--shuffle-corpus", "--think-time-dist constant:value=500ms",
 	} {
@@ -96,7 +92,7 @@ func TestReplayArgvThinkTimeMs(t *testing.T) {
 	g := traceGroup()
 	g.Workload.Trace.ConcurrentSessions = 0
 	g.Workload.Trace.ThinkTimeMs = 500
-	joined := strings.Join(ReplayArgv("./blis", g, deployment(), "/tmp/m.json", "h", "d", ""), " ")
+	joined := strings.Join(replayFor(g, deployment(), "/tmp/m.json", "h", "d", ""), " ")
 	if !strings.Contains(joined, "--think-time-ms 500") {
 		t.Errorf("replay argv missing --think-time-ms 500: %s", joined)
 	}
@@ -109,28 +105,29 @@ func TestReplayArgvHorizon(t *testing.T) {
 	g := traceGroup()
 	h := int64(2_000_000)
 	g.HorizonTicks = &h
-	joined := strings.Join(ReplayArgv("./blis", g, deployment(), "/tmp/m.json", "h", "d", ""), " ")
+	joined := strings.Join(replayFor(g, deployment(), "/tmp/m.json", "h", "d", ""), " ")
 	if !strings.Contains(joined, "--horizon 2000000") {
 		t.Errorf("replay argv missing --horizon: %s", joined)
 	}
 }
 
-// The candidate is described identically to a `run`: the deployment-flag subsequence a
-// replay emits must equal the one `run` emits for the same deployment, so the two
-// commands cannot drift in how a candidate is spelled.
+// The candidate is described identically to a `run`: the surviving candidate-flag
+// subsequence a replay emits must equal the one `run` emits for the same deployment, so
+// the two commands cannot drift in how a candidate is spelled.
 func TestReplayArgvSharesDeploymentBlock(t *testing.T) {
 	d := deployment()
-	runArgv := Argv("./blis", group(), d, "/tmp/m.json", "", "")
-	replayArgv := ReplayArgv("./blis", traceGroup(), d, "/tmp/m.json", "h", "d", "")
+	runArgv := argvFor(group(), d, "/tmp/m.json", "", "")
+	replayArgv := replayFor(traceGroup(), d, "/tmp/m.json", "h", "d", "")
 	if runDep, replayDep := deploymentFlagsOf(runArgv), deploymentFlagsOf(replayArgv); !reflect.DeepEqual(runDep, replayDep) {
 		t.Errorf("deployment flags differ between run and replay\n run: %v\n rep: %v", runDep, replayDep)
 	}
 }
 
-// deploymentFlagsOf extracts the model/hardware/scheduler/... candidate flags shared by
-// run and replay, dropping the workload, group, and trace flags that legitimately differ.
+// deploymentFlagsOf extracts the surviving candidate flags shared by run and replay,
+// dropping the scenario locators, workload, group, and trace flags that legitimately differ.
 func deploymentFlagsOf(argv []string) []string {
 	skip := map[string]bool{
+		"--scenarios": true, "--scenario": true, "--registry": true, "--catalog": true,
 		"--workload": true, "--num-requests": true, "--rate": true, "--concurrency": true,
 		"--prompt-tokens": true, "--prompt-tokens-stdev": true, "--output-tokens": true, "--output-tokens-stdev": true,
 		"--workload-spec": true, "--trace-header": true, "--trace-data": true, "--session-mode": true,
@@ -141,9 +138,7 @@ func deploymentFlagsOf(argv []string) []string {
 	for i := 2; i < len(argv); i++ { // skip binary + subcommand
 		a := argv[i]
 		if strings.HasPrefix(a, "--") {
-			base := a
-			if skip[base] {
-				// also skip its value if it takes one
+			if skip[a] {
 				if i+1 < len(argv) && !strings.HasPrefix(argv[i+1], "--") {
 					i++
 				}

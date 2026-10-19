@@ -8,7 +8,7 @@ import {
   SWEEPABLE_KEYS, BOOL_AXES, axisValues, toggleAxisValue, addAxisValue,
   removeAxisValue, axisVaries, applyPicks, sweepHasVariation,
   AXIS_ABBR, slug, sweepPrefix, cellToken, groupByConfig, guardFor, WARN_AT, BLOCK_AT,
-  mintSweepId, sweepDate, groupSweeps, deriveSweepSummary,
+  mintSweepId, sweepDate, groupSweeps, deriveSweepSummary, deriveSweepSummaryFromCells,
 } from './sweep'
 
 const base = initialValues()
@@ -382,5 +382,28 @@ describe('groupSweeps', () => {
     ;(recs[1]!.group.workload.spec as { aggregate_rate?: number }).aggregate_rate = 8
     const summary = deriveSweepSummary(recs)
     expect(summary).toContain('4/8')
+  })
+})
+
+describe('deriveSweepSummaryFromCells', () => {
+  const profiles: any[] = []
+  const models: any[] = []
+  const hardware: any[] = []
+  const groups: RunGroup[] = []
+  const formBase = () => initialValues()
+
+  it('is empty for a single cell, so the field shows its static placeholder', () => {
+    const e = expandSweep(formBase(), {}, [formBase().loadValue], groups, profiles, models, hardware)
+    expect(e.runs.length).toBe(1)
+    expect(deriveSweepSummaryFromCells(e.runs)).toBe('')
+  })
+
+  it('names the varied axis once the matrix expands, matching the By-sweep summary', () => {
+    const b = formBase()
+    const e = expandSweep(b, toggleAxisValue({}, 'tp', '8', b), [b.loadValue], groups, profiles, models, hardware)
+    expect(e.runs.length).toBe(2)
+    // The preview-derived name is the same text an unnamed sweep gets in the By-sweep list.
+    expect(deriveSweepSummaryFromCells(e.runs)).toContain('tp')
+    expect(deriveSweepSummaryFromCells(e.runs)).toContain('8')
   })
 })

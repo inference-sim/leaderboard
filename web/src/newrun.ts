@@ -74,7 +74,7 @@ export const FALLBACK_GROUP: Group = {
 
 export const FALLBACK_DEPLOYMENT: Deployment = {
   model: 'qwen/qwen3-14b',
-  hardware: 'H100',
+  hardware: 'h100',
   tp: 1,
   dp: 1,
   num_instances: 1,
@@ -710,15 +710,15 @@ export function interpret(
   }
 
   // The hardware catalogue is fetched from the server (GET /api/hardware, read from the
-  // upstream hardware_config.json), so an empty list means it has not loaded yet or could
+  // blis-catalog hardware/ dir), so an empty list means it has not loaded yet or could
   // not be reached: with none in hand the form cannot judge the accelerator and skips the
   // check rather than rejecting every value, exactly as the model check does. Once loaded,
   // an unknown name is rejected — an alias name counts as known, since blis accepts it and
-  // the list carries every name upstream defines.
+  // the list carries every name the catalog defines.
   if (hardware.length > 0 && !hardware.some((hw) => hw.name === values.hardware)) {
     push(
       'hardware',
-      `${values.hardware || 'No accelerator'} is not in ../inference-sim/hardware_config.json; ` +
+      `${values.hardware || 'No accelerator'} is not in the blis-catalog hardware/ dir; ` +
         `the catalogue holds ${hardware.map((hw) => hw.name).join(', ')}.`,
     )
   }

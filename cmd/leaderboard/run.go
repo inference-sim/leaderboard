@@ -47,7 +47,11 @@ func loadPlan(c commonFlags) (*spec.Plan, error) {
 	if err != nil {
 		return nil, err
 	}
-	cat, err := hardware.Load(filepath.Join(c.blisDir, "hardware_config.json"))
+	catalogRoot := os.Getenv("BLIS_CATALOG")
+	if catalogRoot == "" {
+		return nil, fmt.Errorf("set BLIS_CATALOG to a blis-catalog clone (hardware is read from <catalog>/hardware)")
+	}
+	cat, err := hardware.Load(hardware.Dir(catalogRoot))
 	if err != nil {
 		return nil, err
 	}
@@ -98,11 +102,16 @@ func cmdRun(args []string) error {
 		fmt.Println("keeping per-request records")
 	}
 
+	// One runs.yaml invocation is one sweep: its candidates share a single sweep_id, so the
+	// batch is addressable as a group on the board. Minted once here rather than per
+	// candidate (the runner mints a distinct id only when none is supplied).
+	sweepID := schema.MintSweepID()
+
 	var failures int
 	for _, cand := range plan.Runs {
 		metricsPath := filepath.Join(tmpDir, cand.RunID+".json")
 		rec, err := runner.Run(plan.Group, blisrun.RunSpec{
-			RunID: cand.RunID, Deployment: cand.Deployment,
+			RunID: cand.RunID, Deployment: cand.Deployment, SweepID: sweepID,
 		}, metricsPath)
 		if err != nil {
 			// No partial record: a half-written result is worse than a missing one.
