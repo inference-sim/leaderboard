@@ -36,7 +36,7 @@ import { initialValues, postRun, saveThenRun } from './newrun'
 import type { FormValues, Output } from './newrun'
 import { saveWorkload } from './workloads'
 import type { ProfileBody } from './workloads'
-import { runDeclFromOutput, workloadKeyForGroup } from './liverun'
+import { boardTabForReveal, runDeclFromOutput, workloadKeyForGroup } from './liverun'
 import type { LiveRun, RevealTarget } from './liverun'
 
 type View = 'board' | 'declare' | 'catalog'
@@ -102,6 +102,16 @@ function CatalogRepoIcon() {
   return (
     <svg className="navico" viewBox="0 0 24 24" aria-hidden="true">
       <path d="M12 4 3 8l9 4 9-4-9-4zM3 12l9 4 9-4M3 16l9 4 9-4" />
+    </svg>
+  )
+}
+
+// blis-registry is the fourth project (the coefficient sets that price a scenario since blis
+// v0.10.0): sliders, the fitted constants it holds. Stroked to match the others in the foot.
+function RegistryRepoIcon() {
+  return (
+    <svg className="navico" viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M4 7h16M4 12h16M4 17h16M9 5v4M15 10v4M7 15v4" />
     </svg>
   )
 }
@@ -408,9 +418,15 @@ export function App() {
   }, [])
 
   // The progress panel's per-cell "view on board" control: reveal that landed row the same way
-  // the live-run banner does, routing to the board so it scrolls and pulses.
-  const onViewRow = useCallback((groupId: string, runId: string) => {
+  // the live-run banner does, routing to the board so it scrolls and pulses. A sweep cell carries
+  // its sweep_id, so open the By-sweep tab on that sweep rather than the default By-workload tab:
+  // the reader asked to see a sweep's row, so land them in the sweep's own section (where the
+  // SweepScope honors the same revealTarget).
+  const onViewRow = useCallback((groupId: string, runId: string, sweepId?: string) => {
     setRevealTarget({ groupId, runId })
+    const dest = boardTabForReveal(sweepId)
+    setBoardTab(dest.tab)
+    if (dest.sweepId) setSelectedSweepId(dest.sweepId)
     window.location.hash = '#/'
   }, [])
 
@@ -530,6 +546,17 @@ export function App() {
             <CatalogRepoIcon />
             <span className="navlabel">blis-catalog</span>
             {versions && <RailVersion value={versions.catalog} />}
+          </a>
+          <a
+            href="https://github.com/inference-sim/blis-registry"
+            target="_blank"
+            rel="noreferrer"
+            aria-label="BLIS coefficient registry on GitHub"
+            title={collapsed ? 'BLIS coefficient registry on GitHub' : undefined}
+          >
+            <RegistryRepoIcon />
+            <span className="navlabel">blis-registry</span>
+            {versions && <RailVersion value={versions.registry} />}
           </a>
         </div>
       </aside>

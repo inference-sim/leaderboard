@@ -108,6 +108,14 @@ func Generate(d schema.Deployment, catalogRoot string) (body []byte, name string
 		return nil, "", fmt.Errorf("scenario: total_kv_blocks is not supported under blis v0.10.0 (KV capacity is derived from the scenario)")
 	case d.NumSpeculativeTokens > 0:
 		return nil, "", fmt.Errorf("scenario: speculative decoding (num_speculative_tokens>0) is not yet ported to blis v0.10.0")
+	case d.LatencyModel != "" && d.LatencyModel != "trained-physics":
+		// --latency-model was removed in v0.10.0: the cost model is now the registry's
+		// coefficient sets, not a CLI-selected model. "trained-physics" was the only model
+		// older records could carry, so it is treated as "unset" (the kv_cache_dtype "auto"
+		// precedent) and lets every pre-v0.10.0 record still run; any other value declared a
+		// behavior this port cannot honor, so it is refused rather than silently dropped.
+		// (Design doc §13: a correction that lives only in a comment gets re-introduced.)
+		return nil, "", fmt.Errorf("scenario: latency_model %q has no blis v0.10.0 equivalent (the cost model is the registry's coefficient sets)", d.LatencyModel)
 	}
 
 	model := CatalogModel(d.Model)

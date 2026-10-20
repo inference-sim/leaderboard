@@ -162,7 +162,7 @@ func cmdServe(args []string) error {
 		// catalog's VERSION file / git HEAD), else "" (rendered as "unknown"). No flag: these
 		// have no behavioural effect, so a flag would add surface for nothing. See the design doc.
 		versions: resolveVersions(os.Getenv, debug.ReadBuildInfo, blisrun.GitProvenance,
-			os.ReadFile, c.blisDir, os.Getenv("BLIS_CATALOG")),
+			os.ReadFile, c.blisDir, os.Getenv("BLIS_CATALOG"), os.Getenv("BLIS_REGISTRY")),
 	}
 	s.execute = s.runOnce
 	s.validateSpec = s.validateSpecWithBlis

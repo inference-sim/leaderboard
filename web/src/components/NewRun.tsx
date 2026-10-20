@@ -1662,13 +1662,15 @@ function CliDetail({ output }: { output: Output }) {
           {isSpec ? (
             <>
               <code>--workload-spec</code> points at a temp file the runner writes from the inline
-              spec, and <code>--metrics-path</code> at another. The argv that actually ran is
-              stored in the result.
+              spec, <code>--scenario</code> at a scenario the runner generates per run under{' '}
+              <code>--scenarios</code>, and <code>--metrics-path</code> at another temp file. The
+              argv that actually ran is stored in the result.
             </>
           ) : (
             <>
-              <code>--metrics-path</code> is a temporary file the runner picks; the argv that
-              actually ran is stored in the result.
+              <code>--scenario</code> is a file the runner generates per run under{' '}
+              <code>--scenarios</code>, and <code>--metrics-path</code> a temp file it picks; the
+              argv that actually ran is stored in the result.
             </>
           )}
         </p>

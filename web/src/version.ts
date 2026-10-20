@@ -1,6 +1,6 @@
 // The deployment version API: which build of each first-party dependency the running
-// server is made of. GET /api/version answers {leaderboard, blis, catalog}, read from env
-// vars the deployment sets (see the design doc). It is deployment-level, display-only
+// server is made of. GET /api/version answers {leaderboard, blis, catalog, registry}, read
+// from env vars the deployment sets (see the design doc). It is deployment-level, display-only
 // provenance; it is unrelated to the per-run provenance.blis_commit each record carries.
 //
 // A rejection means "no version endpoint here" — the static committed board served with no
@@ -13,6 +13,7 @@ export interface Versions {
   leaderboard: string
   blis: string
   catalog: string
+  registry: string
 }
 
 /** GET /api/version — the three dependency versions, or a rejection when there is no
@@ -35,6 +36,14 @@ export async function fetchVersion(fetchImpl: typeof fetch = fetch): Promise<Ver
   ) {
     throw new Error('/api/version did not return the expected shape')
   }
-  const v = parsed as Versions
-  return { leaderboard: v.leaderboard, blis: v.blis, catalog: v.catalog }
+  const v = parsed as Partial<Versions>
+  // registry is newer than the other three: a serve from before blis-registry omits it, so
+  // it is optional here (defaulting to '') while the original three are required. That keeps
+  // the whole version block visible against an older server rather than hiding it.
+  return {
+    leaderboard: v.leaderboard!,
+    blis: v.blis!,
+    catalog: v.catalog!,
+    registry: typeof v.registry === 'string' ? v.registry : '',
+  }
 }

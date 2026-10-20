@@ -73,6 +73,11 @@ if [ -z "${REGISTRY_SRC}" ]; then
   fi
 fi
 git clone --quiet --depth 1 "${REGISTRY_SRC}" "${CTX}/blis-registry"
+# Capture the registry's cloned commit before stripping .git, into a VERSION file, exactly as
+# the catalog does: serve reads <BLIS_REGISTRY>/VERSION to auto-detect the registry version
+# when BLIS_REGISTRY_VERSION is unset (the .git is stripped below, so git is unavailable).
+REGISTRY_REF="$(git -C "${CTX}/blis-registry" rev-parse --short=8 HEAD)"
+printf '%s\n' "${REGISTRY_REF}" > "${CTX}/blis-registry/VERSION"
 rm -rf "${CTX}/blis-registry/.git"   # config-only; keep the image lean
 
 echo ">> upstream provenance in image: $(git -C "${CTX}/inference-sim" rev-parse --short=8 HEAD)"
@@ -81,7 +86,7 @@ echo ">> model catalog: ${CATALOG_SRC} ($(find "${CTX}/blis-catalog/models" -max
 # The refs this image auto-detects at runtime (blis from its bundled .git, catalog from the
 # VERSION file above). Printed so an operator can override them with env vars if they prefer a
 # tag over a commit, and to show what the deployed nav rail will report.
-echo ">> this image reports BLIS_VERSION=$(git -C "${CTX}/inference-sim" rev-parse --short=8 HEAD) and BLIS_CATALOG_VERSION=${CATALOG_REF} (override via env to taste)"
+echo ">> this image reports BLIS_VERSION=$(git -C "${CTX}/inference-sim" rev-parse --short=8 HEAD), BLIS_CATALOG_VERSION=${CATALOG_REF} and BLIS_REGISTRY_VERSION=${REGISTRY_REF} (override via env to taste)"
 
 echo ">> building ${IMAGE} for ${PLATFORM}"
 # docker's daemon/buildx is not always up on this host; podman is daemon-less and

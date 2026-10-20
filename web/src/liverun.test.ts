@@ -4,7 +4,7 @@ import { loadGroups, loadWorkloads, workloadKey, workloadTitle } from './load'
 import type { RunRecord } from './load'
 import { initialValues, interpret } from './newrun'
 import type { FormValues } from './newrun'
-import { rowId, runDeclFromOutput, workloadKeyForGroup } from './liverun'
+import { boardTabForReveal, rowId, runDeclFromOutput, workloadKeyForGroup } from './liverun'
 
 const records = fixture as unknown as RunRecord[]
 const groups = loadGroups(records)
@@ -59,5 +59,18 @@ describe('workloadKeyForGroup', () => {
 
   it('returns null for a group not present in the loaded workloads', () => {
     expect(workloadKeyForGroup(workloads, 'deadbeefdead')).toBeNull()
+  })
+})
+
+describe('boardTabForReveal', () => {
+  it('opens the By-sweep tab, scoped to the sweep, when the run carries a sweep_id', () => {
+    // A sweep cell's "view on board" must land in that sweep's own section, not the default
+    // By-workload tab (the reported bug: revealing a sweep run showed the workload tab).
+    expect(boardTabForReveal('swp-abc-000001')).toEqual({ tab: 'sweep', sweepId: 'swp-abc-000001' })
+  })
+
+  it('stays on By workload for a run with no sweep_id', () => {
+    expect(boardTabForReveal(undefined)).toEqual({ tab: 'workload' })
+    expect(boardTabForReveal('')).toEqual({ tab: 'workload' })
   })
 })

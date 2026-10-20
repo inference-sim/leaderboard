@@ -169,6 +169,8 @@ spec:
               value: ""
             - name: BLIS_CATALOG_VERSION
               value: ""
+            - name: BLIS_REGISTRY_VERSION
+              value: ""
           # Set the entrypoint explicitly to the bare binary so `args` below ARE the
           # whole command. Kubernetes appends `args` to the image ENTRYPOINT, so if the
           # image bakes `serve -addr ... -blis ...` into its entrypoint (as older images
