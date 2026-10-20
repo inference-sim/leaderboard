@@ -169,8 +169,14 @@ spec:
               value: ""
             - name: BLIS_CATALOG_VERSION
               value: ""
+            # STOPGAP (drop once a >= 0.10.1 image is deployed): on images up to 0.10.0 serve
+            # cannot auto-detect the registry version. git refuses the bundled blis-registry
+            # checkout under the arbitrary pod UID ("dubious ownership") because the image lacks
+            # a safe.directory exception for it (fixed in the Dockerfile for 0.10.1). Without
+            # this override the nav rail shows the registry as blank. The value is the registry
+            # ref pinned in root .env (v0.1.1 = f7519b12); keep the two in sync until removed.
             - name: BLIS_REGISTRY_VERSION
-              value: ""
+              value: "f7519b12"
           # Set the entrypoint explicitly to the bare binary so `args` below ARE the
           # whole command. Kubernetes appends `args` to the image ENTRYPOINT, so if the
           # image bakes `serve -addr ... -blis ...` into its entrypoint (as older images
