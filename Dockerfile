@@ -70,8 +70,17 @@ COPY blis-registry ./inference-sim/blis-registry
 
 # Empty, writable results dir. serve treats a missing dir as "no results yet";
 # /api/run writes new records here, and a volume can be mounted over it.
+#
+# safe.directory: serve auto-detects the blis and blis-registry versions (shown in the
+# nav rail, served at /api/version) by running `git rev-parse` in their bundled checkouts.
+# The pod runs as an arbitrary, non-owning UID (OpenShift assigns one per namespace), so
+# without an exception git refuses each repo with "detected dubious ownership" and the
+# version resolves to "". safe.directory is NOT recursive, so the nested blis-registry
+# repo needs its own entry alongside /app/inference-sim; omit it and the registry version
+# silently blanks in the rail even though the coefficients load fine.
 RUN mkdir -p /app/results \
  && git config --system --add safe.directory /app/inference-sim \
+ && git config --system --add safe.directory /app/inference-sim/blis-registry \
  && chown -R app:app /app
 USER app
 EXPOSE 8080
