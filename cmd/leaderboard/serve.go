@@ -162,7 +162,7 @@ func cmdServe(args []string) error {
 		// catalog's VERSION file / git HEAD), else "" (rendered as "unknown"). No flag: these
 		// have no behavioural effect, so a flag would add surface for nothing. See the design doc.
 		versions: resolveVersions(os.Getenv, debug.ReadBuildInfo, blisrun.GitProvenance,
-			os.ReadFile, c.blisDir, os.Getenv("BLIS_CATALOG")),
+			os.ReadFile, c.blisDir, os.Getenv("BLIS_CATALOG"), os.Getenv("BLIS_REGISTRY")),
 	}
 	s.execute = s.runOnce
 	s.validateSpec = s.validateSpecWithBlis
@@ -308,12 +308,12 @@ func (s *server) handleResultDelete(w http.ResponseWriter, r *http.Request) {
 // upstream commit and dirty flag on the record describe the tree as it was when the
 // run happened, not when the server started.
 func (s *server) runOnce(req runRequest) (schema.Record, error) {
-	cat, err := hardware.Load(filepath.Join(s.blisDir, "hardware_config.json"))
+	cat, err := hardware.Load(hardware.Dir(s.catalogRoot))
 	if err != nil {
 		return schema.Record{}, err
 	}
 	if !cat.Known(req.Deployment.Hardware) {
-		return schema.Record{}, fmt.Errorf("hardware %q is not in hardware_config.json; valid names are %s",
+		return schema.Record{}, fmt.Errorf("hardware %q is not in the blis-catalog hardware/ dir; valid names are %s",
 			req.Deployment.Hardware, strings.Join(cat.Names(), ", "))
 	}
 
@@ -347,7 +347,7 @@ func (s *server) runOnce(req runRequest) (schema.Record, error) {
 // smoke run stays offline.
 const (
 	probeModel    = "qwen/qwen3-14b"
-	probeHardware = "H100"
+	probeHardware = "h100"
 )
 
 // validateSpecWithBlis is the production spec validator: it runs blis on the inline

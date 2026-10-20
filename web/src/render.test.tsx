@@ -214,8 +214,8 @@ describe('ReadoutTable, single-model workload (mainW: one model, three accelerat
       const first = cellsOfRow(row)[0]!
       expect(first).toMatch(/class="dep-hw"/)
     }
-    expect(tbody).toContain('A100-SXM')
-    expect(tbody).toContain('L40S')
+    expect(tbody).toContain('a100-sxm')
+    expect(tbody).toContain('l40s')
   })
 
   it('lists the topology fields (tp, dp, num_instances) on the key line of every row', () => {
@@ -406,15 +406,15 @@ describe('ReadoutTable, hardware filter (a row filter, orthogonal to the model f
   // mainW's comparability group spans three accelerators: H100 (5 complete + the
   // disqualified h100-tp2-len640), A100-SXM (3 complete), and L40S (2 complete).
   it('narrowed to H100 shows only the H100 rows, dropping the A100 and L40S ones', () => {
-    const html = renderToStaticMarkup(<ReadoutTable workload={mainW} models={[]} hardware={['H100']} />)
+    const html = renderToStaticMarkup(<ReadoutTable workload={mainW} models={[]} hardware={['h100']} />)
     const tbody = html.match(/<tbody>([\s\S]*)<\/tbody>/)![1]!
     expect(tbodyRows(html)).toHaveLength(5)
-    expect(tbody).not.toContain('A100-SXM')
-    expect(tbody).not.toContain('L40S')
+    expect(tbody).not.toContain('a100-sxm')
+    expect(tbody).not.toContain('l40s')
   })
 
   it('still shows the H100 disqualified run as a flagged row', () => {
-    const html = renderToStaticMarkup(<ReadoutTable workload={mainW} models={[]} hardware={['H100']} />)
+    const html = renderToStaticMarkup(<ReadoutTable workload={mainW} models={[]} hardware={['h100']} />)
     const dq = dqRows(html)
     expect(dq).toHaveLength(1)
     expect(dq[0]).toContain('max_model_len 640')
@@ -422,11 +422,11 @@ describe('ReadoutTable, hardware filter (a row filter, orthogonal to the model f
 
   it('narrowed to A100-SXM shows its 3 rows and no windowed group (its only DQ run is H100)', () => {
     const html = renderToStaticMarkup(
-      <ReadoutTable workload={mainW} models={[]} hardware={['A100-SXM']} />,
+      <ReadoutTable workload={mainW} models={[]} hardware={['a100-sxm']} />,
     )
     const tbody = html.match(/<tbody>([\s\S]*)<\/tbody>/)![1]!
     expect(tbodyRows(html)).toHaveLength(3)
-    expect(tbody).not.toContain('H100')
+    expect(tbody).not.toContain('h100')
     expect(dqRows(html)).toHaveLength(0)
     expect(dqDivider(html)).toBeUndefined()
   })
@@ -438,10 +438,10 @@ describe('ReadoutTable, hardware filter (a row filter, orthogonal to the model f
 
   it('combines with the model filter: two models, H100 only', () => {
     const two = twoModelWorkload()
-    const html = renderToStaticMarkup(<ReadoutTable workload={two} models={[]} hardware={['H100']} />)
+    const html = renderToStaticMarkup(<ReadoutTable workload={two} models={[]} hardware={['h100']} />)
     const tbody = html.match(/<tbody>([\s\S]*)<\/tbody>/)![1]!
-    expect(tbody).not.toContain('A100-SXM')
-    expect(tbody).not.toContain('L40S')
+    expect(tbody).not.toContain('a100-sxm')
+    expect(tbody).not.toContain('l40s')
     // 5 complete H100 rows per model, still the model-in-cell grid.
     expect(tbodyRows(html)).toHaveLength(10)
     expect(html).not.toMatch(/<th[^>]*>Model<\/th>/)
@@ -467,7 +467,7 @@ describe('SLO-target filtering (via ReadoutTable)', () => {
     const band = sloBand(html)
     expect(band).toBeDefined()
     expect(band).toContain('8 runs')
-    expect(band).toContain('H100 tp1')
+    expect(band).toContain('h100 tp1')
     expect(band).toContain('E2E p99')
     expect(band).toContain('exceeds')
   })
@@ -482,7 +482,7 @@ describe('SLO-target filtering (via ReadoutTable)', () => {
     // A100-SXM has 3 complete runs and no disqualified run, so an impossible target leaves the
     // table with nothing to show and the note stands in for it.
     const html = renderToStaticMarkup(
-      <ReadoutTable workload={mainW} models={[]} hardware={['A100-SXM']} sloTargets={{ e2e_p99_ms: 1 }} />,
+      <ReadoutTable workload={mainW} models={[]} hardware={['a100-sxm']} sloTargets={{ e2e_p99_ms: 1 }} />,
     )
     expect(html).not.toContain('<tbody>')
     expect(html).toContain('No runs meet the SLO targets')
@@ -863,10 +863,10 @@ describe('NewRun', () => {
     // offline shape shows only the seeded current value; the rest of the catalogue (L40S,
     // A100-SXM, ...) arrives once the server answers.
     expect(html).toContain('Accelerator')
-    expect(html).toContain('H100')
-    expect(html).not.toContain('L40S')
+    expect(html).toContain('h100')
+    expect(html).not.toContain('l40s')
     // The A100-80 alias is never offered as its own button — it is folded into A100-SXM.
-    expect(html).not.toContain('A100-80')
+    expect(html).not.toContain('a100-80')
   })
 
   it('opens with a descriptive run id already in the field, not a blank one to fill', () => {

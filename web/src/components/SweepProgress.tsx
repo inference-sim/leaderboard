@@ -54,7 +54,7 @@ export function SweepProgress({
 }: {
   run: SweepRun
   onStop: () => void
-  onView: (groupId: string, runId: string) => void
+  onView: (groupId: string, runId: string, sweepId?: string) => void
   onReset: () => void
 }) {
   const counts = countsOf(run)
@@ -99,7 +99,7 @@ export function SweepProgress({
                       <button
                         type="button"
                         className="viewboard"
-                        onClick={() => onView(cell.record!.group_id, cell.record!.run_id)}
+                        onClick={() => onView(cell.record!.group_id, cell.record!.run_id, cell.record!.sweep_id)}
                       >
                         view on board
                       </button>

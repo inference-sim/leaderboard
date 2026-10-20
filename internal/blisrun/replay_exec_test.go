@@ -32,7 +32,7 @@ func TestRunReplaysATrace(t *testing.T) {
 		t.Fatalf("ingest: %v", err)
 	}
 
-	r := &Runner{Binary: stub, Cwd: dir, TraceStore: store, commit: "abcdef1", binarySHA256: "0123456789abcdef"}
+	r := &Runner{Binary: stub, Cwd: dir, CatalogRoot: fakeCatalogRoot(t), RegistryRoot: t.TempDir(), TraceStore: store, commit: "abcdef1", binarySHA256: "0123456789abcdef"}
 
 	g := schema.Group{
 		Seed: 42, RequestTimeoutS: 300,
@@ -72,7 +72,7 @@ func TestRunReplaysATrace(t *testing.T) {
 // would reference bytes that are not there.
 func TestRunRefusesMissingTraceBlob(t *testing.T) {
 	dir := t.TempDir()
-	r := &Runner{Binary: "true", Cwd: dir, TraceStore: traceingest.Store(filepath.Join(dir, "traces")), commit: "abcdef1", binarySHA256: "0123456789abcdef"}
+	r := &Runner{Binary: "true", Cwd: dir, CatalogRoot: fakeCatalogRoot(t), RegistryRoot: t.TempDir(), TraceStore: traceingest.Store(filepath.Join(dir, "traces")), commit: "abcdef1", binarySHA256: "0123456789abcdef"}
 	g := schema.Group{
 		Seed: 42, RequestTimeoutS: 300,
 		Workload: schema.Workload{

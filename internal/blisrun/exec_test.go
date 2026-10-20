@@ -10,6 +10,22 @@ import (
 	"github.com/inference-sim/leaderboard/internal/schema"
 )
 
+// fakeCatalogRoot is a throwaway blis-catalog whose only model is the one the test
+// deployment names (qwen/qwen3-14b -> models/qwen3-14b), enough for scenario.Generate's
+// existence check. The fake blis stub never reads it, so an empty graph.yaml suffices.
+func fakeCatalogRoot(t *testing.T) string {
+	t.Helper()
+	root := t.TempDir()
+	dir := filepath.Join(root, "models", "qwen3-14b")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "graph.yaml"), []byte("name: qwen3-14b\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return root
+}
+
 // A trimmed but real blis metrics file: the 27 required fields, one omitempty
 // field, and requests[].
 const blisOutput = `{
@@ -231,7 +247,7 @@ func TestRunFinalizesWorkloadSpecSHA(t *testing.T) {
 	}
 	// commit/binarySHA256 satisfy the record's provenance patterns; the point of the test
 	// is the workload block, not provenance, so any well-formed values do.
-	r := &Runner{Binary: stub, Cwd: dir, commit: "abcdef1", binarySHA256: "0123456789abcdef"}
+	r := &Runner{Binary: stub, Cwd: dir, CatalogRoot: fakeCatalogRoot(t), RegistryRoot: t.TempDir(), commit: "abcdef1", binarySHA256: "0123456789abcdef"}
 
 	spec := map[string]any{
 		"version":        "2",
@@ -256,7 +272,7 @@ func TestRunFinalizesWorkloadSpecSHA(t *testing.T) {
 	}
 	d := schema.Deployment{
 		Model:    "qwen/qwen3-14b",
-		Hardware: "L40S", TP: 1, DP: 1, NumInstances: 1,
+		Hardware: "l40s", TP: 1, DP: 1, NumInstances: 1,
 		MaxModelLen: 40960, BlockSizeInTokens: 16, MaxNumSeqs: 256,
 		MaxNumBatchedTokens: 8192, LongPrefillTokenThreshold: 0,
 		Scheduler: "fcfs", PreemptionPolicy: "fcfs",
@@ -283,6 +299,63 @@ func TestRunFinalizesWorkloadSpecSHA(t *testing.T) {
 	// The regression: without the finalized sha the schema rejects the record.
 	if err := schema.ValidateRecord(rec); err != nil {
 		t.Errorf("runner produced a record the schema rejects: %v", err)
+	}
+}
+
+// specRunRunner returns a Runner backed by a stub that writes the fixture metrics, plus the
+// group/deployment a single workload-spec run uses, so a test can vary only the RunSpec.
+func specRunRunner(t *testing.T) (*Runner, schema.Group, schema.Deployment) {
+	t.Helper()
+	dir := t.TempDir()
+	stub := filepath.Join(dir, "blis-stub.sh")
+	script := "#!/bin/sh\nfor a in \"$@\"; do last=\"$a\"; done\ncat > \"$last\" <<'JSON'\n" + blisOutput + "\nJSON\n"
+	if err := os.WriteFile(stub, []byte(script), 0o755); err != nil {
+		t.Fatalf("write stub: %v", err)
+	}
+	r := &Runner{Binary: stub, Cwd: dir, CatalogRoot: fakeCatalogRoot(t), RegistryRoot: t.TempDir(), commit: "abcdef1", binarySHA256: "0123456789abcdef"}
+	g := schema.Group{
+		Seed: 42, RequestTimeoutS: 300,
+		Workload: schema.Workload{
+			Type: "workload-spec", ArrivalProcess: "constant",
+			Load: schema.Load{Kind: "rate", Value: 0},
+			Spec: map[string]any{"version": "2", "aggregate_rate": 6, "num_requests": 100,
+				"clients": []any{map[string]any{"id": "c0", "rate_fraction": 1}}},
+		},
+	}
+	return r, g, deployment()
+}
+
+// Every run gets a sweep_id: when the caller supplies none (a web single run, a CLI run),
+// Run mints a unique one so no record is ever written without it.
+func TestRunMintsSweepIDWhenAbsent(t *testing.T) {
+	r, g, d := specRunRunner(t)
+
+	rec1, err := r.Run(g, RunSpec{RunID: "solo-1", Deployment: d}, filepath.Join(t.TempDir(), "m.json"))
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	rec2, err := r.Run(g, RunSpec{RunID: "solo-2", Deployment: d}, filepath.Join(t.TempDir(), "m.json"))
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if rec1.SweepID == "" || rec2.SweepID == "" {
+		t.Fatalf("a run with no SweepID must be minted one; got %q and %q", rec1.SweepID, rec2.SweepID)
+	}
+	if rec1.SweepID == rec2.SweepID {
+		t.Errorf("two independent runs must get distinct minted sweep ids; both are %q", rec1.SweepID)
+	}
+}
+
+// A supplied SweepID (a web sweep's shared id) is preserved verbatim, not overwritten.
+func TestRunPreservesSuppliedSweepID(t *testing.T) {
+	r, g, d := specRunRunner(t)
+
+	rec, err := r.Run(g, RunSpec{RunID: "cell", Deployment: d, SweepID: "swp-fixed-abc123"}, filepath.Join(t.TempDir(), "m.json"))
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if rec.SweepID != "swp-fixed-abc123" {
+		t.Errorf("supplied SweepID = %q, want it preserved as swp-fixed-abc123", rec.SweepID)
 	}
 }
 
@@ -323,12 +396,12 @@ func TestRunScrapesKVThrashingFromStdout(t *testing.T) {
 	if err := os.WriteFile(stub, []byte(script), 0o755); err != nil {
 		t.Fatalf("write stub: %v", err)
 	}
-	r := &Runner{Binary: stub, Cwd: dir, commit: "abcdef1", binarySHA256: "0123456789abcdef"}
+	r := &Runner{Binary: stub, Cwd: dir, CatalogRoot: fakeCatalogRoot(t), RegistryRoot: t.TempDir(), commit: "abcdef1", binarySHA256: "0123456789abcdef"}
 
 	g := flatSpecGroup(500, 300, 512, 128, 128, 32)
 	d := schema.Deployment{
 		Model:    "qwen/qwen3-14b",
-		Hardware: "L40S", TP: 1, DP: 1, NumInstances: 1,
+		Hardware: "l40s", TP: 1, DP: 1, NumInstances: 1,
 		MaxModelLen: 40960, BlockSizeInTokens: 16, MaxNumSeqs: 256,
 		MaxNumBatchedTokens: 8192, LongPrefillTokenThreshold: 0,
 		Scheduler: "fcfs", PreemptionPolicy: "fcfs",
@@ -363,10 +436,10 @@ func TestRunOmitsKVThrashingWhenStdoutHasNoSection(t *testing.T) {
 	if err := os.WriteFile(stub, []byte(script), 0o755); err != nil {
 		t.Fatalf("write stub: %v", err)
 	}
-	r := &Runner{Binary: stub, Cwd: dir, commit: "abcdef1", binarySHA256: "0123456789abcdef"}
+	r := &Runner{Binary: stub, Cwd: dir, CatalogRoot: fakeCatalogRoot(t), RegistryRoot: t.TempDir(), commit: "abcdef1", binarySHA256: "0123456789abcdef"}
 	g := flatSpecGroup(500, 300, 512, 128, 128, 32)
 	d := schema.Deployment{
-		Model: "qwen/qwen3-14b", Hardware: "L40S", TP: 1, DP: 1, NumInstances: 1,
+		Model: "qwen/qwen3-14b", Hardware: "l40s", TP: 1, DP: 1, NumInstances: 1,
 		MaxModelLen: 40960, BlockSizeInTokens: 16, MaxNumSeqs: 256,
 		MaxNumBatchedTokens: 8192, LongPrefillTokenThreshold: 0,
 		Scheduler: "fcfs", PreemptionPolicy: "fcfs",
@@ -396,7 +469,7 @@ func TestIntegrationRunProducesADisqualifiedTimeoutRecord(t *testing.T) {
 	g := flatSpecGroup(200, 3, 512, 128, 128, 32)
 	d := schema.Deployment{
 		Model:    "qwen/qwen3-14b",
-		Hardware: "L40S", TP: 1, DP: 1, NumInstances: 1,
+		Hardware: "l40s", TP: 1, DP: 1, NumInstances: 1,
 		MaxModelLen: 40960, BlockSizeInTokens: 16, MaxNumSeqs: 256,
 		MaxNumBatchedTokens: 8192, LongPrefillTokenThreshold: 0,
 		Scheduler: "fcfs", PreemptionPolicy: "fcfs",

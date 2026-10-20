@@ -43,17 +43,17 @@ const catalogModels: ModelInfo[] = [
 
 /**
  * A stand-in for the catalog the form fetches from GET /api/hardware, read server-side from
- * the upstream hardware_config.json. It carries the names these tests name plus the
+ * the blis-catalog hardware/ dir. It carries the names these tests name plus the
  * A100-80/A100-SXM pair, which upstream defines with identical specs: the server hands each
  * name the other as its alias, exactly as internal/hardware.Entries does, so the membership
  * and duplicate-row checks have the same shape the running app sees.
  */
 const A100_SPEC = { MemoryGiB: 80, TFlopsPeak: 312 }
 const catalogHardware: HardwareInfo[] = [
-  { name: 'A100-80', aliases: ['A100-SXM'], spec: A100_SPEC },
-  { name: 'A100-SXM', aliases: ['A100-80'], spec: A100_SPEC },
-  { name: 'H100', aliases: [], spec: { MemoryGiB: 80, TFlopsPeak: 989.5 } },
-  { name: 'L40S', aliases: [], spec: { MemoryGiB: 48, TFlopsPeak: 362 } },
+  { name: 'a100-80', aliases: ['a100-sxm'], spec: A100_SPEC },
+  { name: 'a100-sxm', aliases: ['a100-80'], spec: A100_SPEC },
+  { name: 'h100', aliases: [], spec: { MemoryGiB: 80, TFlopsPeak: 989.5 } },
+  { name: 'l40s', aliases: [], spec: { MemoryGiB: 48, TFlopsPeak: 362 } },
 ]
 const main = groups.find((g) => g.groupId === '86575212efc8')!
 
@@ -170,30 +170,96 @@ const committed = (argvRecords as unknown as RunRecord[]).map((record, i) => ({
   record,
 }))
 
+// valueAfter reads the token following a flag in an argv, as Go's regen helper does, so the
+// pin can feed the same pass-through paths Go used back into argvFor.
+function valueAfter(argv: string[], flag: string): string {
+  const i = argv.indexOf(flag)
+  return i >= 0 ? argv[i + 1]! : ''
+}
+
 describe('argvFor', () => {
   it('reproduces the stored argv of every committed record', () => {
     expect(committed.length).toBeGreaterThan(0)
     for (const { path, record } of committed) {
       const stored = record.provenance.argv
       const metricsPath = stored[stored.length - 1]!
-      // A spec record's argv carries the materialized --workload-spec path; feed it the
-      // same one Go used, so this pins the spec branch as tightly as the distribution one.
-      const specIdx = stored.indexOf('--workload-spec')
-      const specPath = specIdx >= 0 ? stored[specIdx + 1]! : ''
-      // Likewise for the generated --kv-offload-config path when offloading is on.
-      const kvIdx = stored.indexOf('--kv-offload-config')
-      const kvOffloadPath = kvIdx >= 0 ? stored[kvIdx + 1]! : ''
+      // Feed back every pass-through path Go stored (the scenario locators, the materialized
+      // --workload-spec, and the generated --kv-offload-config when offloading is on), so this
+      // stays a pure round-trip of the Go builder's output, not a hand-matched expectation.
+      const scenariosDir = valueAfter(stored, '--scenarios')
+      const scenarioFile = valueAfter(stored, '--scenario')
+      const registry = valueAfter(stored, '--registry')
+      const catalog = valueAfter(stored, '--catalog')
+      const specPath = valueAfter(stored, '--workload-spec')
+      const kvOffloadPath = valueAfter(stored, '--kv-offload-config')
       expect(
-        argvFor(stored[0]!, record.group, record.deployment, metricsPath, specPath, kvOffloadPath),
+        argvFor(
+          stored[0]!,
+          scenariosDir,
+          scenarioFile,
+          registry,
+          catalog,
+          record.group,
+          record.deployment,
+          metricsPath,
+          specPath,
+          kvOffloadPath,
+        ),
         path,
       ).toEqual(stored)
     }
   })
 
+  // The scenario-locating placeholders every test below passes; argvFor is a pure function of
+  // these plus the group/deployment, so fixed values keep each test stating only what it varies.
+  const scn = ['/tmp/scn', 's.yaml', '/reg', '/cat'] as const
+
+  it('locates the deployment via the scenario, not --model/--hardware/--tp', () => {
+    // Since blis v0.10.0 the deployment is a generated scenario file; the model, hardware,
+    // parallelism and engine knobs live there, not on the CLI. The preview argv must mirror
+    // internal/blisrun.Argv: carry the four scenario locators and none of the removed flags.
+    const argv = argvFor('./blis', ...scn, main.group, main.records[0]!.deployment, '/tmp/x.json', '/tmp/spec.yaml')
+    for (const flag of ['--scenarios', '--scenario', '--registry', '--catalog']) {
+      expect(argv, flag).toContain(flag)
+    }
+    for (const flag of [
+      '--model',
+      '--hardware',
+      '--tp',
+      '--dp',
+      '--max-model-len',
+      '--block-size-in-tokens',
+      '--max-num-seqs',
+      '--max-num-batched-tokens',
+      '--kv-cache-dtype',
+      '--gpu-memory-utilization',
+      '--latency-model',
+      '--total-kv-blocks',
+    ]) {
+      expect(argv, `${flag} moved into the scenario or was removed upstream`).not.toContain(flag)
+    }
+  })
+
+  it('leads with run + the four scenario locators (Go flag order is load-bearing)', () => {
+    const argv = argvFor('./blis', '/tmp/scn', 's.yaml', '/reg', '/cat', main.group, main.records[0]!.deployment, '/tmp/x.json')
+    expect(argv.slice(0, 10)).toEqual([
+      './blis',
+      'run',
+      '--scenarios',
+      '/tmp/scn',
+      '--scenario',
+      's.yaml',
+      '--registry',
+      '/reg',
+      '--catalog',
+      '/cat',
+    ])
+  })
+
   it('emits --workload-spec and none of the synthetic load flags (the spec carries the load)', () => {
     // Every run is a workload-spec now (closed-loop concurrency lives in the spec's client,
     // not a --concurrency flag), so argv names the spec file and omits --rate/--concurrency.
-    const argv = argvFor('./blis', main.group, main.records[0]!.deployment, '/tmp/x.json', '/tmp/spec.yaml')
+    const argv = argvFor('./blis', ...scn, main.group, main.records[0]!.deployment, '/tmp/x.json', '/tmp/spec.yaml')
     expect(argv).toContain('--workload-spec')
     expect(argv[argv.indexOf('--workload-spec') + 1]).toBe('/tmp/spec.yaml')
     expect(argv).not.toContain('--rate')
@@ -201,14 +267,9 @@ describe('argvFor', () => {
     expect(argv).not.toContain('--num-requests')
   })
 
-  it('omits --max-model-len when it is unset, since 0 means blis derives it', () => {
-    const deployment = { ...main.records[0]!.deployment, max_model_len: 0 }
-    expect(argvFor('./blis', main.group, deployment, '/tmp/x.json')).not.toContain('--max-model-len')
-  })
-
   it('emits --workload-spec and omits the synthetic flags for a spec group (Go Argv branch)', () => {
     const group = interpret(valid({ workloadSel: 'burst' }), groups, [specProfile()]).output!.group
-    const argv = argvFor('./blis', group, main.records[0]!.deployment, '/tmp/x.json', '/tmp/spec.yaml')
+    const argv = argvFor('./blis', ...scn, group, main.records[0]!.deployment, '/tmp/x.json', '/tmp/spec.yaml')
     expect(argv).toContain('--workload-spec')
     expect(argv[argv.indexOf('--workload-spec') + 1]).toBe('/tmp/spec.yaml')
     // The distribution surface is superseded by the spec file (upstream: --workload-spec
@@ -226,10 +287,10 @@ describe('argvFor', () => {
 
 describe('suggestRunId: a descriptive default, so the page is immediately runnable', () => {
   it('names the candidate <hardware>-tp<tp>, lower-cased to a usable filename', () => {
-    expect(suggestRunId(valid({ hardware: 'H100', tp: '8' }), [], [])).toBe('h100-tp8')
+    expect(suggestRunId(valid({ hardware: 'h100', tp: '8' }), [], [])).toBe('h100-tp8')
     // Hardware names carry upper case and dashes; both survive as a valid run_id/filename.
-    expect(suggestRunId(valid({ hardware: 'A100-SXM', tp: '1' }), [], [])).toBe('a100-sxm-tp1')
-    expect(RUN_ID_PATTERN.test(suggestRunId(valid({ hardware: 'A100-SXM', tp: '1' }), [], []))).toBe(true)
+    expect(suggestRunId(valid({ hardware: 'a100-sxm', tp: '1' }), [], [])).toBe('a100-sxm-tp1')
+    expect(RUN_ID_PATTERN.test(suggestRunId(valid({ hardware: 'a100-sxm', tp: '1' }), [], []))).toBe(true)
   })
 
   it('deduplicates against the table it would join, so the default never overwrites a row', () => {
@@ -394,21 +455,24 @@ describe('interpret: a selected trace profile sweeps on its concurrent-sessions 
 })
 
 describe('interpret: total_kv_blocks (KV cache capacity, auto by default)', () => {
-  it('leaves the field, the flag and the yaml line off when blank — blis auto-calculates', () => {
+  it('leaves the field and the yaml line off when blank, so blis auto-calculates', () => {
     const { output, issues } = interpret(valid(), groups, [])
     expect(issues).toEqual([])
     expect(output!.deployment.total_kv_blocks).toBeUndefined()
+    // --total-kv-blocks never appears in the v0.10.0 argv (KV capacity is derived from the
+    // scenario); the preview carries none of the removed flags.
     expect(output!.argv).not.toContain('--total-kv-blocks')
     expect(output!.yamlFile).not.toContain('total_kv_blocks')
   })
 
-  it('pins the block count when set: on the deployment, the argv and the yaml', () => {
+  it('blocks a pinned count under v0.10.0: the knob is not supported, point to auto', () => {
+    // scenario.Generate refuses total_kv_blocks>0 (KV capacity is derived from the scenario),
+    // so the form blocks the run rather than spending it to hit a blis-side error.
     const { output, issues } = interpret(valid({ totalKvBlocks: '20000' }), groups, [])
-    expect(issues).toEqual([])
-    expect(output!.deployment.total_kv_blocks).toBe(20000)
-    expect(output!.argv).toContain('--total-kv-blocks')
-    expect(output!.argv[output!.argv.indexOf('--total-kv-blocks') + 1]).toBe('20000')
-    expect(output!.yamlFile).toContain('total_kv_blocks: 20000')
+    expect(output).toBeNull()
+    expect(issues.some((i) => i.field === 'totalKvBlocks' && /not supported under blis v0\.10\.0/.test(i.message))).toBe(
+      true,
+    )
   })
 
   it('rejects a non-positive or non-integer value, pointing to blank for auto', () => {
@@ -688,19 +752,19 @@ describe('interpret: refusals', () => {
 
   it('rejects an alias of hardware already in the table, since it is a duplicate row', () => {
     // The fixture has a100-tp1 on A100-SXM; A100-80 is the same specs upstream.
-    const clash = messages(valid({ runId: 'a100-80-tp1', hardware: 'A100-80', tp: '1' })).join(' ')
+    const clash = messages(valid({ runId: 'a100-80-tp1', hardware: 'a100-80', tp: '1' })).join(' ')
     expect(clash).toMatch(/identical specs/)
   })
 
   it('rejects hardware that is not in the upstream catalogue', () => {
-    expect(messages(valid({ hardware: 'B200' })).join(' ')).toMatch(/hardware_config\.json/)
+    expect(messages(valid({ hardware: 'NO-SUCH-GPU' })).join(' ')).toMatch(/blis-catalog hardware\//)
   })
 
   it('accepts an alias name the catalogue knows, since blis does too', () => {
     // A100-80 is a valid upstream name (an alias of A100-SXM), so it passes the membership
     // check; only the duplicate-row guard, when a rival row already holds A100-SXM, refuses it.
     const hwIssue = interpret(
-      valid({ runId: 'a100-80-tp8', hardware: 'A100-80' }),
+      valid({ runId: 'a100-80-tp8', hardware: 'a100-80' }),
       groups,
       [],
       catalogModels,
@@ -714,8 +778,8 @@ describe('interpret: refusals', () => {
     // the accelerator, so an unknown name is not rejected — the same deferral the model check
     // makes. interpret is called without the hardware argument, as the form does before the
     // fetch resolves.
-    const issues = interpret(valid({ hardware: 'B200' }), withCustomTable, [], catalogModels).issues
-    expect(issues.some((i) => /hardware_config\.json/.test(i.message))).toBe(false)
+    const issues = interpret(valid({ hardware: 'NO-SUCH-GPU' }), withCustomTable, [], catalogModels).issues
+    expect(issues.some((i) => /blis-catalog hardware\//.test(i.message))).toBe(false)
   })
 
   it('rejects a model that is not in the catalogue', () => {
@@ -756,7 +820,9 @@ describe('interpret: the candidate serving knobs', () => {
       routingPolicy: 'least-loaded',
       admissionPolicy: 'token-bucket',
       kvCacheDtype: 'fp8',
-      latencyModel: 'roofline',
+      // trained-physics is the only latency model v0.10.0 honors; roofline is refused (its own
+      // test below), so this knob carries the supported value through.
+      latencyModel: 'trained-physics',
       runId: 'h100-tuned',
     })
     const d = interpret(values, groups, []).output!.deployment
@@ -772,8 +838,14 @@ describe('interpret: the candidate serving knobs', () => {
       routing_policy: 'least-loaded',
       admission_policy: 'token-bucket',
       kv_cache_dtype: 'fp8',
-      latency_model: 'roofline',
+      latency_model: 'trained-physics',
     })
+  })
+
+  it('refuses the roofline latency model under v0.10.0, pointing to trained-physics', () => {
+    const { output, issues } = interpret(valid({ latencyModel: 'roofline' }), groups, [])
+    expect(output).toBeNull()
+    expect(issues.some((i) => i.field === 'latencyModel' && /trained-physics/.test(i.message))).toBe(true)
   })
 
   it('leaves the group_id untouched — a serving knob is a new row, not a new table', () => {
@@ -854,23 +926,21 @@ describe('interpret: weighted routing scorers', () => {
 
 describe('interpret: MoE knobs', () => {
   const moe = 'mistralai/mixtral-8x7b-v0.1' // a catalog MoE model
-  it('emits the MoE flags for a MoE model on trained-physics', () => {
+  it('carries expert parallelism into the deployment for a MoE model on trained-physics', () => {
+    // Expert parallelism survives v0.10.0 (it becomes the scenario pool's enable_expert_parallel);
+    // the MoE comm backend does not, so this run sets only expert parallelism.
     const out = interpret(
-      valid({ model: moe, enableExpertParallel: true, moeCommBackend: 'pplx', runId: 'moe' }),
+      valid({ model: moe, enableExpertParallel: true, runId: 'moe' }),
       groups,
       [],
       catalogModels,
     ).output!
     expect(out.deployment.enable_expert_parallel).toBe(true)
-    expect(out.deployment.moe_comm_backend).toBe('pplx')
-    // --enable-expert-parallel is valueless; --moe-comm-backend carries its value.
-    expect(out.argv).toContain('--enable-expert-parallel')
-    expect(out.argv[out.argv.indexOf('--moe-comm-backend') + 1]).toBe('pplx')
-    // Both sit before --num-instances.
-    expect(out.argv.indexOf('--enable-expert-parallel')).toBeLessThan(out.argv.indexOf('--num-instances'))
+    // It lives in the scenario's pool, not on the CLI, so it does not reach the preview argv.
+    expect(out.argv).not.toContain('--enable-expert-parallel')
   })
 
-  it('omits the MoE flags when off, leaving a dense candidate unchanged', () => {
+  it('omits the MoE flags from the deployment when off, leaving a dense candidate unchanged', () => {
     const out = interpret(valid({ model: moe, runId: 'plain' }), groups, [], catalogModels).output!
     expect(out.deployment.enable_expert_parallel).toBeUndefined()
     expect(out.deployment.moe_comm_backend).toBeUndefined()
@@ -889,32 +959,35 @@ describe('interpret: MoE knobs', () => {
     expect(issues.some((i) => i.field === 'enableExpertParallel' && /dense/.test(i.message))).toBe(true)
   })
 
-  it('rejects a MoE backend without dp>1 or expert parallelism', () => {
-    const { issues } = interpret(valid({ model: moe, moeCommBackend: 'pplx' }), groups, [], catalogModels)
-    expect(issues.some((i) => i.field === 'moeCommBackend' && /dp > 1 or expert/.test(i.message))).toBe(true)
+  it('refuses a MoE comm backend under v0.10.0, which has no equivalent yet', () => {
+    // --moe-comm-backend was removed in v0.10.0, so scenario.Generate refuses any value; the
+    // form blocks it regardless of model/dp/expert-parallelism (the old coupling is gone).
+    const { issues, output } = interpret(
+      valid({ model: moe, enableExpertParallel: true, moeCommBackend: 'pplx', runId: 'moe' }),
+      groups,
+      [],
+      catalogModels,
+    )
+    expect(output).toBeNull()
+    expect(issues.some((i) => i.field === 'moeCommBackend' && /no blis v0\.10\.0 equivalent/.test(i.message))).toBe(true)
   })
 })
 
 describe('interpret: prefill/decode disaggregation', () => {
   const pd = (over = {}) => valid({ numInstances: '4', runId: 'pd', ...over })
 
-  it('writes the disaggregation block and argv for a prefill/decode split', () => {
-    const out = interpret(
-      pd({ prefillInstances: '1', decodeInstances: '1', pdDecider: 'always' }),
-      groups,
-      [],
-    ).output!
-    expect(out.deployment.disaggregation).toMatchObject({
-      prefill_instances: 1,
-      decode_instances: 1,
-      decider: 'always',
-    })
-    expect(out.argv).toContain('--prefill-instances')
-    expect(out.argv[out.argv.indexOf('--pd-decider') + 1]).toBe('always')
-    // Transfer physics at defaults are omitted from the argv.
-    expect(out.argv).not.toContain('--pd-transfer-bandwidth')
-    // The declaration spells the block out as inline-flow YAML.
-    expect(out.yamlFile).toContain('disaggregation: {prefill_instances: 1, decode_instances: 1')
+  it('refuses any active pool under v0.10.0: disaggregation is not yet ported', () => {
+    // scenario.Generate refuses a disaggregated deployment, so the form blocks a run with any
+    // pool set rather than spending it to hit a blis-side error. Both the explicit prefill/decode
+    // split and the shared-role pool are refused, since both populate the disaggregation block.
+    for (const over of [
+      { prefillInstances: '1', decodeInstances: '1', pdDecider: 'always' },
+      { prefillDecodeInstances: '2' },
+    ]) {
+      const { issues, output } = interpret(pd(over), groups, [])
+      expect(output, JSON.stringify(over)).toBeNull()
+      expect(issues.some((i) => i.field === 'form' && /not yet ported to the blis v0\.10\.0/.test(i.message))).toBe(true)
+    }
   })
 
   it('omits disaggregation entirely when no pool is set', () => {
@@ -926,33 +999,16 @@ describe('interpret: prefill/decode disaggregation', () => {
     expect(canonical(out.deployment)).toBe(canonical({ ...plain.deployment, num_instances: 4 }))
   })
 
-  it('rejects a pool total that exceeds the cluster', () => {
-    const { issues, output } = interpret(
-      pd({ numInstances: '2', prefillInstances: '2', decodeInstances: '2' }),
-      groups,
-      [],
-    )
-    expect(output).toBeNull()
-    expect(issues.some((i) => /more than the 2 in the cluster/.test(i.message))).toBe(true)
-  })
+  it('still runs the topology checks before the v0.10.0 refusal', () => {
+    // The structural guards fire alongside the not-ported refusal, so an authoring mistake in a
+    // pool still gets its specific message (not only the blanket "not ported" one).
+    const tooBig = interpret(pd({ numInstances: '2', prefillInstances: '2', decodeInstances: '2' }), groups, [])
+    expect(tooBig.output).toBeNull()
+    expect(tooBig.issues.some((i) => /more than the 2 in the cluster/.test(i.message))).toBe(true)
 
-  it('rejects prefill without decode unless the shared pool is used', () => {
-    const { issues, output } = interpret(pd({ prefillInstances: '1' }), groups, [])
-    expect(output).toBeNull()
-    expect(issues.some((i) => /both a prefill and a decode pool/.test(i.message))).toBe(true)
-    // The shared-role pool alone is allowed.
-    expect(interpret(pd({ prefillDecodeInstances: '2' }), groups, []).output).not.toBeNull()
-  })
-
-  it('emits the prefix threshold only for the prefix-threshold decider', () => {
-    const out = interpret(
-      pd({ prefillDecodeInstances: '2', pdDecider: 'prefix-threshold', pdPrefixThreshold: '128' }),
-      groups,
-      [],
-    ).output!
-    expect(out.argv[out.argv.indexOf('--pd-prefix-threshold') + 1]).toBe('128')
-    const always = interpret(pd({ prefillDecodeInstances: '2', pdDecider: 'always' }), groups, []).output!
-    expect(always.argv).not.toContain('--pd-prefix-threshold')
+    const prefillOnly = interpret(pd({ prefillInstances: '1' }), groups, [])
+    expect(prefillOnly.output).toBeNull()
+    expect(prefillOnly.issues.some((i) => /both a prefill and a decode pool/.test(i.message))).toBe(true)
   })
 })
 
@@ -1035,7 +1091,7 @@ describe('interpret: the declaration it writes', () => {
     expect(output.yamlFile).toContain('type: gaussian')
     expect(output.yamlFile).toContain('aggregate_rate: 6')
     expect(output.yamlFile).toContain('max_num_batched_tokens: 8192')
-    expect(output.yamlFile).toContain('- {run_id: h100-tp8, hardware: H100, tp: 8}')
+    expect(output.yamlFile).toContain('- {run_id: h100-tp8, hardware: h100, tp: 8}')
     // arrival_process is a derived field of the flat distribution, absent from a spec run.
     expect(output.yamlFile).not.toContain('arrival_process')
   })
@@ -1134,10 +1190,10 @@ describe('postRun', () => {
 
   it('throws the server {error} on a rejected declaration', async () => {
     const fakeFetch = (async () =>
-      new Response(JSON.stringify({ error: 'hardware "B200" is not in hardware_config.json' }), {
+      new Response(JSON.stringify({ error: 'hardware "nope" is not in the blis-catalog hardware/ dir' }), {
         status: 422,
       })) as typeof fetch
-    await expect(postRun(output, fakeFetch)).rejects.toThrow(/B200/)
+    await expect(postRun(output, fakeFetch)).rejects.toThrow(/nope/)
   })
 
   it('explains how to start the server when the fetch itself fails', async () => {

@@ -27,6 +27,7 @@ type versions struct {
 	Leaderboard string `json:"leaderboard"`
 	Blis        string `json:"blis"`
 	Catalog     string `json:"catalog"`
+	Registry    string `json:"registry"`
 }
 
 // resolveVersions fills each dependency's version, preferring the explicit env var, then an
@@ -38,7 +39,7 @@ func resolveVersions(
 	buildInfo func() (*debug.BuildInfo, bool),
 	gitHead func(string) (string, bool, error),
 	readFile func(string) ([]byte, error),
-	blisDir, catalogRoot string,
+	blisDir, catalogRoot, registryRoot string,
 ) versions {
 	return versions{
 		// This binary: the VCS revision Go stamps in at build time (zero-config for a
@@ -54,6 +55,14 @@ func resolveVersions(
 			getenv("BLIS_CATALOG_VERSION"),
 			catalogFileVersion(readFile, catalogRoot),
 			gitShortVersion(gitHead, catalogRoot),
+		),
+		// registry: the coefficient-set clone (blis-registry). Same precedence as the catalog —
+		// an explicit BLIS_REGISTRY_VERSION, else a bundled VERSION file, else a local checkout's
+		// git HEAD — so a .git-stripped image still reports a version when build.sh writes one.
+		Registry: firstNonEmpty(
+			getenv("BLIS_REGISTRY_VERSION"),
+			catalogFileVersion(readFile, registryRoot),
+			gitShortVersion(gitHead, registryRoot),
 		),
 	}
 }
@@ -120,9 +129,9 @@ func catalogFileVersion(readFile func(string) ([]byte, error), catalogRoot strin
 	return strings.TrimSpace(string(b))
 }
 
-// handleVersion serves the three dependency versions as a stable
-// {"leaderboard": ..., "blis": ..., "catalog": ...} shape. An unresolved dependency yields ""
-// for that key — never omitted — so the client's shape is constant.
+// handleVersion serves the dependency versions as a stable
+// {"leaderboard": ..., "blis": ..., "catalog": ..., "registry": ...} shape. An unresolved
+// dependency yields "" for that key — never omitted — so the client's shape is constant.
 //
 // A dedicated endpoint, deliberately not folded into /api/results: the static,
 // server-less build simply does not have it, and the versions are omitted beside the rail

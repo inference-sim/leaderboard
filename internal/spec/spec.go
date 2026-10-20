@@ -329,7 +329,7 @@ func Check(p *Plan, cat *hardware.Catalog) error {
 		seenID[c.RunID] = true
 
 		if !cat.Known(c.Deployment.Hardware) {
-			return fmt.Errorf("spec: %s: hardware %q is not in hardware_config.json; "+
+			return fmt.Errorf("spec: %s: hardware %q is not in the blis-catalog hardware/ dir; "+
 				"valid names are %s", c.RunID, c.Deployment.Hardware,
 				strings.Join(cat.Names(), ", "))
 		}
@@ -347,8 +347,8 @@ func Check(p *Plan, cat *hardware.Catalog) error {
 
 		for _, alias := range cat.Aliases(c.Deployment.Hardware) {
 			if prev, ok := seenHardware[alias]; ok {
-				return fmt.Errorf("spec: %s uses %q and %s uses %q, which "+
-					"hardware_config.json defines with identical specs — they are an "+
+				return fmt.Errorf("spec: %s uses %q and %s uses %q, which the "+
+					"blis-catalog defines with identical specs — they are an "+
 					"alias pair, so this is a duplicate row rather than a second candidate",
 					c.RunID, c.Deployment.Hardware, prev, alias)
 			}

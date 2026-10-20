@@ -205,9 +205,9 @@ describe('structured deployment fields render as per-item chips, never "[object 
 
 describe('distinctHardware / distinctModels', () => {
   it('counts the accelerators present, so the cell can drop a one-GPU-type label', () => {
-    expect(distinctHardware(main.complete)).toEqual(['A100-SXM', 'H100', 'L40S'])
-    const h100 = main.complete.filter((r) => r.deployment.hardware === 'H100')
-    expect(distinctHardware(h100)).toEqual(['H100'])
+    expect(distinctHardware(main.complete)).toEqual(['a100-sxm', 'h100', 'l40s'])
+    const h100 = main.complete.filter((r) => r.deployment.hardware === 'h100')
+    expect(distinctHardware(h100)).toEqual(['h100'])
   })
 
   it('counts the models present, so the cell can drop a one-model label', () => {

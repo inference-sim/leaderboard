@@ -36,8 +36,8 @@ defaults:
   model: qwen/qwen3-14b
   max_num_batched_tokens: 8192
 runs:
-  - {run_id: h100-tp2, hardware: H100, tp: 2}
-  - {run_id: l40s-tp2, hardware: L40S, tp: 2}
+  - {run_id: h100-tp2, hardware: h100, tp: 2}
+  - {run_id: l40s-tp2, hardware: l40s, tp: 2}
 `
 
 func TestLoadFillsDefaultsAndDerivedFields(t *testing.T) {
@@ -63,7 +63,7 @@ func TestLoadFillsDefaultsAndDerivedFields(t *testing.T) {
 		t.Fatalf("got %d candidates, want 2", len(p.Runs))
 	}
 	d := p.Runs[0].Deployment
-	if d.Hardware != "H100" || d.TP != 2 {
+	if d.Hardware != "h100" || d.TP != 2 {
 		t.Errorf("candidate 0 = %s tp%d", d.Hardware, d.TP)
 	}
 	// Model is a candidate field now (E1), taken from the declared defaults.
@@ -141,9 +141,9 @@ func TestLoadSynthesizesFlatIntoWorkloadSpec(t *testing.T) {
 
 func TestPerRunOverrideDoesNotLeak(t *testing.T) {
 	body := strings.Replace(minimal,
-		"  - {run_id: l40s-tp2, hardware: L40S, tp: 2}",
-		"  - {run_id: h100-tp2-seqs8, hardware: H100, tp: 2, max_num_seqs: 8}\n"+
-			"  - {run_id: l40s-tp2, hardware: L40S, tp: 2}", 1)
+		"  - {run_id: l40s-tp2, hardware: l40s, tp: 2}",
+		"  - {run_id: h100-tp2-seqs8, hardware: h100, tp: 2, max_num_seqs: 8}\n"+
+			"  - {run_id: l40s-tp2, hardware: l40s, tp: 2}", 1)
 	p, err := Load(write(t, body))
 	if err != nil {
 		t.Fatalf("Load: %v", err)
@@ -161,8 +161,8 @@ func TestPerRunOverrideDoesNotLeak(t *testing.T) {
 // the same candidate. An unstated profile stays nil (omitted from a non-weighted record).
 func TestLoadDecodesRoutingScorers(t *testing.T) {
 	body := strings.Replace(minimal,
-		"  - {run_id: h100-tp2, hardware: H100, tp: 2}",
-		"  - {run_id: h100-weighted, hardware: H100, tp: 2, routing_policy: weighted, "+
+		"  - {run_id: h100-tp2, hardware: h100, tp: 2}",
+		"  - {run_id: h100-weighted, hardware: h100, tp: 2, routing_policy: weighted, "+
 			"routing_scorers: [{name: precise-prefix-cache, weight: 2}, {name: queue-depth, weight: 1}]}", 1)
 	p, err := Load(write(t, body))
 	if err != nil {
@@ -188,8 +188,8 @@ func TestLoadDecodesRoutingScorers(t *testing.T) {
 // a non-disaggregated record omits the block.
 func TestLoadDecodesMoEAndDisaggregation(t *testing.T) {
 	body := strings.Replace(minimal,
-		"  - {run_id: h100-tp2, hardware: H100, tp: 2}",
-		"  - {run_id: h100-pd, hardware: H100, tp: 2, enable_expert_parallel: true, "+
+		"  - {run_id: h100-tp2, hardware: h100, tp: 2}",
+		"  - {run_id: h100-pd, hardware: h100, tp: 2, enable_expert_parallel: true, "+
 			"moe_comm_backend: pplx, disaggregation: {prefill_instances: 1, decode_instances: 1, "+
 			"prefill_decode_instances: 0, decider: always, prefix_threshold: 16, "+
 			"transfer_bandwidth: 25, transfer_base_latency: 0.05, transfer_contention: false}}", 1)
@@ -235,7 +235,7 @@ func TestLoadRejects(t *testing.T) {
 		},
 		{
 			name:    "missing tp",
-			body:    strings.Replace(minimal, "hardware: H100, tp: 2}", "hardware: H100}", 1),
+			body:    strings.Replace(minimal, "hardware: h100, tp: 2}", "hardware: h100}", 1),
 			wantErr: "tp",
 		},
 		{
@@ -281,13 +281,13 @@ func TestLoadRejects(t *testing.T) {
 // one thing the readout must never allow.
 func TestCheckRejectsIdenticalDeployments(t *testing.T) {
 	body := strings.Replace(minimal,
-		"  - {run_id: l40s-tp2, hardware: L40S, tp: 2}",
-		"  - {run_id: h100-tp2-again, hardware: H100, tp: 2}", 1)
+		"  - {run_id: l40s-tp2, hardware: l40s, tp: 2}",
+		"  - {run_id: h100-tp2-again, hardware: h100, tp: 2}", 1)
 	p, err := Load(write(t, body))
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
-	cat, err := hardware.Load(filepath.Join("..", "hardware", "testdata", "hardware_config.json"))
+	cat, err := hardware.Load(filepath.Join("..", "hardware", "testdata", "hardware"))
 	if err != nil {
 		t.Fatalf("hardware.Load: %v", err)
 	}
@@ -306,13 +306,13 @@ func TestCheckRejectsIdenticalDeployments(t *testing.T) {
 // distinct deployments, so Check accepts them rather than flagging a duplicate.
 func TestCheckAcceptsTwoModelsInOneTable(t *testing.T) {
 	body := strings.Replace(minimal,
-		"  - {run_id: l40s-tp2, hardware: L40S, tp: 2}",
-		"  - {run_id: h100-tp2-glm, hardware: H100, tp: 2, model: zai-org/glm-5.2-fp8}", 1)
+		"  - {run_id: l40s-tp2, hardware: l40s, tp: 2}",
+		"  - {run_id: h100-tp2-glm, hardware: h100, tp: 2, model: zai-org/glm-5.2-fp8}", 1)
 	p, err := Load(write(t, body))
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
-	cat, err := hardware.Load(filepath.Join("..", "hardware", "testdata", "hardware_config.json"))
+	cat, err := hardware.Load(filepath.Join("..", "hardware", "testdata", "hardware"))
 	if err != nil {
 		t.Fatalf("hardware.Load: %v", err)
 	}
@@ -325,12 +325,12 @@ func TestCheckAcceptsTwoModelsInOneTable(t *testing.T) {
 }
 
 func TestCheckRejectsUnknownHardware(t *testing.T) {
-	body := strings.Replace(minimal, "hardware: L40S", "hardware: H200", 1)
+	body := strings.Replace(minimal, "hardware: l40s", "hardware: NO-SUCH-GPU", 1)
 	p, err := Load(write(t, body))
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
-	cat, err := hardware.Load(filepath.Join("..", "hardware", "testdata", "hardware_config.json"))
+	cat, err := hardware.Load(filepath.Join("..", "hardware", "testdata", "hardware"))
 	if err != nil {
 		t.Fatalf("hardware.Load: %v", err)
 	}
@@ -338,7 +338,7 @@ func TestCheckRejectsUnknownHardware(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected an error")
 	}
-	if !strings.Contains(err.Error(), "H200") || !strings.Contains(err.Error(), "H100") {
+	if !strings.Contains(err.Error(), "NO-SUCH-GPU") || !strings.Contains(err.Error(), "h100") {
 		t.Errorf("error should name the bad value and the valid ones, got %v", err)
 	}
 }
@@ -347,14 +347,14 @@ func TestCheckRejectsUnknownHardware(t *testing.T) {
 // duplicate row, so Check refuses them.
 func TestCheckRejectsAliasedHardwarePair(t *testing.T) {
 	body := strings.Replace(minimal,
-		"  - {run_id: l40s-tp2, hardware: L40S, tp: 2}",
-		"  - {run_id: a100-sxm-tp2, hardware: A100-SXM, tp: 2}\n"+
-			"  - {run_id: a100-80-tp2, hardware: A100-80, tp: 2}", 1)
+		"  - {run_id: l40s-tp2, hardware: l40s, tp: 2}",
+		"  - {run_id: a100-sxm-tp2, hardware: a100-sxm, tp: 2}\n"+
+			"  - {run_id: a100-80-tp2, hardware: a100-80, tp: 2}", 1)
 	p, err := Load(write(t, body))
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
-	cat, err := hardware.Load(filepath.Join("..", "hardware", "testdata", "hardware_config.json"))
+	cat, err := hardware.Load(filepath.Join("..", "hardware", "testdata", "hardware"))
 	if err != nil {
 		t.Fatalf("hardware.Load: %v", err)
 	}
@@ -362,7 +362,7 @@ func TestCheckRejectsAliasedHardwarePair(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected an error")
 	}
-	if !strings.Contains(err.Error(), "A100-80") || !strings.Contains(err.Error(), "alias") {
+	if !strings.Contains(err.Error(), "a100-80") || !strings.Contains(err.Error(), "alias") {
 		t.Errorf("error should explain the alias, got %v", err)
 	}
 }

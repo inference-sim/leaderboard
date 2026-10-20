@@ -9,6 +9,9 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+
+	"github.com/inference-sim/leaderboard/internal/scenario"
+	"github.com/inference-sim/leaderboard/internal/schema"
 )
 
 // ValidateModel runs blis once against a candidate model purely to prove blis can load and
@@ -30,16 +33,36 @@ func (r *Runner) ValidateModel(baseCatalogRoot, dir, canonicalName, modelYAML, c
 	}
 	defer os.RemoveAll(tmpDir)
 
+	if r.RegistryRoot == "" {
+		return fmt.Errorf("no coefficient registry to validate against: BLIS_REGISTRY is unset")
+	}
 	staging := filepath.Join(tmpDir, "catalog")
 	if err := stageCatalog(staging, baseCatalogRoot, dir, modelYAML, configJSON); err != nil {
 		return err
+	}
+
+	// Since v0.10.0 a run needs a deployment scenario; generate a probe one for the candidate
+	// on the probe hardware, resolved against the STAGING catalog so the candidate is found
+	// without the live catalog carrying it.
+	probe := schema.Deployment{Model: canonicalName, Hardware: probeHardware, TP: 1, DP: 1, NumInstances: 1}
+	body, name, err := scenario.Generate(probe, staging)
+	if err != nil {
+		return fmt.Errorf("build probe scenario: %w", err)
+	}
+	scenariosDir := filepath.Join(tmpDir, "scenarios")
+	if err := os.MkdirAll(scenariosDir, 0o755); err != nil {
+		return fmt.Errorf("create scenarios dir: %w", err)
+	}
+	if err := os.WriteFile(filepath.Join(scenariosDir, name+".yaml"), body, 0o644); err != nil {
+		return fmt.Errorf("write scenario: %w", err)
 	}
 
 	// A single synthetic request on the candidate: enough to exercise model loading, not
 	// enough to hang a form. No --workload-spec — the default synthetic workload is what we
 	// want here, since we are testing the model, not a workload.
 	argv := []string{r.Binary, "run",
-		"--model", canonicalName, "--hardware", probeHardware, "--tp", "1",
+		"--scenarios", scenariosDir, "--scenario", name + ".yaml",
+		"--registry", r.RegistryRoot, "--catalog", staging,
 		"--num-requests", "1",
 		"--metrics-path", filepath.Join(tmpDir, "m.json"),
 	}

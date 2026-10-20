@@ -146,6 +146,11 @@ spec:
             # validation probe), which -blis/args cannot cover.
             - name: BLIS_CATALOG
               value: /data/blis-catalog
+            # Coefficient sets for blis-latency-kernel (since blis v0.10.0). Unlike the
+            # catalog, nothing writes to it (no user-models overlay), so it stays on the
+            # read-only image at the path the Dockerfile bundles it, not the /data PVC.
+            - name: BLIS_REGISTRY
+              value: /app/inference-sim/blis-registry
             # Results directory. It lives on the /data PVC (mounted below) so it is
             # the only state that survives a restart. serve reads it via -out, whose
             # default is this env var; keep it inside the /data mount.
@@ -163,6 +168,8 @@ spec:
             - name: BLIS_VERSION
               value: ""
             - name: BLIS_CATALOG_VERSION
+              value: ""
+            - name: BLIS_REGISTRY_VERSION
               value: ""
           # Set the entrypoint explicitly to the bare binary so `args` below ARE the
           # whole command. Kubernetes appends `args` to the image ENTRYPOINT, so if the

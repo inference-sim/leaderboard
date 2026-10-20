@@ -26,7 +26,7 @@ import { workloadParam, workloadsHref } from '../route'
 import { listWorkloads, profileKnobs, profileSummary, profileToGroup } from '../workloads'
 import type { ProfileBody } from '../workloads'
 import type { SweepableKey, SweepAxes, SweepCell, SweepRun } from '../sweep'
-import { expandSweep, SWEEPABLE_KEYS, sweepHasVariation } from '../sweep'
+import { deriveSweepSummaryFromCells, expandSweep, SWEEPABLE_KEYS, sweepHasVariation } from '../sweep'
 import { offeredLoad } from '../load'
 import { numeric } from '../format'
 import { shellLines } from '../repro'
@@ -296,6 +296,14 @@ export function NewRun({
   const expansion = useMemo(
     () => expandSweep(values, sweepAxes, loadValues, groups, profiles, models, hardware),
     [values, sweepAxes, loadValues, groups, profiles, models, hardware],
+  )
+
+  // The name an unnamed sweep would take in the By-sweep list (deriveSweepSummary over its
+  // cells), shown as the Sweep-name placeholder so the reader sees the auto-name they get by
+  // leaving the field blank. Falls back to a static example until the matrix varies (<2 cells).
+  const sweepNamePlaceholder = useMemo(
+    () => deriveSweepSummaryFromCells(expansion.runs) || 'H100 vs A100 as concurrency climbs',
+    [expansion.runs],
   )
 
   // Switching sweep -> single discards every axis beyond the first value (App's onModeChange
@@ -572,7 +580,7 @@ export function NewRun({
               <input
                 type="text"
                 value={sweepName}
-                placeholder="H100 vs A100 as concurrency climbs"
+                placeholder={sweepNamePlaceholder}
                 spellCheck={false}
                 onChange={(e) => onSweepNameChange(e.target.value)}
               />
@@ -1654,13 +1662,15 @@ function CliDetail({ output }: { output: Output }) {
           {isSpec ? (
             <>
               <code>--workload-spec</code> points at a temp file the runner writes from the inline
-              spec, and <code>--metrics-path</code> at another. The argv that actually ran is
-              stored in the result.
+              spec, <code>--scenario</code> at a scenario the runner generates per run under{' '}
+              <code>--scenarios</code>, and <code>--metrics-path</code> at another temp file. The
+              argv that actually ran is stored in the result.
             </>
           ) : (
             <>
-              <code>--metrics-path</code> is a temporary file the runner picks; the argv that
-              actually ran is stored in the result.
+              <code>--scenario</code> is a file the runner generates per run under{' '}
+              <code>--scenarios</code>, and <code>--metrics-path</code> a temp file it picks; the
+              argv that actually ran is stored in the result.
             </>
           )}
         </p>

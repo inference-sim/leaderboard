@@ -74,7 +74,7 @@ export const FALLBACK_GROUP: Group = {
 
 export const FALLBACK_DEPLOYMENT: Deployment = {
   model: 'qwen/qwen3-14b',
-  hardware: 'H100',
+  hardware: 'h100',
   tp: 1,
   dp: 1,
   num_instances: 1,
@@ -619,21 +619,15 @@ export function interpret(
     }
   }
 
-  // MoE knobs. blis fatally rejects --enable-expert-parallel on a dense model, and only
-  // charges the MoE comm cost for a MoE model on trained-physics with dp>1 or expert
-  // parallelism. The form guards all of that before a run is spent (mirrors cmd/root.go).
+  // MoE knobs. blis fatally rejects --enable-expert-parallel on a dense model. Expert
+  // parallelism is carried into the v0.10.0 scenario's pool, so it stays supported; the MoE
+  // comm backend is not (it is refused below), so the dp>1/backend coupling no longer applies
+  // and only the dense-model and latency-model guards remain here. Mirrors cmd/root.go.
   const moe = isMoE(models, values.model)
   const trainedPhysics = values.latencyModel === 'trained-physics'
   if (values.enableExpertParallel) {
     if (!moe) push('enableExpertParallel', `Expert parallelism needs a MoE model; ${values.model} is dense.`)
     if (!trainedPhysics) push('enableExpertParallel', 'Expert parallelism needs the trained-physics latency model.')
-  }
-  if (values.moeCommBackend !== '') {
-    if (!moe) push('moeCommBackend', `A MoE comm backend needs a MoE model; ${values.model} is dense.`)
-    if (!trainedPhysics) push('moeCommBackend', 'A MoE comm backend needs the trained-physics latency model.')
-    if (dp <= 1 && !values.enableExpertParallel) {
-      push('moeCommBackend', 'A MoE comm backend is only charged with dp > 1 or expert parallelism on.')
-    }
   }
 
   // Prefill/decode disaggregation. When any pool is set the counts must satisfy
@@ -709,16 +703,46 @@ export function interpret(
     }
   }
 
+  // Knobs blis v0.10.0 removed or has not yet re-ported to the scenario model. The server's
+  // internal/scenario.Generate refuses each of these rather than silently simulating something
+  // the run did not declare, so the run would fail at submit with a blis-side error. Guard them
+  // here instead, with a field-level message, so a run is never spent to discover it. These
+  // mirror Generate's refusal switch one-for-one; keep the two in lockstep. The controls stay
+  // on the form (not disabled) so they return for free when upstream re-enables the feature.
+  if (values.moeCommBackend !== '') {
+    push('moeCommBackend', 'A MoE comm backend has no blis v0.10.0 equivalent yet; leave it unset.')
+  }
+  if (pdActive) {
+    push('form', 'Prefill/decode disaggregation is not yet ported to the blis v0.10.0 scenario model; leave the pools at 0.')
+  }
+  if (totalKvBlocks > 0) {
+    push(
+      'totalKvBlocks',
+      'Total KV blocks is not supported under blis v0.10.0 (KV capacity is derived from the scenario); leave it blank for auto.',
+    )
+  }
+  if (numSpeculativeTokens > 0) {
+    push('numSpeculativeTokens', 'Speculative decoding is not yet ported to blis v0.10.0; set draft tokens to 0.')
+  }
+  // latency_model: trained-physics is the only value v0.10.0 honors (the cost model is now the
+  // registry's), so any other choice (e.g. roofline) is refused. Blank is treated as unset.
+  if (values.latencyModel !== '' && values.latencyModel !== 'trained-physics') {
+    push(
+      'latencyModel',
+      `The ${values.latencyModel} latency model has no blis v0.10.0 equivalent; the cost model is the registry's coefficient sets. Use trained-physics.`,
+    )
+  }
+
   // The hardware catalogue is fetched from the server (GET /api/hardware, read from the
-  // upstream hardware_config.json), so an empty list means it has not loaded yet or could
+  // blis-catalog hardware/ dir), so an empty list means it has not loaded yet or could
   // not be reached: with none in hand the form cannot judge the accelerator and skips the
   // check rather than rejecting every value, exactly as the model check does. Once loaded,
   // an unknown name is rejected — an alias name counts as known, since blis accepts it and
-  // the list carries every name upstream defines.
+  // the list carries every name the catalog defines.
   if (hardware.length > 0 && !hardware.some((hw) => hw.name === values.hardware)) {
     push(
       'hardware',
-      `${values.hardware || 'No accelerator'} is not in ../inference-sim/hardware_config.json; ` +
+      `${values.hardware || 'No accelerator'} is not in the blis-catalog hardware/ dir; ` +
         `the catalogue holds ${hardware.map((hw) => hw.name).join(', ')}.`,
     )
   }
@@ -925,6 +949,14 @@ export function interpret(
   // A placeholder path for the generated kv_offload config, mirroring specPath: the real
   // path is a per-run temp file the server writes, so the preview argv shows a stable stand-in.
   const kvOffloadPath = `/tmp/${runId || 'run'}.kv-offload.yaml`
+  // Likewise for the scenario the runner generates per run: the browser cannot write it or
+  // know its temp path, so the preview shows stand-ins. The file stem is the real one blis
+  // reads (<catalog-model>-<hardware>-tp<tp>, from internal/scenario.Generate), and the
+  // catalog/registry are the clones the server resolves from BLIS_CATALOG/BLIS_REGISTRY.
+  const scenariosDir = '/tmp/leaderboard-metrics/scenarios'
+  const scenarioFile = `${catalogModel(deployment.model)}-${deployment.hardware}-tp${deployment.tp}.yaml`
+  const registry = '/blis-registry'
+  const catalog = '/blis-catalog'
   return {
     issues,
     target,
@@ -941,7 +973,18 @@ export function interpret(
       target,
       yamlFile: yamlFile(group, deployment, runId),
       yamlRow: yamlRow(deployment, baseDeployment, runId),
-      argv: argvFor('./blis', group, deployment, `/tmp/${runId}.json`, specPath, kvOffloadPath),
+      argv: argvFor(
+        './blis',
+        scenariosDir,
+        scenarioFile,
+        registry,
+        catalog,
+        group,
+        deployment,
+        `/tmp/${runId}.json`,
+        specPath,
+        kvOffloadPath,
+      ),
       resultPath: target.group ? `results/${target.group.groupId}/${runId}.json` : null,
     },
   }
@@ -1361,14 +1404,29 @@ function kvOffloadFlow(kv: NonNullable<Deployment['kv_offload']>): string {
   )
 }
 
+/** The blis-catalog models/ directory name for an org-prefixed model name (qwen/qwen3-14b ->
+ *  qwen3-14b), which is what a scenario's `model:` field and its file stem reference. Mirrors
+ *  internal/scenario.CatalogModel: the bare name after the last slash. */
+export function catalogModel(model: string): string {
+  const i = model.lastIndexOf('/')
+  return i >= 0 ? model.slice(i + 1) : model
+}
+
 /**
  * The blis command line this declaration produces. A port of
  * internal/blisrun.Argv, pinned to it by a test over every committed record's
- * stored argv — the flag order, the omitted --dp and the omitted --max-model-len
- * are all load-bearing there.
+ * stored argv (the flag order is load-bearing there). Since blis v0.10.0 the
+ * deployment lives in a generated scenario file (located by --scenarios/--scenario/
+ * --registry/--catalog), not in --model/--hardware/--tp and the engine flags; the
+ * preview names stand-in paths for the scenario the runner generates per run, as it
+ * already does for --workload-spec and --metrics-path.
  */
 export function argvFor(
   binary: string,
+  scenariosDir: string,
+  scenarioFile: string,
+  registry: string,
+  catalog: string,
   g: Group,
   d: Deployment,
   metricsPath: string,
@@ -1378,30 +1436,15 @@ export function argvFor(
   const a: string[] = [binary, 'run']
   const add = (flag: string, value: string | number) => a.push(flag, String(value))
 
-  add('--model', d.model)
-  add('--hardware', d.hardware)
-  add('--tp', d.tp)
-  // --dp is MoE-only upstream and rejects several combinations, so the default is
-  // left off rather than asserted.
-  if (d.dp > 1) add('--dp', d.dp)
-  // The MoE knobs, emitted only when on. --enable-expert-parallel is a valueless bool flag.
-  if (d.enable_expert_parallel) a.push('--enable-expert-parallel')
-  if (d.moe_comm_backend) add('--moe-comm-backend', d.moe_comm_backend)
-  add('--num-instances', d.num_instances)
-
-  // Prefill/decode disaggregation, present only when a pool is set; each flag emitted only
-  // at a non-default value. Mirrors internal/blisrun.Argv.
-  const pd = d.disaggregation
-  if (pd) {
-    if (pd.prefill_instances > 0) add('--prefill-instances', pd.prefill_instances)
-    if (pd.decode_instances > 0) add('--decode-instances', pd.decode_instances)
-    if (pd.prefill_decode_instances > 0) add('--prefill-decode-instances', pd.prefill_decode_instances)
-    if (pd.decider && pd.decider !== 'never') add('--pd-decider', pd.decider)
-    if (pd.decider === 'prefix-threshold') add('--pd-prefix-threshold', pd.prefix_threshold)
-    if (pd.transfer_bandwidth !== 25) add('--pd-transfer-bandwidth', numeric(pd.transfer_bandwidth))
-    if (pd.transfer_base_latency !== 0.05) add('--pd-transfer-base-latency', numeric(pd.transfer_base_latency))
-    if (pd.transfer_contention) a.push('--pd-transfer-contention')
-  }
+  // Since blis v0.10.0 the deployment (model, hardware, tp/dp, expert parallelism and the
+  // engine knobs: block size, batch/seq caps, model length, KV dtype, GPU memory) lives in
+  // a generated scenario file, located by these four flags, not on the CLI. --latency-model
+  // and the speculative/total-kv-blocks/disaggregation flags were removed outright. Mirrors
+  // internal/blisrun.Argv, which these flags and this order track exactly.
+  add('--scenarios', scenariosDir)
+  add('--scenario', scenarioFile)
+  add('--registry', registry)
+  add('--catalog', catalog)
 
   // The workload surface is the inline spec: --workload-spec supersedes the synthetic flags
   // entirely (upstream: it overrides --workload). The offered load, token distributions and
@@ -1414,39 +1457,21 @@ export function argvFor(
   add('--timeout', g.request_timeout_s)
   if (g.horizon_ticks != null) add('--horizon', g.horizon_ticks)
 
-  if (d.max_model_len > 0) add('--max-model-len', d.max_model_len)
-  add('--block-size-in-tokens', d.block_size_in_tokens)
-  add('--max-num-seqs', d.max_num_seqs)
-  add('--max-num-batched-tokens', d.max_num_batched_tokens)
-  add('--long-prefill-token-threshold', d.long_prefill_token_threshold)
+  // --num-instances scales the one colocated pool; it is the only candidate-head flag that
+  // survives v0.10.0 (the rest moved into the scenario).
+  add('--num-instances', d.num_instances)
 
+  add('--long-prefill-token-threshold', d.long_prefill_token_threshold)
   add('--scheduler', d.scheduler)
   add('--preemption-policy', d.preemption_policy)
   add('--routing-policy', d.routing_policy)
   // --routing-scorers is read only for the weighted policy (blis warns and ignores it
-  // otherwise), so it is emitted only then and only with a profile — the same "emit when
-  // the capability is on" rule as --dp and the speculative trio, keeping a non-weighted
+  // otherwise), so it is emitted only then and only with a profile, keeping a non-weighted
   // record's argv byte-for-byte unchanged. Mirrors internal/blisrun.Argv.
   if (d.routing_policy === 'weighted' && d.routing_scorers && d.routing_scorers.length > 0) {
     add('--routing-scorers', d.routing_scorers.map((s) => `${s.name}:${numeric(s.weight)}`).join(','))
   }
   add('--admission-policy', d.admission_policy)
-  add('--kv-cache-dtype', d.kv_cache_dtype)
-  add('--latency-model', d.latency_model)
-
-  add('--gpu-memory-utilization', numeric(d.gpu_memory_utilization))
-
-  // --total-kv-blocks pins the KV cache capacity; emitted only when > 0 (0/absent is the
-  // auto sentinel, and blis rejects --total-kv-blocks 0). Mirrors internal/blisrun.Argv.
-  if (d.total_kv_blocks && d.total_kv_blocks > 0) add('--total-kv-blocks', d.total_kv_blocks)
-
-  // The speculative trio follows the --dp precedent: emitted only when the capability is
-  // on (K>0), so an off run reproduces from the record's stored defaults.
-  if (d.num_speculative_tokens > 0) {
-    add('--num-speculative-tokens', d.num_speculative_tokens)
-    add('--speculative-acceptance-rate', numeric(d.speculative_acceptance_rate))
-    if (d.speculative_method !== '') add('--speculative-method', d.speculative_method)
-  }
 
   for (const flag of Object.keys(d.extra_flags ?? {}).sort()) {
     add(`--${flag}`, (d.extra_flags ?? {})[flag] ?? '')

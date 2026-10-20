@@ -55,7 +55,7 @@ export interface BLISLeaderboardRunRecord {
    */
   workload_name?: string;
   /**
-   * The sweep this run belongs to, when it was fired as one cell of a sweep. Provenance only, never part of the comparability key: it is a top-level sibling of run_id (never inside group/deployment), so it cannot affect group_id (hash(group)) or deployment twin-detection. All of a sweep's cells carry the same value; two sweeps over the same workload carry different ones. Absent for a single run, a runs.yaml run, and every pre-existing record.
+   * The sweep this run belongs to. Provenance only, never part of the comparability key: it is a top-level sibling of run_id (never inside group/deployment), so it cannot affect group_id (hash(group)) or deployment twin-detection. Every run minted by the current server/CLI carries one (the runner mints a unique id when the caller supplies none, so a single run is a one-cell sweep); a web sweep's cells share one id, a runs.yaml invocation's candidates share one, two sweeps over the same workload carry different ones. Optional in the schema (not in required) so records predating this field still validate; absent only on such a pre-existing record.
    */
   sweep_id?: string;
   /**

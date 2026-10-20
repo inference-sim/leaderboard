@@ -10,32 +10,22 @@ import (
 	"github.com/inference-sim/leaderboard/internal/schema"
 )
 
-// Cwd is the working directory blis must be run from: it resolves defaults.yaml and
-// hardware_config.json relative to cwd, and fails or silently mis-defaults otherwise.
-// The model catalog is separate: blis locates it via the BLIS_CATALOG env var (no
-// default), which the blis subprocess inherits from this process's environment.
+// Cwd is the working directory blis is run from. Since v0.10.0 blis resolves the catalog,
+// registry and scenarios from explicit flags (absolute paths), so cwd no longer picks the
+// model/hardware config; but it still carries defaults.yaml and is the checkout
+// GitProvenance shells `git` in, so a run is executed from it.
 const Cwd = "../inference-sim"
 
-// The blis defaults for the PD KV-transfer physics (cmd/root.go). A disaggregated run
-// emits these flags only when it deviates from them, so the argv stays minimal.
-const (
-	defaultPDTransferBandwidth   = 25.0
-	defaultPDTransferBaseLatency = 0.05
-)
-
 // Argv builds the command line for one workload-spec run. It is a pure function of the
-// declared inputs, so a spec argv stored in a record reproduces the record. specPath is
-// the file the inline WorkloadSpec was materialized to; blis reads the offered load,
-// token distributions and arrival from the spec, so no synthetic --rate/--prompt-tokens/…
-// flags are emitted (a trace run goes through ReplayArgv instead, and the flat gaussian
-// shorthand is lowered to a workload-spec before it ever reaches here).
-func Argv(binary string, g schema.Group, d schema.Deployment, metricsPath, specPath, kvOffloadPath string) []string {
+// declared inputs plus the resolved paths (the generated scenario, the registry/catalog
+// clones), so a stored argv reproduces the record given those paths. The deployment's
+// model/hardware/parallelism and engine knobs live in the scenario file (scenariosDir +
+// scenarioFile); only the scheduling/routing/admission knobs remain CLI flags.
+func Argv(binary, scenariosDir, scenarioFile, registry, catalog string, g schema.Group, d schema.Deployment, metricsPath, specPath, kvOffloadPath string) []string {
 	a := []string{binary, "run"}
 	add := func(flag, value string) { a = append(a, flag, value) }
 
-	// The candidate head (model/hardware/parallelism/disaggregation), shared verbatim
-	// with a replay so the two commands cannot drift in how a candidate is spelled.
-	a = appendCandidateHead(a, d)
+	a = appendScenario(a, scenariosDir, scenarioFile, registry, catalog)
 
 	// The workload surface is the inline spec: --workload-spec supersedes the synthetic
 	// flags entirely (upstream: it "overrides --workload").
@@ -49,32 +39,25 @@ func Argv(binary string, g schema.Group, d schema.Deployment, metricsPath, specP
 		add("--horizon", strconv.FormatInt(*g.HorizonTicks, 10))
 	}
 
-	// The candidate tail (batching/scheduling/routing/speculative/extra), shared with
-	// a replay for the same no-drift reason as the head.
+	a = appendCandidateHead(a, d)
 	a = appendCandidateTail(a, d)
 
-	// KV-cache CPU offloading. Path-valued (a generated config file), so it is emitted
-	// here rather than in the shared tail, which takes only the deployment. Emitted only
-	// when offloading is on, the "emit only when the capability is on" rule.
 	if d.KVOffload != nil {
 		add("--kv-offload-config", kvOffloadPath)
 	}
 
-	// Required, and last so it is easy to find in a stored argv: cache_hit_rate and
-	// requests[] are written only to the file branch of EmitOutput.
 	add("--metrics-path", metricsPath)
 	return a
 }
 
-// ReplayArgv builds the command line for a trace replay. It shares the candidate-flag
-// blocks with Argv (appendCandidateHead / appendCandidateTail), so a candidate is spelled
-// identically whether it is run or replayed, and emits the trace + injection flags in
-// place of the synthetic-distribution ones. traceHeader / traceData are the resolved
-// paths into the hash-addressed store. Like Argv it is a pure function of the record, so
-// a stored replay argv reproduces the record given the trace blob is present.
-func ReplayArgv(binary string, g schema.Group, d schema.Deployment, metricsPath, traceHeader, traceData, kvOffloadPath string) []string {
+// ReplayArgv builds the command line for a trace replay. It shares the scenario and the
+// candidate-flag blocks with Argv so a candidate is spelled identically whether run or
+// replayed, and emits the trace + injection flags in place of the synthetic ones.
+func ReplayArgv(binary, scenariosDir, scenarioFile, registry, catalog string, g schema.Group, d schema.Deployment, metricsPath, traceHeader, traceData, kvOffloadPath string) []string {
 	a := []string{binary, "replay"}
 	add := func(flag, value string) { a = append(a, flag, value) }
+
+	a = appendScenario(a, scenariosDir, scenarioFile, registry, catalog)
 
 	add("--trace-header", traceHeader)
 	add("--trace-data", traceData)
@@ -83,15 +66,12 @@ func ReplayArgv(binary string, g schema.Group, d schema.Deployment, metricsPath,
 	// record produces a terse argv rather than a nil dereference.
 	if t := g.Workload.Trace; t != nil {
 		add("--session-mode", t.SessionMode)
-		// Think time, closed-loop only, at most one form (ValidateTrace enforces this).
 		if t.ThinkTimeMs > 0 {
 			add("--think-time-ms", strconv.Itoa(t.ThinkTimeMs))
 		}
 		if t.ThinkTimeDist != "" {
 			add("--think-time-dist", t.ThinkTimeDist)
 		}
-		// Pool knobs, emitted only when pooling, the "emit only when the capability is on"
-		// rule the run flags follow.
 		if t.ConcurrentSessions > 0 {
 			add("--concurrent-sessions", strconv.Itoa(t.ConcurrentSessions))
 			if t.TotalSessions > 0 {
@@ -106,20 +86,13 @@ func ReplayArgv(binary string, g schema.Group, d schema.Deployment, metricsPath,
 	a = appendCandidateHead(a, d)
 	a = appendCandidateTail(a, d)
 
-	// KV-cache CPU offloading, as in Argv. blis replay registers --kv-offload-config too;
-	// the trace header is authoritative on replay, but the flag is still passed when set
-	// so a replayed candidate is spelled identically to a run candidate.
 	if d.KVOffload != nil {
 		add("--kv-offload-config", kvOffloadPath)
 	}
 
 	add("--seed", strconv.FormatInt(g.Seed, 10))
-	// No --timeout: blis replay does not register it (it is run-only; there is an upstream
-	// test pinning replayCmd has no "timeout" flag). A per-request deadline for a replay
-	// comes from the trace's own deadline_us column, not a CLI flag, so RequestTimeoutS is
-	// not applied here — passing it makes cobra reject the whole command with a usage dump.
-	// replay derives a horizon from the trace's latest arrival when none is given; pass
-	// one only when the group declares it (the same group-side rule as a run).
+	// No --timeout: blis replay does not register it (run-only). A horizon is passed only
+	// when the group declares one, as on a run.
 	if g.HorizonTicks != nil {
 		add("--horizon", strconv.FormatInt(*g.HorizonTicks, 10))
 	}
@@ -128,89 +101,34 @@ func ReplayArgv(binary string, g schema.Group, d schema.Deployment, metricsPath,
 	return a
 }
 
-// appendCandidateHead emits the leading candidate flags — model, hardware, parallelism,
-// MoE, instance count, and prefill/decode disaggregation — shared by Argv and ReplayArgv.
-func appendCandidateHead(a []string, d schema.Deployment) []string {
-	add := func(flag, value string) { a = append(a, flag, value) }
-	add("--model", d.Model)
-	add("--hardware", d.Hardware)
-	add("--tp", strconv.Itoa(d.TP))
-	// --dp is MoE-only upstream and rejects several combinations, so the default is
-	// left off rather than asserted.
-	if d.DP > 1 {
-		add("--dp", strconv.Itoa(d.DP))
-	}
-	// The MoE knobs, emitted only when on: --enable-expert-parallel is a valueless bool
-	// flag, and --moe-comm-backend is left off when unset. blis fatally rejects either on
-	// a dense model, so the form guards them, but the argv only reflects what was set.
-	if d.EnableExpertParallel {
-		a = append(a, "--enable-expert-parallel")
-	}
-	if d.MoECommBackend != "" {
-		add("--moe-comm-backend", d.MoECommBackend)
-	}
-	add("--num-instances", strconv.Itoa(d.NumInstances))
-
-	// Prefill/decode disaggregation, present only when a pool is declared. Each flag is
-	// emitted only when it carries a non-default value (the --dp
-	// precedent), so a disaggregated run at blis's transfer defaults stays terse and a
-	// non-disaggregated run emits none of this.
-	if pd := d.Disaggregation; pd != nil {
-		if pd.PrefillInstances > 0 {
-			add("--prefill-instances", strconv.Itoa(pd.PrefillInstances))
-		}
-		if pd.DecodeInstances > 0 {
-			add("--decode-instances", strconv.Itoa(pd.DecodeInstances))
-		}
-		if pd.PrefillDecodeInstances > 0 {
-			add("--prefill-decode-instances", strconv.Itoa(pd.PrefillDecodeInstances))
-		}
-		// The decider drives disaggregation; "never" is blis's default and is left off.
-		if pd.Decider != "" && pd.Decider != "never" {
-			add("--pd-decider", pd.Decider)
-		}
-		// The threshold only means anything to the prefix-threshold decider (blis warns
-		// otherwise), so it rides with it.
-		if pd.Decider == "prefix-threshold" {
-			add("--pd-prefix-threshold", strconv.Itoa(pd.PrefixThreshold))
-		}
-		if pd.TransferBandwidth != defaultPDTransferBandwidth {
-			add("--pd-transfer-bandwidth", strconv.FormatFloat(pd.TransferBandwidth, 'f', -1, 64))
-		}
-		if pd.TransferBaseLatency != defaultPDTransferBaseLatency {
-			add("--pd-transfer-base-latency", strconv.FormatFloat(pd.TransferBaseLatency, 'f', -1, 64))
-		}
-		if pd.TransferContention {
-			a = append(a, "--pd-transfer-contention")
-		}
-	}
-	return a
+// appendScenario emits the four flags that locate the deployment and its pricing inputs:
+// the generated scenario (a dir plus the file within it) and the catalog + registry
+// clones. Absolute paths, since blis runs from Cwd and resolves these with no search path.
+func appendScenario(a []string, scenariosDir, scenarioFile, registry, catalog string) []string {
+	return append(a, "--scenarios", scenariosDir, "--scenario", scenarioFile, "--registry", registry, "--catalog", catalog)
 }
 
-// appendCandidateTail emits the trailing candidate flags — batching, scheduling,
-// routing, admission, KV dtype, latency model, GPU memory, the speculative trio, and the
-// extra-flags escape hatch — shared by Argv and ReplayArgv.
+// appendCandidateHead emits the leading candidate CLI flags that survive v0.10.0. Model,
+// hardware, tp/dp, expert parallelism and disaggregation now live in the scenario file (or
+// are refused by scenario.Generate), so only the instance count remains here.
+func appendCandidateHead(a []string, d schema.Deployment) []string {
+	return append(a, "--num-instances", strconv.Itoa(d.NumInstances))
+}
+
+// appendCandidateTail emits the trailing candidate CLI flags that survive v0.10.0 — the
+// scheduling, routing, admission and chunked-prefill knobs, plus the extra-flags escape
+// hatch. The engine knobs (block size, batch/seq caps, model length, KV dtype, GPU
+// memory) moved into the scenario's engine block; --latency-model and the speculative/
+// total-kv-blocks flags were removed upstream (scenario.Generate refuses the latter).
 func appendCandidateTail(a []string, d schema.Deployment) []string {
 	add := func(flag, value string) { a = append(a, flag, value) }
-	if d.MaxModelLen > 0 {
-		add("--max-model-len", strconv.FormatInt(d.MaxModelLen, 10))
-	}
-	add("--block-size-in-tokens", strconv.FormatInt(d.BlockSizeInTokens, 10))
-	add("--max-num-seqs", strconv.FormatInt(d.MaxNumSeqs, 10))
-	// Upstream deprecated --max-num-scheduled-tokens in favour of this spelling;
-	// both write the same variable.
-	add("--max-num-batched-tokens", strconv.FormatInt(d.MaxNumBatchedTokens, 10))
 
 	add("--long-prefill-token-threshold", strconv.FormatInt(d.LongPrefillTokenThreshold, 10))
-
 	add("--scheduler", d.Scheduler)
 	add("--preemption-policy", d.PreemptionPolicy)
 	add("--routing-policy", d.RoutingPolicy)
-	// --routing-scorers is the weighted policy's name:weight profile, and blis reads it
-	// only for that policy (it warns and ignores it otherwise). So it is emitted only when
-	// the policy is "weighted" and a profile is present — the same "emit only when the
-	// capability is on" rule as --dp and the speculative trio, which keeps a non-weighted
-	// record's argv byte-for-byte unchanged.
+	// --routing-scorers is read only for the weighted policy; emitted only then, so a
+	// non-weighted record's argv is byte-for-byte unchanged.
 	if d.RoutingPolicy == "weighted" && len(d.RoutingScorers) > 0 {
 		pairs := make([]string, len(d.RoutingScorers))
 		for i, s := range d.RoutingScorers {
@@ -219,30 +137,6 @@ func appendCandidateTail(a []string, d schema.Deployment) []string {
 		add("--routing-scorers", strings.Join(pairs, ","))
 	}
 	add("--admission-policy", d.AdmissionPolicy)
-	add("--kv-cache-dtype", d.KVCacheDtype)
-	add("--latency-model", d.LatencyModel)
-
-	add("--gpu-memory-utilization", strconv.FormatFloat(d.GPUMemoryUtilization, 'f', -1, 64))
-
-	// --total-kv-blocks pins the KV cache capacity. Emitted only when > 0: 0 is the "auto"
-	// sentinel (blis sizes the cache from the hardware when the flag is omitted, and fatally
-	// rejects --total-kv-blocks 0), following the same "emit only when the capability is on"
-	// rule as the speculative trio.
-	if d.TotalKVBlocks > 0 {
-		add("--total-kv-blocks", strconv.FormatInt(d.TotalKVBlocks, 10))
-	}
-
-	// The speculative trio follows the --dp precedent: emitted only when the capability
-	// is on. blis requires --speculative-acceptance-rate when K>0 and rejects a
-	// --speculative-method (or a non-zero acceptance rate) when K==0, so an off run
-	// passes none of them and reproduces from the record's stored defaults.
-	if d.NumSpeculativeTokens > 0 {
-		add("--num-speculative-tokens", strconv.Itoa(d.NumSpeculativeTokens))
-		add("--speculative-acceptance-rate", strconv.FormatFloat(d.SpeculativeAcceptanceRate, 'f', -1, 64))
-		if d.SpeculativeMethod != "" {
-			add("--speculative-method", d.SpeculativeMethod)
-		}
-	}
 
 	keys := make([]string, 0, len(d.ExtraFlags))
 	for k := range d.ExtraFlags {

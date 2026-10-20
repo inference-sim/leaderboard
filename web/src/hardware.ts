@@ -1,12 +1,12 @@
 /**
  * The accelerator catalog the Catalog page shows, fetched live from the server rather
- * than frozen into the front-end. `leaderboard serve` reads it from the upstream
- * hardware_config.json (GET /api/hardware) the same file blis checks a run's hardware
+ * than frozen into the front-end. `leaderboard serve` reads it from the blis-catalog
+ * hardware/ dir (GET /api/hardware) the same source blis checks a run's hardware
  * against, so the list is never a hand-maintained snapshot. Kept out of the components,
  * like models.ts and workloads.ts, so every claim it makes is testable.
  *
- * There is no committed fallback list: when the config cannot be read (no server, or a
- * missing hardware_config.json) the page says so, exactly as the Workloads tab reports an
+ * There is no committed fallback list: when the catalog cannot be read (no server, or a
+ * missing hardware/ dir) the page says so, exactly as the Workloads tab reports an
  * unreachable server.
  */
 

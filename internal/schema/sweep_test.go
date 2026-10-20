@@ -4,8 +4,39 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"regexp"
 	"testing"
 )
+
+// sweepIDPattern mirrors the format the web app reads back (web/src/sweep.ts sweepDate):
+// swp- then a base36 time component, a dash, and a base36 suffix.
+var sweepIDPattern = regexp.MustCompile(`^swp-[0-9a-z]+-[0-9a-z]{6}$`)
+
+func TestMintSweepIDFormatIsStableAndTimeOrdered(t *testing.T) {
+	// A fixed clock + randomness renders a fixed id, and the time component decodes back.
+	got := mintSweepID(1_700_000_000_000, 0)
+	if !sweepIDPattern.MatchString(got) {
+		t.Errorf("mintSweepID = %q, want swp-<base36 time>-<6 base36>", got)
+	}
+	// A later time sorts lexicographically after an earlier one (the By-sweep newest-first
+	// ordering and date read rely on this), for same-length base36 time components.
+	earlier := mintSweepID(1_700_000_000_000, 0)
+	later := mintSweepID(1_700_000_001_000, 0)
+	if !(earlier < later) {
+		t.Errorf("time ordering broken: %q !< %q", earlier, later)
+	}
+}
+
+func TestMintSweepIDIsUnique(t *testing.T) {
+	seen := make(map[string]bool, 500)
+	for i := 0; i < 500; i++ {
+		id := MintSweepID()
+		if seen[id] {
+			t.Fatalf("duplicate sweep id minted: %q", id)
+		}
+		seen[id] = true
+	}
+}
 
 // TestSweepFieldsAreOptional is the §invariant guarantee for storage: sweep_id and
 // sweep_label are optional top-level record fields, so a record validates with both absent

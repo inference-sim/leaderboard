@@ -15,6 +15,7 @@ import (
 
 	"gopkg.in/yaml.v3"
 
+	"github.com/inference-sim/leaderboard/internal/scenario"
 	"github.com/inference-sim/leaderboard/internal/schema"
 	"github.com/inference-sim/leaderboard/internal/status"
 	"github.com/inference-sim/leaderboard/internal/traceingest"
@@ -56,6 +57,12 @@ type Runner struct {
 	// catalog). A trace workload's blob is resolved from it to build the replay argv.
 	TraceStore traceingest.Store
 
+	// CatalogRoot and RegistryRoot are the blis-catalog and blis-registry clones (absolute
+	// paths), passed to blis as --catalog/--registry. Since v0.10.0 a run resolves the
+	// model, hardware and coefficient sets from them, so both are required for any run.
+	CatalogRoot  string
+	RegistryRoot string
+
 	commit       string
 	dirty        bool
 	binarySHA256 string
@@ -87,10 +94,51 @@ func NewRunner(cwd string) (*Runner, error) {
 	return &Runner{
 		Binary:       binary,
 		Cwd:          cwd,
+		CatalogRoot:  absEnv("BLIS_CATALOG"),
+		RegistryRoot: absEnv("BLIS_REGISTRY"),
 		commit:       commit,
 		dirty:        dirty,
 		binarySHA256: hex.EncodeToString(sum[:])[:16],
 	}, nil
+}
+
+// absEnv reads an environment path and resolves it to absolute, since blis runs from Cwd
+// and resolves --catalog/--registry/--scenarios with no search path. An unset variable
+// stays empty so writeScenario can report precisely which one is missing.
+func absEnv(key string) string {
+	v := os.Getenv(key)
+	if v == "" {
+		return ""
+	}
+	if abs, err := filepath.Abs(v); err == nil {
+		return abs
+	}
+	return v
+}
+
+// writeScenario generates the deployment's blis-schemas scenario and writes it beside the
+// metrics file (the per-run temp dir the caller owns, so cleanup is free). It returns the
+// scenarios directory and the file name within it, as --scenarios/--scenario want them.
+func (r *Runner) writeScenario(d schema.Deployment, metricsPath string) (dir, file string, err error) {
+	if r.CatalogRoot == "" {
+		return "", "", fmt.Errorf("BLIS_CATALOG is not set (needed to resolve the scenario's model and hardware)")
+	}
+	if r.RegistryRoot == "" {
+		return "", "", fmt.Errorf("BLIS_REGISTRY is not set (needed to price the scenario)")
+	}
+	body, name, err := scenario.Generate(d, r.CatalogRoot)
+	if err != nil {
+		return "", "", err
+	}
+	dir = filepath.Join(filepath.Dir(metricsPath), "scenarios")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return "", "", fmt.Errorf("create scenarios dir: %w", err)
+	}
+	file = name + ".yaml"
+	if err := os.WriteFile(filepath.Join(dir, file), body, 0o644); err != nil {
+		return "", "", fmt.Errorf("write scenario: %w", err)
+	}
+	return dir, file, nil
 }
 
 // GitProvenance reports the upstream commit and whether its tree is dirty. Never
@@ -131,6 +179,22 @@ func (r *Runner) Run(g schema.Group, c RunSpec, metricsPath string) (schema.Reco
 		kvOffloadPath = p
 	}
 
+	// Since v0.10.0 the deployment (model, hardware, parallelism, engine knobs) is a
+	// scenario file blis reads via --scenarios/--scenario, shared by both run and replay.
+	scenariosDir, scenarioFile, err := r.writeScenario(c.Deployment, metricsPath)
+	if err != nil {
+		return schema.Record{}, fmt.Errorf("blisrun: %s: %w", c.RunID, err)
+	}
+
+	// Every record carries a sweep_id. A web sweep supplies one shared across its cells; a
+	// web single run and a CLI runs.yaml run leave it empty, so mint one here — the single
+	// chokepoint every run path funnels through, so no record is written without one. A
+	// runs.yaml invocation shares one id across its candidates, like a sweep.
+	sweepID := c.SweepID
+	if sweepID == "" {
+		sweepID = schema.MintSweepID()
+	}
+
 	switch g.Workload.Type {
 	case "trace":
 		// A trace runs `blis replay` against its stored blob. The blob must be present, or
@@ -144,7 +208,7 @@ func (r *Runner) Run(g schema.Group, c RunSpec, metricsPath string) (schema.Reco
 				"blisrun: %s: trace %s is not in the store; ingest it before replaying", c.RunID, sha)
 		}
 		header, data := r.TraceStore.Paths(sha)
-		argv = ReplayArgv(r.Binary, g, c.Deployment, metricsPath, header, data, kvOffloadPath)
+		argv = ReplayArgv(r.Binary, scenariosDir, scenarioFile, r.RegistryRoot, r.CatalogRoot, g, c.Deployment, metricsPath, header, data, kvOffloadPath)
 	case "workload-spec":
 		// A workload-spec run needs its inline spec on disk for --workload-spec. It is
 		// written next to the metrics file (a per-run temp dir the caller owns), so it is
@@ -165,7 +229,7 @@ func (r *Runner) Run(g schema.Group, c RunSpec, metricsPath string) (schema.Reco
 			return schema.Record{}, fmt.Errorf("blisrun: %s: spec_sha256: %w", c.RunID, err)
 		}
 		g.Workload.SpecSHA256 = &sha
-		argv = Argv(r.Binary, g, c.Deployment, metricsPath, specPath, kvOffloadPath)
+		argv = Argv(r.Binary, scenariosDir, scenarioFile, r.RegistryRoot, r.CatalogRoot, g, c.Deployment, metricsPath, specPath, kvOffloadPath)
 	default:
 		// Only "workload-spec" and "trace" are stored variants; the flat gaussian shorthand
 		// is lowered to a workload-spec before a run reaches here (internal/spec,
@@ -226,7 +290,7 @@ func (r *Runner) Run(g schema.Group, c RunSpec, metricsPath string) (schema.Reco
 		GroupID:       groupID,
 		WorkID:        workID,
 		WorkloadName:  c.WorkloadName,
-		SweepID:       c.SweepID,
+		SweepID:       sweepID,
 		SweepLabel:    c.SweepLabel,
 		TraceMeta:     c.TraceMeta,
 		Group:         g,
@@ -258,9 +322,9 @@ const specValidateTimeout = 60 * time.Second
 
 // ValidateSpec runs blis on an inline WorkloadSpec purely to surface blis's own parse
 // and semantic errors. blis has no validate subcommand, so this smoke run is the
-// mechanism (design §5): a probe model/hardware (the spec is model-free, blis requires
-// both) and --num-requests 1 so it terminates after one request. It returns nil when
-// blis accepts the spec, or blis's stderr tail otherwise.
+// mechanism (design §5). Since v0.10.0 a run needs a deployment scenario, so a probe
+// model/hardware is generated into one (the spec is model-free); --num-requests 1 so it
+// terminates after one request. Returns nil when blis accepts the spec, else its stderr.
 func (r *Runner) ValidateSpec(spec map[string]any, probeModel, probeHardware string) error {
 	tmpDir, err := os.MkdirTemp("", "leaderboard-validate-")
 	if err != nil {
@@ -272,8 +336,14 @@ func (r *Runner) ValidateSpec(spec map[string]any, probeModel, probeHardware str
 	if err != nil {
 		return err
 	}
+	probe := schema.Deployment{Model: probeModel, Hardware: probeHardware, TP: 1, DP: 1, NumInstances: 1}
+	scenariosDir, scenarioFile, err := r.writeScenario(probe, filepath.Join(tmpDir, "m.json"))
+	if err != nil {
+		return fmt.Errorf("build probe scenario: %w", err)
+	}
 	argv := []string{r.Binary, "run",
-		"--model", probeModel, "--hardware", probeHardware, "--tp", "1",
+		"--scenarios", scenariosDir, "--scenario", scenarioFile,
+		"--registry", r.RegistryRoot, "--catalog", r.CatalogRoot,
 		"--workload-spec", specPath,
 		"--num-requests", "1",
 		"--metrics-path", filepath.Join(tmpDir, "m.json"),

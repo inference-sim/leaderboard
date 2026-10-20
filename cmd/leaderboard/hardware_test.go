@@ -11,9 +11,9 @@ import (
 
 // A server pointed at the hardware fixture serves its accelerators as JSON.
 func TestHandleHardwareServesCatalog(t *testing.T) {
-	// handleHardware reads hardware_config.json from blisDir; the hardware package's
-	// testdata dir holds a trimmed copy.
-	s := &server{blisDir: filepath.Join("..", "..", "internal", "hardware", "testdata")}
+	// handleHardware reads <catalogRoot>/hardware; the hardware package's testdata dir
+	// holds a copy of the catalog's hardware/ dir, so point catalogRoot at that testdata.
+	s := &server{catalogRoot: filepath.Join("..", "..", "internal", "hardware", "testdata")}
 
 	rr := httptest.NewRecorder()
 	s.routes().ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/api/hardware", nil))
@@ -31,19 +31,19 @@ func TestHandleHardwareServesCatalog(t *testing.T) {
 	if err := json.Unmarshal(rr.Body.Bytes(), &got); err != nil {
 		t.Fatalf("decoding response: %v", err)
 	}
-	if len(got.Hardware) != 4 {
-		t.Fatalf("got %d entries, want 4: %+v", len(got.Hardware), got.Hardware)
+	if len(got.Hardware) != 9 {
+		t.Fatalf("got %d entries, want 9: %+v", len(got.Hardware), got.Hardware)
 	}
 	// Sorted by name, with aliases and the numeric spec carried through.
 	first := got.Hardware[0]
-	if first.Name != "A100-80" {
-		t.Errorf("first entry = %q, want A100-80", first.Name)
+	if first.Name != "a100-80" {
+		t.Errorf("first entry = %q, want a100-80", first.Name)
 	}
-	if len(first.Aliases) != 1 || first.Aliases[0] != "A100-SXM" {
-		t.Errorf("A100-80 aliases = %v, want [A100-SXM]", first.Aliases)
+	if len(first.Aliases) != 1 || first.Aliases[0] != "a100-sxm" {
+		t.Errorf("a100-80 aliases = %v, want [a100-sxm]", first.Aliases)
 	}
 	if first.Spec["MemoryGiB"] != 80.0 {
-		t.Errorf("A100-80 MemoryGiB = %v, want 80", first.Spec["MemoryGiB"])
+		t.Errorf("a100-80 MemoryGiB = %v, want 80", first.Spec["MemoryGiB"])
 	}
 	// An accelerator with no aliases must serialize its aliases as [] not null: the browser
 	// spreads this list, and a null would throw and blank the Catalog page.
@@ -52,10 +52,10 @@ func TestHandleHardwareServesCatalog(t *testing.T) {
 	}
 }
 
-// An unreadable config (here: a blisDir with no hardware_config.json) is surfaced
+// An unreadable catalog (here: a catalogRoot with no hardware/ dir) is surfaced
 // as a 500 the page can show.
 func TestHandleHardwareUnreadableConfigIs500(t *testing.T) {
-	s := &server{blisDir: t.TempDir()}
+	s := &server{catalogRoot: t.TempDir()}
 	rr := httptest.NewRecorder()
 	s.routes().ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/api/hardware", nil))
 	if rr.Code != http.StatusInternalServerError {

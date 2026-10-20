@@ -8,11 +8,21 @@ function stubFetch(status: number, body: string): typeof fetch {
 }
 
 describe('fetchVersion', () => {
-  it('returns the three dependency versions when /api/version resolves', async () => {
+  it('returns the four dependency versions when /api/version resolves', async () => {
+    const got = await fetchVersion(
+      stubFetch(
+        200,
+        JSON.stringify({ leaderboard: 'v0.1.7', blis: 'v1.4.0', catalog: '2026-09-30', registry: 'v0.1.1' }),
+      ),
+    )
+    expect(got).toEqual({ leaderboard: 'v0.1.7', blis: 'v1.4.0', catalog: '2026-09-30', registry: 'v0.1.1' })
+  })
+
+  it('defaults registry to "" when a pre-registry serve omits it, keeping the other three', async () => {
     const got = await fetchVersion(
       stubFetch(200, JSON.stringify({ leaderboard: 'v0.1.7', blis: 'v1.4.0', catalog: '2026-09-30' })),
     )
-    expect(got).toEqual({ leaderboard: 'v0.1.7', blis: 'v1.4.0', catalog: '2026-09-30' })
+    expect(got).toEqual({ leaderboard: 'v0.1.7', blis: 'v1.4.0', catalog: '2026-09-30', registry: '' })
   })
 
   it('rejects on a 404 (no such route) so the footer stays hidden', async () => {

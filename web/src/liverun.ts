@@ -44,6 +44,17 @@ export interface RevealTarget {
 }
 
 /**
+ * Which board tab a "view on board" should open for a revealed run, and the sweep to scope
+ * when it is the sweep tab. A run carrying a sweep_id belongs to a sweep, so revealing it
+ * from the sweep progress panel lands in that sweep's own section (By sweep) rather than the
+ * default By-workload tab; a run with no sweep_id stays under By workload. Pure, so App's
+ * reveal wiring rests on a tested decision (liverun.test.ts) rather than an untested closure.
+ */
+export function boardTabForReveal(sweepId?: string): { tab: 'workload' | 'sweep'; sweepId?: string } {
+  return sweepId ? { tab: 'sweep', sweepId } : { tab: 'workload' }
+}
+
+/**
  * The DOM id of one run's table row. A run is identified by group_id + run_id rather than
  * by position, so the scroll target is correct whether the run joined an existing table or
  * opened a new one, and whether the table is single-group or merged-model.

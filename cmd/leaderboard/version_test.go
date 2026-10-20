@@ -92,9 +92,10 @@ func TestCatalogFileVersionMissingIsEmpty(t *testing.T) {
 func TestResolveVersionsEnvWinsOverAutoDetect(t *testing.T) {
 	env := func(k string) string {
 		return map[string]string{
-			"LEADERBOARD_VERSION":  "v9.9.9",
-			"BLIS_VERSION":         "blis-env",
-			"BLIS_CATALOG_VERSION": "catalog-env",
+			"LEADERBOARD_VERSION":   "v9.9.9",
+			"BLIS_VERSION":          "blis-env",
+			"BLIS_CATALOG_VERSION":  "catalog-env",
+			"BLIS_REGISTRY_VERSION": "registry-env",
 		}[k]
 	}
 	// Auto-detect sources all return something different, to prove the env value is chosen.
@@ -102,8 +103,8 @@ func TestResolveVersionsEnvWinsOverAutoDetect(t *testing.T) {
 	git := func(string) (string, bool, error) { return "bbbbbbbb", false, nil }
 	read := func(string) ([]byte, error) { return []byte("cccccccc"), nil }
 
-	got := resolveVersions(env, build, git, read, "/blis", "/catalog")
-	want := versions{Leaderboard: "v9.9.9", Blis: "blis-env", Catalog: "catalog-env"}
+	got := resolveVersions(env, build, git, read, "/blis", "/catalog", "/registry")
+	want := versions{Leaderboard: "v9.9.9", Blis: "blis-env", Catalog: "catalog-env", Registry: "registry-env"}
 	if got != want {
 		t.Errorf("env should win: got %+v, want %+v", got, want)
 	}
@@ -115,16 +116,19 @@ func TestResolveVersionsAutoDetectsWhenEnvUnset(t *testing.T) {
 	git := func(dir string) (string, bool, error) { return "git-" + dir, false, nil }
 	read := func(name string) ([]byte, error) { return []byte("from-version-file\n"), nil }
 
-	got := resolveVersions(noEnv, build, git, read, "/blis", "/catalog")
+	got := resolveVersions(noEnv, build, git, read, "/blis", "/catalog", "/registry")
 	if got.Leaderboard != "11111111" {
 		t.Errorf("leaderboard = %q, want the build stamp 11111111", got.Leaderboard)
 	}
 	if got.Blis != "git-/blis" {
 		t.Errorf("blis = %q, want git HEAD of the blis checkout", got.Blis)
 	}
-	// Catalog prefers the VERSION file over git.
+	// Catalog and registry both prefer the VERSION file over git.
 	if got.Catalog != "from-version-file" {
 		t.Errorf("catalog = %q, want the VERSION file contents", got.Catalog)
+	}
+	if got.Registry != "from-version-file" {
+		t.Errorf("registry = %q, want the VERSION file contents", got.Registry)
 	}
 }
 
@@ -132,16 +136,19 @@ func TestResolveVersionsAutoDetectsWhenEnvUnset(t *testing.T) {
 // checkout that still has its .git), so dev gets auto-detection too.
 func TestResolveVersionsCatalogFallsBackToGit(t *testing.T) {
 	git := func(dir string) (string, bool, error) { return "catalog-git", false, nil }
-	got := resolveVersions(noEnv, noBuildInfo, git, noFile, "", "/catalog")
+	got := resolveVersions(noEnv, noBuildInfo, git, noFile, "", "/catalog", "/registry")
 	if got.Catalog != "catalog-git" {
 		t.Errorf("catalog = %q, want the git fallback catalog-git", got.Catalog)
+	}
+	if got.Registry != "catalog-git" {
+		t.Errorf("registry = %q, want the git fallback catalog-git", got.Registry)
 	}
 }
 
 // resolveVersions: nothing set and nothing detectable yields empty strings (the rail shows
 // "unknown"), never a panic.
 func TestResolveVersionsAllEmpty(t *testing.T) {
-	got := resolveVersions(noEnv, noBuildInfo, noGit, noFile, "", "")
+	got := resolveVersions(noEnv, noBuildInfo, noGit, noFile, "", "", "")
 	if got != (versions{}) {
 		t.Errorf("got %+v, want all empty", got)
 	}
@@ -154,6 +161,7 @@ func TestHandleVersionServesTheServersVersions(t *testing.T) {
 		Leaderboard: "v0.1.7",
 		Blis:        "07622594",
 		Catalog:     "2026-09-30",
+		Registry:    "v0.1.1",
 	}}
 
 	rr := httptest.NewRecorder()
@@ -169,8 +177,8 @@ func TestHandleVersionServesTheServersVersions(t *testing.T) {
 	if err := json.Unmarshal(rr.Body.Bytes(), &got); err != nil {
 		t.Fatalf("decoding response: %v", err)
 	}
-	if got.Leaderboard != "v0.1.7" || got.Blis != "07622594" || got.Catalog != "2026-09-30" {
-		t.Errorf("got %+v, want the three values the server was built with", got)
+	if got.Leaderboard != "v0.1.7" || got.Blis != "07622594" || got.Catalog != "2026-09-30" || got.Registry != "v0.1.1" {
+		t.Errorf("got %+v, want the four values the server was built with", got)
 	}
 }
 
@@ -190,7 +198,7 @@ func TestHandleVersionUnsetValuesAreEmptyStringsNotOmitted(t *testing.T) {
 	if err := json.Unmarshal(rr.Body.Bytes(), &raw); err != nil {
 		t.Fatalf("decoding response: %v", err)
 	}
-	for _, key := range []string{"leaderboard", "blis", "catalog"} {
+	for _, key := range []string{"leaderboard", "blis", "catalog", "registry"} {
 		v, ok := raw[key]
 		if !ok {
 			t.Errorf("key %q missing; it must always be present", key)
